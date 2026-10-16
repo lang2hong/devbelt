@@ -12,6 +12,8 @@ import AdminInvoicesView from './pages/AdminInvoicesView.vue';
 import AdminAuditView from './pages/AdminAuditView.vue';
 import AdminPlansView from './pages/AdminPlansView.vue';
 import AdminAiTopupView from './pages/AdminAiTopupView.vue';
+import AdminAiProvidersView from './pages/AdminAiProvidersView.vue';
+import AdminAiBillingView from './pages/AdminAiBillingView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
 
 installRouter(ADMIN_ROUTES);
@@ -31,6 +33,8 @@ const view = computed<{ comp: Component | null; props: Record<string, unknown> }
     case 'admin-audit': return { comp: AdminAuditView, props: {} };
     case 'admin-plans': return { comp: AdminPlansView, props: {} };
     case 'admin-ai-topup': return { comp: AdminAiTopupView, props: {} };
+    case 'admin-ai-providers': return { comp: AdminAiProvidersView, props: {} };
+    case 'admin-ai-billing': return { comp: AdminAiBillingView, props: {} };
     case 'admin-version': return { comp: AdminVersionView, props: {} };
     default: return { comp: null, props: {} };
   }
@@ -73,45 +77,47 @@ async function onLogout(): Promise<void> {
 
 <template>
   <div class="shell">
-    <header class="topbar">
-      <span class="brand">DevBelt 平台后台</span>
-      <span class="spacer" />
-      <template v-if="me_">
-        <span class="email">{{ me_.user.email }}</span>
-        <button class="btn ghost" @click="onLogout">登出</button>
-      </template>
-    </header>
+    <aside class="side">
+      <div class="brand"><span class="logo">D</span>DevBelt<small>平台后台</small></div>
+      <AdminNav v-if="state === 'ready'" />
+      <div class="side-foot" v-if="me_">
+        <span class="email" :title="me_.user.email">{{ me_.user.email }}</span>
+        <button class="btn small ghost" @click="onLogout">登出</button>
+      </div>
+    </aside>
 
     <main class="body">
-      <p v-if="state === 'loading'">加载中…</p>
+      <div v-if="logoutError" class="logout-warn" role="alert">登出请求未得到服务器确认。</div>
+      <p v-if="state === 'loading'" class="muted">加载中…</p>
       <p v-else-if="state === 'forbidden'">需要平台管理员权限。</p>
       <p v-else-if="state === 'error'">加载失败，请刷新重试。</p>
       <template v-else-if="state === 'ready'">
-        <AdminNav />
         <component :is="view.comp" v-bind="view.props" />
         <p v-if="!view.comp">页面不存在。<a :href="withBase('/users')" @click.prevent="navigate('/users')">返回用户</a></p>
       </template>
     </main>
-
-    <div v-if="logoutError" class="logout-warn" role="alert">登出请求未得到服务器确认。</div>
   </div>
 </template>
 
 <style scoped>
-.shell { min-height: 100vh; background: var(--c-bg); }
-.topbar {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 4px;
-  height: 54px; padding: 0 24px;
-  background: var(--c-surface); border-bottom: 1px solid var(--c-border);
+.shell { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); background: var(--c-bg); }
+.side {
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 20px;
+  padding: 18px 12px; background: var(--c-surface); border-right: 1px solid var(--c-border); overflow-y: auto;
 }
-.brand { font-weight: 700; font-size: 15px; color: var(--c-text); margin-right: 16px; letter-spacing: -0.01em; }
-.spacer { flex: 1; }
-.email { color: var(--c-text-muted); font-size: 13px; margin-right: 4px; }
-.body { max-width: 1200px; margin: 0 auto; padding: 32px 24px 64px; }
+.brand { display: flex; align-items: center; gap: 8px; padding: 0 8px 4px; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+.brand small { font-weight: 500; font-size: 12px; color: var(--c-text-subtle); }
+.logo { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--c-accent); color: #fff; font-size: 14px; }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 10px 8px 0; border-top: 1px solid var(--c-border); }
+.email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--c-text-muted); }
+.body { padding: 28px 32px 64px; max-width: 1280px; width: 100%; }
 .logout-warn {
-  display: flex; align-items: center; gap: 12px; max-width: 1200px; margin: 0 auto;
-  padding: 10px 24px; background: var(--c-warn-bg); border-bottom: 1px solid var(--c-warn-border);
-  color: var(--c-warn-text); font-size: 13px;
+  margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--c-warn-border); border-radius: var(--r-md);
+  background: var(--c-warn-bg); color: var(--c-warn-text); font-size: 13px;
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; }
+  .body { padding: 20px 16px 48px; }
 }
 </style>

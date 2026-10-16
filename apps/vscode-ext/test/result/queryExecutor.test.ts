@@ -67,4 +67,36 @@ describe('QueryExecutor.runHeadless（AI Chat 在对话中运行）', () => {
     expect(Array.isArray(r.result?.fields)).toBe(true);
     expect(r.result?.fields).toHaveLength(0);
   });
+
+  it('用户取消：句柄 cancel 后返回 userCanceled，不记结果', async () => {
+    let rejectQuery: (e: Error) => void = () => {};
+    const query = {
+      query: vi.fn(() => new Promise((_res, rej) => { rejectQuery = rej; })),
+      wrap: (s: string) => s,
+      cancel: () => true,
+    };
+    const manager: any = {
+      connectSql: vi.fn(async () => ({ query, metadata: { getColumns: async () => [] } })),
+      scanOptionsFor: () => undefined,
+      disposeConn: () => {},
+    };
+    const exec = new QueryExecutor(manager);
+    let handle: { cancel(): void } | undefined;
+    const pending = exec.runHeadless(conn, 'SELECT SLEEP(60)', 'db', { onStart: (h) => { handle = h; } });
+    await vi.waitFor(() => expect(query.query).toHaveBeenCalled());
+    handle!.cancel();
+    rejectQuery(new Error('Query cancelled'));
+    const r = await pending;
+    expect(r.userCanceled).toBe(true);
+    expect(r.canceled).toBe(true);
+    expect(r.result).toBeUndefined();
+  });
+
+  it('开跑前取消：不下发查询', async () => {
+    const { manager } = makeManager();
+    const exec = new QueryExecutor(manager);
+    const r = await exec.runHeadless(conn, 'SELECT 1', 'db', { onStart: (h) => h.cancel() });
+    expect(r.userCanceled).toBe(true);
+    expect(manager.connectSql).not.toHaveBeenCalled();
+  });
 });

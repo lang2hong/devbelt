@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { inject, ref } from 'vue';
 import { useVsCode } from '../../composables/useVsCode';
 import { useI18n } from '../../composables/useI18n';
+import { RUN_IN_CHAT_KEY } from '../../utils/runInChat';
 
-const props = defineProps<{ code: string; lang?: string; dbType?: string }>();
+const props = defineProps<{
+  code: string;
+  lang?: string;
+  dbType?: string;
+  /** 所在消息与块的下标（结果内联绑定 blockRef 用，P9）。 */
+  msgIdx?: number;
+  blockIdx?: number;
+}>();
 const isSql = (): boolean => !props.lang || props.lang === 'sql';
 const engine = (): string => String(props.dbType ?? '').toUpperCase();
 /** 运行按钮仅在与当前连接引擎匹配时显示（sql/无标 → 关系引擎；redis → REDIS；json → ES）。 */
@@ -42,17 +50,19 @@ function runInPanel(): void {
   post({ type: 'executeSql', text: props.code });
 }
 
-/** 在对话中执行（结果回帖到消息流；AI 永不自动执行）。 */
+/** 在对话中执行（结果内联回填到本代码块下方；代次由视图根补齐，写语句门禁在宿主）。 */
+const dispatchRunInChat = inject(RUN_IN_CHAT_KEY, (payload) => {
+  // 根未提供（异常装配）时兜底为无绑定的直发，结果走尾部气泡。
+  const type = payload.kind === 'sql' ? 'executeSqlInChat' : payload.kind === 'redis' ? 'runRedis' : 'runEsDsl';
+  post({ type, text: payload.text });
+});
 function runInChat(): void {
-  if (props.lang === 'redis') {
-    post({ type: 'runRedis', text: props.code });
-    return;
-  }
-  if (props.lang === 'json') {
-    post({ type: 'runEsDsl', text: props.code });
-    return;
-  }
-  post({ type: 'executeSqlInChat', text: props.code });
+  dispatchRunInChat({
+    kind: props.lang === 'redis' ? 'redis' : props.lang === 'json' ? 'es' : 'sql',
+    text: props.code,
+    msgIdx: props.msgIdx,
+    blockIdx: props.blockIdx,
+  });
 }
 </script>
 

@@ -165,12 +165,8 @@ async function submitPassword(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 840px; margin: 0 auto; }
 .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
-.head { margin-bottom: 20px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 16px; }
 .cards .card { margin-bottom: 0; }
 h3 { font-size: 14px; font-weight: 600; margin: 0 0 14px; }
@@ -184,17 +180,11 @@ input { width: 100%; box-sizing: border-box; }
 .pw input { padding-right: 38px; }
 .toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; opacity: .55; }
 .toggle:hover { opacity: 1; }
-.actions { margin-top: 16px; }
-.btn { height: 34px; padding: 0 16px; border: none; border-radius: var(--r-md); font-size: 13px; font-weight: 600; cursor: pointer; background: var(--c-success); color: #fff; }
 .btn.accent { background: var(--c-accent); }
-.btn.danger { background: var(--c-danger); }
-.btn:disabled { opacity: .6; cursor: default; }
 .badge { display: inline-flex; padding: 1px 8px; border-radius: var(--r-pill); font-size: 12px; background: #eaeef2; color: var(--c-text-muted); }
 .badge.ok { background: var(--c-success-bg); color: var(--c-success-text); }
 .badge.warn { background: var(--c-warn-bg); color: var(--c-warn-text); }
-.error { color: var(--c-danger); font-size: 13px; }
 .ok { color: var(--c-success-text); font-size: 13px; }
-.muted { color: var(--c-text-muted); font-size: 13px; }
 .small { font-size: 12px; }
 .link { border: none; background: none; color: var(--c-accent); cursor: pointer; font-size: 13px; padding: 0; }
 </style>

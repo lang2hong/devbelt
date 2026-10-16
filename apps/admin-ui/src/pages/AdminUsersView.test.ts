@@ -8,6 +8,9 @@ vi.mock('../api/admin', () => ({
   listUsers: vi.fn(),
   setUserStatus: vi.fn(),
   adjustUserSubscription: vi.fn(),
+  getSyncOverview: vi.fn(),
+  setUserRole: vi.fn(),
+  getAdminAiQuota: vi.fn(),
 }));
 
 vi.mock('@devbelt/auth-client', async (importOriginal) => ({
@@ -16,7 +19,7 @@ vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   setAccessToken: vi.fn(),
 }));
 
-import { listUsers, setUserStatus } from '../api/admin';
+import { getAdminAiQuota, listUsers, setUserStatus } from '../api/admin';
 import AdminUsersView from './AdminUsersView.vue';
 
 const emptyPage = { kind: 'ok' as const, value: { items: [] as AdminUser[], nextCursor: null } };
@@ -99,3 +102,62 @@ describe('AdminUsersView 筛选', () => {
     document.body.innerHTML = '';
   });
 });
+
+describe('AdminUsersView · AI 用量弹层', () => {
+  const USER: AdminUser = {
+    userId: '7', email: 'u@b.com', emailVerified: true, displayName: null, status: 'active',
+    role: 'user', lastLoginTime: null, planCode: 'free', deviceCount: 1,
+    subscriptionVersion: null, periodEndTime: null, createTime: '2026-01-01T00:00:00Z',
+  };
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.mocked(getAdminAiQuota).mockReset();
+  });
+
+  it('点击「AI 用量」：渲染配额/购买聚合/近月用量/加油包余额', async () => {
+    vi.mocked(listUsers).mockResolvedValue({ kind: 'ok', value: { items: [USER], nextCursor: null } });
+    vi.mocked(getAdminAiQuota).mockResolvedValue({
+      kind: 'ok',
+      value: {
+        snapshot: { used: 1200, reserved: 50, monthlyRemaining: 98800, topupRemaining: 3800, remaining: 102600, resetAt: '2026-11-01T00:00:00Z' },
+        grants: [{ grantId: 1, orderId: 7, skuCode: 'topup_500k', status: 'active', tokensTotal: 5000, tokensUsed: 1200, tokensReserved: 0, expiresTime: '2027-10-01T00:00:00Z' }],
+        months: [
+          { usageMonth: '2026-10', promptTokens: 1000, completionTokens: 200, requestCount: 12 },
+          { usageMonth: '2026-09', promptTokens: 300, completionTokens: 100, requestCount: 4 },
+        ],
+        topupOrders: { totalCount: 3, paidCount: 2, paidCents: 3800, refundedCount: 1, lastPaidTime: '2026-10-10T00:00:00Z' },
+      },
+    });
+    const wrapper = mount(AdminUsersView);
+    await flushPromises();
+    await wrapper.findAll('button').find((b) => b.text().trim() === 'AI 用量')!.trigger('click');
+    await flushPromises();
+    expect(getAdminAiQuota).toHaveBeenCalledWith(7);
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('已用 1,200');
+    expect(text).toContain('3 笔');
+    expect(text).toContain('¥38.00');
+    expect(text).toContain('2026-10');
+    expect(text).toContain('topup_500k');
+  });
+
+  it('无数据：各区块显示空态', async () => {
+    vi.mocked(listUsers).mockResolvedValue({ kind: 'ok', value: { items: [USER], nextCursor: null } });
+    vi.mocked(getAdminAiQuota).mockResolvedValue({
+      kind: 'ok',
+      value: {
+        snapshot: { used: 0, reserved: 0, monthlyRemaining: 0, topupRemaining: 0, remaining: 0, resetAt: null },
+        grants: [],
+      },
+    });
+    const wrapper = mount(AdminUsersView);
+    await flushPromises();
+    await wrapper.findAll('button').find((b) => b.text().trim() === 'AI 用量')!.trigger('click');
+    await flushPromises();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('0 笔');
+    expect(text).toContain('无用量记录。');
+  });
+});
+

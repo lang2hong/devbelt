@@ -143,7 +143,7 @@ export function classifyActions(
 const RELINK_TYPES: ReadonlySet<SyncEntityType> = new Set<SyncEntityType>([
   'connection', 'group', 'queryFolder', 'query',
   'authenticatorEntry', 'authenticatorGroup', 'authenticatorTag',
-  'schemaNotes',
+  'schemaNotes', 'aiModelAccess',
 ]);
 
 /** 展示值：实体名（条目用 issuer( account)，其余类型用 name）。 */

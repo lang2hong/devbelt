@@ -250,6 +250,9 @@ export async function consoleAiTopupRoutes(app: FastifyInstance, opts: ConsoleAi
         opts.auditWriter.write({ eventType: 'admin.ai.quota.read', result: 'success', actorUserId: userIdOf(req), actorRole: 'platform_admin' });
         const snapshot = await opts.quota.getUsage(targetUserId);
         const grants = await opts.topup.listGrants(targetUserId);
+        // 用户管理视图（增量字段）：近 6 个月用量（计费 token 口径）+ 加油包订单实付聚合。
+        const months = await opts.quota.monthlyUsageHistory(targetUserId, 6);
+        const stats = await opts.topup.topupOrderStats(targetUserId);
         reply.send({
           snapshot,
           grants: grants.map((g) => ({
@@ -262,6 +265,14 @@ export async function consoleAiTopupRoutes(app: FastifyInstance, opts: ConsoleAi
             tokensReserved: g.tokensReserved,
             expiresTime: g.expiresTime.toISOString(),
           })),
+          months,
+          topupOrders: {
+            totalCount: stats.totalCount,
+            paidCount: stats.paidCount,
+            paidCents: stats.paidCents,
+            refundedCount: stats.refundedCount,
+            lastPaidTime: stats.lastPaidTime ? stats.lastPaidTime.toISOString() : null,
+          },
         });
       });
     },

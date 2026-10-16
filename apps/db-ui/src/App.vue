@@ -34,6 +34,23 @@ const ROUTES: RouteConfig[] = [
 
 ];
 
+/** 分组导航：账户类 / 订阅与账单类（checkout 属于后者，无子项高亮）。 */
+const NAV = [
+  { title: '账户', names: ['account', 'devices', 'sync', 'authenticator'], links: [
+    { name: 'account', path: '/account', label: '概览' },
+    { name: 'devices', path: '/account/devices', label: '设备' },
+    { name: 'sync', path: '/account/sync', label: '同步' },
+    { name: 'authenticator', path: '/account/authenticator', label: '验证器' },
+  ] },
+  { title: '订阅与账单', names: ['plans', 'orders', 'invoices', 'ai-topup', 'checkout'], links: [
+    { name: 'plans', path: '/plans', label: '套餐' },
+    { name: 'orders', path: '/orders', label: '订单' },
+    { name: 'invoices', path: '/invoices', label: '发票' },
+    { name: 'ai-topup', path: '/ai-topup', label: 'AI 加油包' },
+  ] },
+];
+const activeGroup = computed(() => NAV.find((g) => g.names.includes(router.name ?? '')) ?? null);
+
 installRouter(ROUTES);
 
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -120,20 +137,31 @@ async function onLogout(): Promise<void> {
     </div>
 
     <template v-else-if="me_">
-      <nav class="nav">
-        <a class="brand" href="/">DB Client</a>
-        <a class="home" href="/" title="返回 DevBelt 首页">首页</a>
-        <a :href="withBase('/account')" @click.prevent="navigate('/account')" :class="{ on: router.name === 'account' }">账户</a>
-        <a :href="withBase('/account/devices')" @click.prevent="navigate('/account/devices')" :class="{ on: router.name === 'devices' }">设备</a>
-        <a :href="withBase('/account/sync')" @click.prevent="navigate('/account/sync')" :class="{ on: router.name === 'sync' }">同步</a>
-        <a :href="withBase('/account/authenticator')" @click.prevent="navigate('/account/authenticator')" :class="{ on: router.name === 'authenticator' }">验证器</a>
-        <a :href="withBase('/plans')" @click.prevent="navigate('/plans')" :class="{ on: router.name === 'plans' }">套餐</a>
-        <a :href="withBase('/orders')" @click.prevent="navigate('/orders')" :class="{ on: router.name === 'orders' }">订单</a>
-        <a :href="withBase('/invoices')" @click.prevent="navigate('/invoices')" :class="{ on: router.name === 'invoices' }">发票</a>
-        <span class="spacer"></span>
-        <span class="email">{{ me_.user.email }}</span>
-        <button class="btn ghost" @click="onLogout">登出</button>
-      </nav>
+      <header class="top">
+        <nav class="nav" aria-label="主导航">
+          <a class="brand" href="/">DB Client</a>
+          <a class="home" href="/" title="返回 DevBelt 首页">首页</a>
+          <a
+            v-for="g in NAV"
+            :key="g.title"
+            :href="withBase(g.links[0]!.path)"
+            :class="{ on: g === activeGroup }"
+            @click.prevent="navigate(g.links[0]!.path)"
+          >{{ g.title }}</a>
+          <span class="spacer"></span>
+          <span class="email">{{ me_.user.email }}</span>
+          <button class="btn ghost small" @click="onLogout">登出</button>
+        </nav>
+        <nav v-if="activeGroup" class="subnav" aria-label="子导航">
+          <a
+            v-for="l in activeGroup.links"
+            :key="l.name"
+            :href="withBase(l.path)"
+            :class="{ on: router.name === l.name }"
+            @click.prevent="navigate(l.path)"
+          >{{ l.label }}</a>
+        </nav>
+      </header>
 
       <div v-if="logoutError" class="logout-warn" role="alert">
         <span>登出请求未得到服务器确认，本机登录态已清除。建议重试或关闭浏览器。</span>
@@ -149,33 +177,24 @@ async function onLogout(): Promise<void> {
 
 <style scoped>
 .shell { min-height: 100vh; background: var(--c-bg); }
-.nav {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 4px;
-  height: 54px; padding: 0 24px;
-  background: var(--c-surface); border-bottom: 1px solid var(--c-border);
-}
+.top { position: sticky; top: 0; z-index: 10; background: var(--c-surface); border-bottom: 1px solid var(--c-border); }
+.nav { display: flex; align-items: center; gap: 4px; height: 54px; padding: 0 24px; }
 .nav .brand { font-weight: 700; font-size: 15px; color: var(--c-text); margin-right: 8px; letter-spacing: -0.01em; text-decoration: none; padding: 0; }
 .nav a.home { border-right: 1px solid var(--c-border); border-radius: 0; margin-right: 8px; }
-.nav a {
-  color: var(--c-text-muted); text-decoration: none; font-size: 13.5px;
-  padding: 6px 12px; border-radius: var(--r-sm);
-}
+.nav a { color: var(--c-text-muted); text-decoration: none; font-size: 14px; padding: 6px 12px; border-radius: var(--r-sm); }
 .nav a:hover { background: var(--c-surface-muted); color: var(--c-text); }
 .nav a.on { color: var(--c-accent-text); background: var(--c-accent-bg); font-weight: 600; }
+.subnav { display: flex; gap: 20px; padding: 0 24px; border-top: 1px solid #eaeef2; background: var(--c-surface); }
+.subnav a { padding: 10px 2px; font-size: 13.5px; color: var(--c-text-muted); text-decoration: none; border-bottom: 2px solid transparent; }
+.subnav a:hover { color: var(--c-text); }
+.subnav a.on { color: var(--c-text); font-weight: 600; border-bottom-color: var(--c-accent); }
 .spacer { flex: 1; }
 .email { color: var(--c-text-muted); font-size: 13px; margin-right: 4px; }
-.body { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
-.btn { background: var(--c-success); color: var(--c-surface); border: none; height: 32px; padding: 0 14px; border-radius: var(--r-md); font-size: 13px; font-weight: 600; cursor: pointer; }
-.btn:hover { filter: brightness(0.96); }
-.btn.ghost { background: transparent; color: var(--c-text-muted); border: 1px solid var(--c-border-strong); font-weight: 500; }
-.muted { color: var(--c-text-muted); }
-.error { color: var(--c-danger); }
+.body { max-width: 960px; margin: 0 auto; padding: 28px 24px 64px; }
 .error-box { padding: 80px 24px; text-align: center; }
-.loadout-warn, .logout-warn {
+.logout-warn {
   display: flex; align-items: center; gap: 12px; max-width: 960px; margin: 0 auto;
   padding: 10px 24px; background: var(--c-warn-bg); border-bottom: 1px solid var(--c-warn-border);
   color: var(--c-warn-text); font-size: 13px;
 }
-.logout-warn .btn { height: 28px; }
 </style>

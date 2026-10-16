@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { withBase } from '../lib/router';
-import { listUsers, setUserStatus, adjustUserSubscription, getSyncOverview, type AdminUser, type AdminSyncKindOverview } from '../api/admin';
+import { listUsers, setUserRole, setUserStatus, adjustUserSubscription, getSyncOverview, getAdminAiQuota, type AdminAiQuota, type AdminUser, type AdminSyncKindOverview } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
@@ -25,6 +25,31 @@ const subWrite = useIdempotencyKey();
 const statusForm = ref<{ userId: string; status: 'active' | 'disabled' } | null>(null);
 const syncFor = ref<AdminUser | null>(null);
 const syncRows = ref<AdminSyncKindOverview[]>([]);
+const aiFor = ref<AdminUser | null>(null);
+const aiQuota = ref<AdminAiQuota | null>(null);
+const aiBusy = ref(false);
+
+async function openAi(u: AdminUser): Promise<void> {
+  aiFor.value = u;
+  aiQuota.value = null;
+  const r = await getAdminAiQuota(Number(u.userId));
+  if (r.kind === 'ok') aiQuota.value = r.value;
+  else if (r.kind === 'unauthorized') relogin();
+  else aiBusy.value = false;
+}
+
+/** 点击菜单项后收起原生 details 下拉。 */
+function closeMenu(e: Event): void {
+  (e.currentTarget as HTMLElement).closest('details')?.removeAttribute('open');
+}
+
+function fmtTokens(n: number): string {
+  return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n.toLocaleString();
+}
+
+function fmtCents(cents: number): string {
+  return `¥${(cents / 100).toFixed(2)}`;
+}
 const syncBusy = ref(false);
 const syncError = ref('');
 const reason = ref('');
@@ -92,6 +117,45 @@ function search(): void {
   users.value = [];
   nextCursor.value = null;
   void load(true);
+}
+
+const roleForm = ref<{ user: AdminUser; role: 'user' | 'platform_admin' } | null>(null);
+const roleReason = ref('');
+
+function openRole(u: AdminUser, role: 'user' | 'platform_admin'): void {
+  roleForm.value = { user: u, role };
+  roleReason.value = '';
+  error.value = '';
+}
+
+async function confirmRole(): Promise<void> {
+  const form = roleForm.value;
+  if (!form || busy.value) return;
+  const reasonValue = roleReason.value.trim();
+  if (!reasonValue) {
+    error.value = '请填写操作原因。';
+    return;
+  }
+  const tag = `role:${form.user.userId}:${form.role}:${reasonValue}`;
+  busy.value = true;
+  error.value = '';
+  try {
+    const csrf = await ensureCsrf();
+    const r = await setUserRole(form.user.userId, form.role, reasonValue, statusWrite.ensure(tag), csrf);
+    if (r.kind === 'ok') {
+      statusWrite.reset(tag);
+      roleForm.value = null;
+      await load(true);
+    } else if (r.kind === 'unauthorized') {
+      statusWrite.reset(tag);
+      relogin();
+    } else {
+      statusWrite.reset(tag);
+      error.value = serverMsg(r);
+    }
+  } finally {
+    busy.value = false;
+  }
 }
 
 function openStatus(u: AdminUser, status: 'active' | 'disabled'): void {
@@ -237,15 +301,23 @@ async function confirmSub(): Promise<void> {
       <tbody>
         <tr v-for="u in users" :key="u.userId">
           <td>{{ u.email }}</td>
-          <td>{{ u.status }}</td>
-          <td>{{ u.role }}</td>
+          <td><span class="badge" :class="u.status === 'active' ? 'ok' : 'danger'">{{ u.status === 'active' ? '启用' : '禁用' }}</span></td>
+          <td><span class="badge" :class="u.role === 'platform_admin' ? 'warn' : ''">{{ u.role === 'platform_admin' ? '管理员' : '用户' }}</span></td>
           <td>{{ u.planCode ?? '—' }} <span v-if="u.subscriptionVersion != null" class="muted">v{{ u.subscriptionVersion }}</span></td>
           <td>{{ u.deviceCount }}</td>
           <td class="actions">
             <button v-if="u.status === 'active'" class="btn small danger" :disabled="busy" @click="openStatus(u, 'disabled')">禁用</button>
             <button v-else class="btn small" :disabled="busy" @click="openStatus(u, 'active')">启用</button>
-            <button class="btn small secondary" :disabled="busy" @click="openSub(u)">订阅</button>
-            <button class="btn small secondary" :disabled="busy" @click="openSync(u)">同步</button>
+            <details class="menu">
+              <summary class="btn small secondary">更多 ▾</summary>
+              <div class="menu-list" @click="closeMenu">
+                <button :disabled="busy" @click="openSub(u)">订阅</button>
+                <button :disabled="busy" @click="openSync(u)">同步</button>
+                <button :disabled="busy" @click="openAi(u)">AI 用量</button>
+                <button v-if="u.role !== 'platform_admin'" :disabled="busy" @click="openRole(u, 'platform_admin')">设为管理员</button>
+                <button v-else class="danger" :disabled="busy" @click="openRole(u, 'user')">撤销管理员</button>
+              </div>
+            </details>
           </td>
         </tr>
         <tr v-if="users.length === 0"><td colspan="6" class="muted">无匹配用户。</td></tr>
@@ -253,6 +325,61 @@ async function confirmSub(): Promise<void> {
     </table>
 
     <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+
+    <Modal v-if="aiFor" :title="`AI 用量 · ${aiFor.email ?? aiFor.userId}`" :closable="!busy" @close="aiFor = null">
+      <p v-if="!aiQuota" class="muted">加载中…</p>
+      <template v-else>
+        <h4>本月配额</h4>
+        <p class="quota-summary">
+          已用 {{ fmtTokens(aiQuota.snapshot.used) }} · 预占 {{ fmtTokens(aiQuota.snapshot.reserved) }} ·
+          月剩余 {{ fmtTokens(aiQuota.snapshot.monthlyRemaining) }} · 加油包 {{ fmtTokens(aiQuota.snapshot.topupRemaining) }}
+          <template v-if="aiQuota.snapshot.resetAt"> · 重置 {{ new Date(aiQuota.snapshot.resetAt).toLocaleDateString() }}</template>
+        </p>
+        <h4>加油包购买</h4>
+        <p class="quota-summary">
+          {{ aiQuota.topupOrders?.totalCount ?? 0 }} 笔 · 已支付 {{ aiQuota.topupOrders?.paidCount ?? 0 }} 笔（{{ fmtCents(aiQuota.topupOrders?.paidCents ?? 0) }}）<template v-if="aiQuota.topupOrders?.refundedCount"> · 退款 {{ aiQuota.topupOrders.refundedCount }} 笔</template><template v-if="aiQuota.topupOrders?.lastPaidTime"> · 最近 {{ new Date(aiQuota.topupOrders.lastPaidTime).toLocaleString() }}</template>
+        </p>
+        <h4>近月用量（计费 token）</h4>
+        <table class="table">
+          <thead><tr><th>月份</th><th>输入</th><th>输出</th><th>请求</th></tr></thead>
+          <tbody>
+            <tr v-for="m in aiQuota.months ?? []" :key="m.usageMonth">
+              <td class="mono">{{ m.usageMonth }}</td>
+              <td>{{ fmtTokens(m.promptTokens) }}</td>
+              <td>{{ fmtTokens(m.completionTokens) }}</td>
+              <td>{{ m.requestCount }}</td>
+            </tr>
+            <tr v-if="(aiQuota.months ?? []).length === 0"><td colspan="4" class="muted">无用量记录。</td></tr>
+          </tbody>
+        </table>
+        <h4 v-if="(aiQuota.grants ?? []).length">加油包余额</h4>
+        <table v-if="(aiQuota.grants ?? []).length" class="table">
+          <thead><tr><th>档位</th><th>总量</th><th>已用</th><th>状态</th><th>过期</th></tr></thead>
+          <tbody>
+            <tr v-for="g in aiQuota.grants" :key="g.grantId">
+              <td class="mono">{{ g.skuCode }}</td>
+              <td>{{ fmtTokens(g.tokensTotal) }}</td>
+              <td>{{ fmtTokens(g.tokensUsed) }}</td>
+              <td>{{ g.status }}</td>
+              <td>{{ new Date(g.expiresTime).toLocaleDateString() }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+      <div class="modal-actions">
+        <button class="btn secondary" :disabled="busy" @click="aiFor = null">关闭</button>
+      </div>
+    </Modal>
+
+    <Modal v-if="roleForm" :title="roleForm.role === 'platform_admin' ? '授予管理员' : '撤销管理员'" :closable="!busy" @close="roleForm = null">
+      <p class="muted">{{ roleForm.user.email ?? roleForm.user.userId }} · 当前角色 {{ roleForm.user.role }}</p>
+      <input v-model="roleReason" type="text" maxlength="500" placeholder="原因（必填，进审计）" />
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="modal-actions">
+        <button class="btn" :disabled="busy" @click="confirmRole">确认</button>
+        <button class="btn secondary" :disabled="busy" @click="roleForm = null">取消</button>
+      </div>
+    </Modal>
 
     <Modal v-if="statusForm" :title="statusForm.status === 'disabled' ? '禁用用户' : '启用用户'" :closable="!busy" @close="statusForm = null">
       <input v-model="reason" type="text" maxlength="500" placeholder="原因（必填）" />
@@ -299,23 +426,4 @@ async function confirmSub(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 960px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-.bar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
-input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
-.table { width: 100%; border-collapse: collapse; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eaeef2; font-size: 14px; }
-.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
-.btn:disabled { opacity: 0.6; cursor: default; }
-.btn.small { padding: 5px 10px; font-size: 13px; }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
-.btn.danger { background: var(--c-danger); }
-.actions { display: flex; gap: 6px; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
-.load-more { margin: 16px 0; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

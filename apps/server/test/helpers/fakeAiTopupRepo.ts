@@ -77,6 +77,19 @@ export class MemoryAiTopupRepo implements IAiTopupRepo {
     return true;
   }
 
+  async topupStatsByUser(userId: number): Promise<{ totalCount: number; paidCount: number; paidCents: number; refundedCount: number; lastPaidTime: Date | null }> {
+    const rows = [...this.orders.values()].filter((o) => o.userId === userId);
+    const paid = rows.filter((o) => o.status === 'paid' || o.status === 'fulfilled');
+    const lastPaid = paid.map((o) => o.paidTime).filter((d): d is Date => d instanceof Date).sort((a, b) => b.getTime() - a.getTime())[0];
+    return {
+      totalCount: rows.length,
+      paidCount: paid.length,
+      paidCents: paid.reduce((n, o) => n + o.amountCents, 0),
+      refundedCount: rows.filter((o) => o.status === 'refunded').length,
+      lastPaidTime: lastPaid ?? null,
+    };
+  }
+
   async listGrantsByUser(userId: number, limit: number): Promise<AiGrantDetail[]> {
     return [...this.grants.values()]
       .filter((g) => g.userId === userId)

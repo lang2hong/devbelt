@@ -129,11 +129,6 @@ onMounted(() => load());
 </template>
 
 <style scoped>
-.page { max-width: 720px; margin: 0 auto; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
-.bar { display: flex; gap: 8px; margin: 0 0 16px; }
 .bar select { max-width: 180px; }
 .item { transition: border-color .15s; }
 .item:hover { border-color: var(--c-border-strong); }
@@ -155,9 +150,4 @@ select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-bo
 .detail dt { color: var(--c-text-muted); font-size: 13px; }
 .detail dd { margin: 0; font-size: 13px; color: var(--c-text); word-break: break-all; }
 .reorder { padding: 0 16px 12px; }
-.btn.small { display: inline-block; padding: 4px 12px; font-size: 13px; text-decoration: none; }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
-.load-more { margin: 16px 0; }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 </style>

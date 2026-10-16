@@ -15,3 +15,4 @@ devbelt-db-connections.json
 
 # 本地验证用二维码截图（可能含真实 MFA 密钥），禁止入库
 /mfa_*.png
+.vscode-test/

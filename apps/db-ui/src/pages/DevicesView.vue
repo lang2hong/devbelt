@@ -102,19 +102,8 @@ async function confirmRevoke(d: Device): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 720px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .list { list-style: none; padding: 0; margin: 16px 0 0; }
 .item { display: flex; align-items: center; justify-content: space-between; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
 .meta { display: flex; flex-direction: column; gap: 2px; }
-.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.btn:disabled { opacity: 0.6; cursor: default; }
-.btn.danger { background: var(--c-danger); }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
 .confirm { display: flex; align-items: center; gap: 8px; }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

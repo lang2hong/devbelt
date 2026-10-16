@@ -28,6 +28,29 @@ const ENUM_MAPPING =
   'definitions or column comments. Do NOT guess enum values from world knowledge.';
 
 /**
+ * 业务术语 / 默认业务规则的 user 区块标题（NL2SQL 与 Chat/数据问答共用，避免措辞漂移）：
+ * 术语“优先于模型先验”；规则“仅当涉及的表/列存在时适用，不得编造”。
+ */
+export const DOMAIN_CONTEXT_HEADER =
+  'User-provided domain context (business terminology mapping; treat as authoritative over model priors):';
+export const BUSINESS_RULES_HEADER =
+  'User-provided business rules (apply ONLY when the tables/columns they mention exist in the provided schema; ' +
+  'never invent columns or tables):';
+
+const ALIAS_CONSISTENCY =
+  'Table aliases: every alias prefix used on column references (e.g. t.col, f.id) must be declared as a table alias ' +
+  'in FROM/JOIN. Never invent a prefix that is not bound there; with a single table, use unqualified column names.';
+
+const NO_PLACEHOLDER_SQL =
+  'If schema information is missing or incomplete, do NOT emit SQL containing placeholder identifiers ' +
+  '(such as angle-bracket tokens); ask the user for the real table/column names in plain text instead.';
+
+const RESERVED_IDENTIFIER_QUOTING =
+  'Wrap table/column identifiers that collide with SQL reserved words in the dialect identifier quote ' +
+  '(MySQL/SQLite: backticks, PostgreSQL: double quotes). Example: for a column named condition, write it ' +
+  'backtick-quoted in MySQL. Never emit a reserved word as a bare identifier.';
+
+/**
  * NL2SQL prompt 契约（P9 v5，§6.7.1）：
  * - schema-linking 显式映射指令；
  * - ENUM/字典严格映射（解决"谓词猜错 → 0 行"）；
@@ -47,15 +70,8 @@ export function buildNl2SqlMessages(input: Nl2SqlInput): ChatMessage[] {
           .filter(Boolean)
           .join(', ')}. Do not guess tables from other databases or schemas.`
       : undefined;
-  const domainContext = section(
-    'User-provided domain context (business terminology mapping; treat as authoritative over model priors):',
-    input.domainContext,
-  );
-  const businessRules = section(
-    'User-provided business rules (apply ONLY when the tables/columns they mention exist in the provided schema; ' +
-      'never invent columns or tables):',
-    input.defaultDirectives,
-  );
+  const domainContext = section(DOMAIN_CONTEXT_HEADER, input.domainContext);
+  const businessRules = section(BUSINESS_RULES_HEADER, input.defaultDirectives);
 
   return withSystem(
     joinSections([
@@ -68,6 +84,9 @@ export function buildNl2SqlMessages(input: Nl2SqlInput): ChatMessage[] {
       businessRules,
       section('Request:', input.request),
       ENUM_MAPPING,
+      ALIAS_CONSISTENCY,
+      NO_PLACEHOLDER_SQL,
+      RESERVED_IDENTIFIER_QUOTING,
       'Output format (strict order):\n' +
         '1. A single line starting with "**意图理解：**" (intent paraphrase: restate the metric scope, filters and key assumptions in one plain-language sentence, same language as the user);\n' +
         '2. The SQL in a ```sql code block (keep the block clean; append `LIMIT 10` to SELECTs unless the user asks for all rows or a specific count);\n' +

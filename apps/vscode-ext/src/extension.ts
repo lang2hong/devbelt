@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
+import { applyQueryTimeoutFromConfig } from './utils/sqlTimeout';
 import { ConnectionManager } from './connection/connectionManager';
 import { ConnectionPathOverrideStore } from './connection/connectionPathOverrideStore';
 import { ConnectionContext } from './connection/connectionContext';
@@ -42,6 +43,7 @@ import { registerCommands } from './commands';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
+import type { SyncEntityType } from '@devbelt/db-host/sync/e2e/syncEntity';
 import { DekStore } from '@devbelt/db-host/sync/crypto/keyStore';
 
 import { registerPersonalSyncCommands } from './commands/personalSync';
@@ -53,6 +55,11 @@ import { AuthenticatorView } from './authenticator/authenticatorView';
 import { AuthenticatorChangedEvent } from './authenticator/events';
 import { AuthenticatorSyncBackend } from './authenticator/syncBackend';
 import { SchemaNotesSyncBackend } from './ai/schemaNotesSyncBackend';
+import { AiModelAccessStore } from './ai/aiModelAccessStore';
+import { ModelAccessSyncBackend } from './ai/modelAccessSyncBackend';
+import { readSyncItems, typeEnabledOf } from './sync/syncItems';
+import { ProviderCatalog } from './ai/providerCatalog';
+import { applyModelAccessRuntime } from './ai/modelAccessRuntime';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
@@ -206,11 +213,31 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const isAutoSyncEnabled = (): boolean =>
     vscode.workspace.getConfiguration().get<boolean>(SYNC_AUTO_SYNC_KEY, false);
 
+  // SQL 语句执行超时（全局默认，秒）：QueryService 每次查询读取静态值 → 改动实时生效（无需重连）；
+  // 连接表单的 requestTimeout（毫秒）按连接覆盖本值；0 = 不超时。
+  applyQueryTimeoutFromConfig((key) => vscode.workspace.getConfiguration('devbelt').get<number>(key));
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('devbelt.sql.queryTimeoutSeconds')) {
+        applyQueryTimeoutFromConfig((key) => vscode.workspace.getConfiguration('devbelt').get<number>(key));
+      }
+    }),
+  );
+
+  // 选择性同步项（按机器生效，实时读取）：关闭的类型本机不推送、入站暂存不应用（重开后 drain 重放）、
+  // 体检不计为缺失；依赖级联（关连接 → 查询/注记随停）在 typeEnabledOf 内强制。
+  const syncTypeEnabled = (type: SyncEntityType): boolean =>
+    typeEnabledOf(readSyncItems(vscode.workspace.getConfiguration('devbelt')), type);
+
   const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current, isAutoSyncEnabled);
   const authStatusBar = createAuthStatusBar(context, auth);
 
   // P9 S7f：AI 上下文的连接级存储在同步工厂之前建好（schemaNotes 实体后端与 AI 面板共用同一实例）。
   const aiContextStore = new AiContextStore(context.globalState);
+  // 模型接入：Key 面与同步工厂共用同一实例（aiModelAccess 实体后端出站需读缓存 Key）。
+  const aiKeyStore = new AiKeyStore(context.secrets);
+  const aiModelAccessStore = new AiModelAccessStore(context.globalState);
+  const providerCatalog = new ProviderCatalog(context.globalState, serverUrl);
 
   const syncFactory = new SyncSessionFactory({
     connectionStore: store,
@@ -234,6 +261,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
         skippedRemote: result?.skippedRemote,
         skippedEntitlement: result?.skippedEntitlement,
         skippedUnsupported: result?.skippedUnsupported,
+        skippedDisabled: result?.skippedDisabled,
         skippedOutbound: result?.skippedOutbound,
       });
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
@@ -245,6 +273,12 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     createClient: () => new PersonalSyncClient(auth.client),
     authenticatorBackend: new AuthenticatorSyncBackend(authStore),
     schemaNotesBackend: new SchemaNotesSyncBackend(aiContextStore),
+    typeEnabled: syncTypeEnabled,
+    aiModelAccessBackend: new ModelAccessSyncBackend(aiModelAccessStore, aiKeyStore, {
+      applyRuntime: (fields) => applyModelAccessRuntime(fields),
+      // 配置已从其他设备同步、但本机尚无 Key（或对端未同步 Key）→ 引导输入。
+      onNeedsKey: () => void vscode.window.showInformationMessage(l10n('ai.ma.needsKey')),
+    }),
     // P6 §六：按类型配额拒绝 → 标 localOnly/quota；推送成功 → 清除标记。
     onQuotaRejected: async (ref) => {
       if (ref.type === 'authenticatorEntry') await authStore.markSyncError(ref.localId, 'quota');
@@ -334,7 +368,6 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // ===== P9 S3：AI 能力（Chat 面板骨架）=====
   // 独立 WebviewPanel（devbelt.ai + aiChat.html），不走 QueryView/DesignView 的 WebviewMode；
   // apiKey 只落 SecretStorage；面板单例由 AiChatView 管理（关闭即释放，在途流 abort）。
-  const aiKeyStore = new AiKeyStore(context.secrets);
   const aiSessions = new AiSessionStore(context.globalState);
   const aiService = new AiService({ keyStore: aiKeyStore, auth, serverUrl, audit: auditLogger });
   const aiSchemaBuilder = new AiSchemaContextBuilder();
@@ -351,6 +384,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     auth,
     executor,
     schemaBuilder: aiSchemaBuilder,
+    modelAccessStore: aiModelAccessStore,
+    providerCatalog,
   };
   // 叶子视图（结果面板/表设计器）经桥发起 Chat 请求；未初始化时调用方给明确提示。
   AiBridge.init({

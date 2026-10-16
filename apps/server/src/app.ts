@@ -65,6 +65,13 @@ import { consoleMeRoutes } from './modules/auth/route/consoleMe.js';
 import { consoleDataRoutes } from './modules/db/route/consoleData.js';
 import { consoleAdminRoutes } from './modules/admin/route/consoleAdmin.js';
 import { consoleAiTopupRoutes } from './modules/admin/route/consoleAiTopup.js';
+import { consoleAiProvidersRoutes } from './modules/admin/route/consoleAiProviders.js';
+import { consoleAiBillingRoutes } from './modules/admin/route/consoleAiBilling.js';
+import { MysqlAiBillingRepo } from './modules/ai/repository/aiBillingRepo.js';
+import { AiBillingService } from './modules/ai/service/aiBillingService.js';
+import { aiProvidersRoutes } from './modules/ai/route/providers.js';
+import { MysqlAiProviderRepo } from './modules/ai/repository/aiProviderRepo.js';
+import { AiProviderService } from './modules/ai/service/aiProviderService.js';
 import { aiTopupOrderRoutes } from './modules/ai/route/topup.js';
 import { registerPaymentRoutes } from './modules/billing/route/paymentRoutes.js';
 import { invoiceRoutes } from './modules/billing/route/invoices.js';
@@ -300,6 +307,7 @@ export async function createApp() {
     (fn) => withTransaction(app.mysql, fn),
   );
   const aiTopupService = new AiTopupService(aiTopupRepo, (fn) => withTransaction(app.mysql, fn));
+  const aiProviderService = new AiProviderService(new MysqlAiProviderRepo(getMysql));
   const aiUpstreamConfig = resolveAiUpstreamConfig(process.env);
   if (!aiUpstreamConfig.configured) {
     app.log.warn(
@@ -307,7 +315,10 @@ export async function createApp() {
         '(set DEVBELT_AI_UPSTREAM_BASE_URL / DEVBELT_AI_UPSTREAM_MODEL)',
     );
   }
+  // AI 计费引擎：模型计价 + 计费设置（管理后台可配置；60s 缓存，写后即时失效）；env 回退。
+  const aiBillingService = new AiBillingService(new MysqlAiBillingRepo(getMysql), aiUpstreamConfig);
   const aiProxyService = new AiProxyService({
+    billing: aiBillingService,
     config: aiUpstreamConfig,
     quota: aiQuotaService,
     audit: auditWriter,
@@ -468,6 +479,31 @@ export async function createApp() {
     idempotencyService,
     topup: aiTopupService,
     quota: aiQuotaService,
+    auditWriter,
+  });
+  // AI 模型厂商目录：公开只读（自带 Key 预设，按 IP 限流）+ 后台维护（console + CSRF + 幂等 + 审计）。
+  app.register(aiProvidersRoutes, { rateLimiter, providers: aiProviderService });
+  // AI 计费引擎：计价表/计费设置/财务月报（console + CSRF + 幂等 + 审计；Key 只写不读）。
+  app.register(consoleAiBillingRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    consoleOrigin: config.consoleOrigin,
+    rateLimiter,
+    idempotencyService,
+    billing: aiBillingService,
+    auditWriter,
+  });
+  app.register(consoleAiProvidersRoutes, {
+    tokenService,
+    getUser,
+    getSessionActive,
+    csrfService,
+    consoleOrigin: config.consoleOrigin,
+    rateLimiter,
+    idempotencyService,
+    providers: aiProviderService,
     auditWriter,
   });
   app.register(linkFlowRoutes, {

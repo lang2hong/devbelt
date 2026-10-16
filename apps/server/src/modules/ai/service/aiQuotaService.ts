@@ -169,6 +169,18 @@ export class AiQuotaService {
     });
   }
 
+  /** 近 N 个月用量历史（计费 token 口径；按月降序）。 */
+  monthlyUsageHistory(userId: number, months = 6): Promise<Array<{ usageMonth: string; promptTokens: number; completionTokens: number; requestCount: number }>> {
+    return this.usageRepo.listMonthlyByUser(userId, months).then((rows) =>
+      rows.map((r) => ({
+        usageMonth: r.usageMonth,
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        requestCount: r.requestCount,
+      })),
+    );
+  }
+
   /** 当月用量快照（无行时全 0；limit 仍按当前权益派生；`remaining` = 月段 + 加油包合计）。 */
   async getUsage(userId: number): Promise<AiQuotaSnapshot> {
     const limit = await this.resolveMonthlyLimit(userId);

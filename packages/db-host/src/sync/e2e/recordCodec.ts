@@ -16,6 +16,7 @@ import {
   type SyncAuthenticatorEntryValue, type SyncAuthenticatorGroup, type SyncAuthenticatorTag,
 } from './authenticatorTypes.js';
 import { assertSchemaNotesScope, assertSchemaNotesTables, type SyncSchemaNotesValue } from './schemaNotesTypes.js';
+import { assertAiModelAccessPayload, type AiModelAccessPayload, type SyncAiModelAccessValue } from './aiModelAccessTypes.js';
 
 /**
  * record 密文编解码（A2：四类型 discriminated payload + 引用转 recordId）。
@@ -106,7 +107,8 @@ export type CodecEntityInput =
   | { type: 'authenticatorGroup'; entity: SyncAuthenticatorGroup }
   | { type: 'authenticatorTag'; entity: SyncAuthenticatorTag }
   | { type: 'authenticatorEntry'; entity: SyncAuthenticatorEntryValue }
-  | { type: 'schemaNotes'; entity: SyncSchemaNotesValue };
+  | { type: 'schemaNotes'; entity: SyncSchemaNotesValue }
+  | { type: 'aiModelAccess'; entity: SyncAiModelAccessValue };
 
 function assertSqlSize(sql: string): void {
   if (new TextEncoder().encode(sql).length > SQL_MAX_BYTES) {
@@ -218,7 +220,23 @@ export function encodeEntityPayload(input: CodecEntityInput, resolveRef: RefReso
     case 'authenticatorTag': return encodeAuthenticatorTagPayload(input.entity);
     case 'authenticatorEntry': return encodeAuthenticatorEntryPayload(input.entity, resolveRef);
     case 'schemaNotes': return encodeSchemaNotesPayload(input.entity, resolveRef);
+    case 'aiModelAccess': return encodeAiModelAccessPayload(input.entity);
   }
+}
+
+/** AI 模型接入配置编码：仅含后端已按本机勾选裁剪的组；此处做白名单校验。 */
+export function encodeAiModelAccessPayload(entity: SyncAiModelAccessValue): Record<string, unknown> {
+  const payload = assertAiModelAccessPayload({
+    ...(entity.selection ? { selection: entity.selection } : {}),
+    ...(entity.custom ? { custom: entity.custom } : {}),
+    ...(entity.apiKey ? { apiKey: entity.apiKey } : {}),
+  });
+  return { type: 'aiModelAccess', ...payload };
+}
+
+/** 解码：各组可选（发送端未勾选的组不出现在 payload）。 */
+export function decodeAiModelAccessPayload(p: Record<string, unknown>): AiModelAccessPayload {
+  return assertAiModelAccessPayload(p);
 }
 
 /** S7f 编码：connId 本地 id → recordId（unresolved 时省略字段，后续轮收敛）。 */
@@ -422,7 +440,8 @@ export type DecodedEntityPayload =
   | { type: 'authenticatorGroup'; data: DecodedAuthenticatorGroupPayload }
   | { type: 'authenticatorTag'; data: DecodedAuthenticatorTagPayload }
   | { type: 'authenticatorEntry'; data: DecodedAuthenticatorEntryPayload }
-  | { type: 'schemaNotes'; data: DecodedSchemaNotesPayload };
+  | { type: 'schemaNotes'; data: DecodedSchemaNotesPayload }
+  | { type: 'aiModelAccess'; data: AiModelAccessPayload };
 
 /**
  * 向前兼容策略（D14）：**忽略未知字段**，只校验已知字段。
@@ -752,6 +771,7 @@ export function decodeEntityPayload(p: unknown): DecodedEntityPayload {
     case 'authenticatorTag': return { type: 'authenticatorTag', data: decodeAuthenticatorTagPayload(p) };
     case 'authenticatorEntry': return { type: 'authenticatorEntry', data: decodeAuthenticatorEntryPayload(p) };
     case 'schemaNotes': return { type: 'schemaNotes', data: decodeSchemaNotesPayload(p as Record<string, unknown>) };
+    case 'aiModelAccess': return { type: 'aiModelAccess', data: decodeAiModelAccessPayload(p as Record<string, unknown>) };
   }
 }
 

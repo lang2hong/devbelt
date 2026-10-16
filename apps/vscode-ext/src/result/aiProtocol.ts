@@ -86,6 +86,12 @@ export interface AiFinishDown {
   sessionId: string;
   aborted?: boolean;
   error?: { code: string; message: string };
+  /**
+   * 权威最终正文（P9 保留字补引）：host 收流后对 ```sql 块做过本地修正的版本。
+   * 存在时 webview 以它替换流式累积缓冲——显示/自动执行/编辑器插入三者一致；
+   * 缺省（无正文）沿用旧行为。
+   */
+  content?: string;
 }
 
 export interface AiQuotaUpdateDown {
@@ -123,6 +129,43 @@ export interface AiContextDetailDown {
   tables?: string[];
 }
 
+/** 连接级业务规则（业务术语 + 默认业务规则）快照；saved=true 表示刚保存成功（弹层据此关闭/提示）。 */
+/** 模型接入快照（自带 Key 模式配置 + 厂商目录 + 同步项勾选；**永不携带 apiKey 值**，只带 hasKey）。 */
+export interface AiModelAccessDown {
+  type: 'modelAccess';
+  mode: 'server-proxy' | 'openai-compatible';
+  vendorId: string;
+  baseUrl: string;
+  model: string;
+  customVendors: Array<{ id: string; name: string; baseUrl: string; models: string[] }>;
+  customModels: Record<string, string[]>;
+  hasKey: boolean;
+  prefs: { selection: boolean; custom: boolean; key: boolean };
+  catalog: Array<{
+    code: string;
+    name: { en: string; zh: string };
+    baseUrl: string;
+    models: Array<{ id: string; label?: string; default?: boolean }>;
+    sortOrder: number;
+  }>;
+  /** 保存校验失败错误码（仅保存回执时出现；UI 本地化）。 */
+  saveError?: string;
+}
+
+/** 连接测试结果（稳定原因码 + 耗时；不含密钥）。 */
+export interface AiModelAccessTestDown {
+  type: 'modelAccessTest';
+  result: { ok: boolean; code: string; latencyMs: number; status?: number; detail?: string };
+}
+
+export interface AiBusinessRulesDown {
+  type: 'businessRules';
+  connId?: string;
+  domainContext: string;
+  defaultDirectives: string;
+  saved?: boolean;
+}
+
 export interface AiTableOptionsDown {
   type: 'tableOptions';
   tables: string[];
@@ -156,6 +199,23 @@ export interface AiToolResultDown {
   format?: 'text' | 'markdown';
   /** 围栏语言标记（redis-result / es-result 等）；仅 format=text 时有意义。 */
   lang?: string;
+  /** 结果内联回填引用（P9）：来自上行 executeSqlInChat/autoExecuteSql/runRedis/runEsDsl 的透传。 */
+  blockRef?: AiBlockRef;
+  /** 对应 toolRunning 的执行标识（SQL in-chat；结束执行中指示）。 */
+  runId?: string;
+  /** 实测执行耗时（ms；SQL in-chat）。 */
+  costMs?: number;
+  /** 用户取消或确认门禁未放行（未产生执行结果）。 */
+  canceled?: boolean;
+}
+
+/** SQL in-chat 开始执行（webview 据此显示「执行中 + 计时 + 取消」；toolResult 到达即结束）。 */
+export interface AiToolRunningDown {
+  type: 'toolRunning';
+  runId: string;
+  /** host 端开始时间戳（ms）。 */
+  startedAt: number;
+  blockRef: AiBlockRef;
 }
 
 export type AiDownMessage =
@@ -168,12 +228,38 @@ export type AiDownMessage =
   | AiSessionLoadedDown
   | AiPrefillInputDown
   | AiContextDetailDown
+  | AiBusinessRulesDown
+  | AiModelAccessDown
+  | AiModelAccessTestDown
   | AiToolResultDown
+  | AiToolRunningDown
   | AiTableOptionsDown
   | AiTableNoteDown
   | AiColumnSampleDown;
 
 // ── Up（webview → host）──
+
+export interface AiSaveModelAccessUp {
+  type: 'saveModelAccess';
+  mode: 'server-proxy' | 'openai-compatible';
+  vendorId: string;
+  baseUrl: string;
+  model: string;
+  customVendors: Array<{ id: string; name: string; baseUrl: string; models: string[] }>;
+  customModels: Record<string, string[]>;
+  /** 新填写的 Key（空 = 保持本机）——**仅此上行与 testModelAccess 允许携带密钥**。 */
+  apiKey: string;
+  clearKey?: boolean;
+  prefs: { selection: boolean; custom: boolean; key: boolean };
+}
+
+/** 测试连接（不保存）：apiKey 为待测新 Key（空 = 用已保存的）。 */
+export interface AiTestModelAccessUp {
+  type: 'testModelAccess';
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
 
 export interface AiSendUp {
   type: 'send';
@@ -196,12 +282,16 @@ export interface AiSelectScopeUp {
 export interface AiRunRedisUp {
   type: 'runRedis';
   text: string;
+  /** 结果内联绑定（P9）：webview 生成、host 透传。 */
+  blockRef?: AiBlockRef;
 }
 
 /** S7c：执行 AI 生成的 ES DSL（代码块按钮，用户显式触发）。 */
 export interface AiRunEsDslUp {
   type: 'runEsDsl';
   text: string;
+  /** 结果内联绑定（P9）：webview 生成、host 透传。 */
+  blockRef?: AiBlockRef;
 }
 
 /** 表选择：拉取当前作用域的表清单（抽屉打开时）。 */
@@ -236,6 +326,17 @@ export interface AiFetchColumnSampleUp {
   column: string;
 }
 
+/**
+ * 结果内联绑定引用（P9）：webview 生成（消息下标 + 块下标 + 代次），host 在
+ * toolResult 下行里原样回带；host 不解释其语义。gen 为 webview 消息代次
+ * （会话切换/重置时 +1，迟到的旧代次结果回退尾部气泡）。
+ */
+export interface AiBlockRef {
+  gen: number;
+  msgIdx: number;
+  blockIdx: number;
+}
+
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
@@ -262,10 +363,18 @@ export type AiUpMessage =
   | { type: 'copyCode'; text: string }
   | { type: 'applyCode'; text: string }
   | { type: 'executeSql'; text: string }
-  | { type: 'executeSqlInChat'; text: string }
+  | { type: 'executeSqlInChat'; text: string; blockRef?: AiBlockRef }
+  | { type: 'autoExecuteSql'; text: string; blockRef?: AiBlockRef }
   | { type: 'runRedisInPanel'; text: string }
   | { type: 'runEsDslInPanel'; text: string }
-  | { type: 'requestContextDetail' };
+  | { type: 'requestContextDetail' }
+  | { type: 'cancelQuery'; runId: string }
+  | { type: 'optimizeSql'; text: string; costMs?: number }
+  | { type: 'requestModelAccess' }
+  | AiSaveModelAccessUp
+  | AiTestModelAccessUp
+  | { type: 'requestBusinessRules' }
+  | { type: 'saveBusinessRules'; domainContext: string; defaultDirectives: string };
 
 /** 会话消息类型在协议层再导出，webview 侧从 ai-protocol 单点取。 */
 export type { AiChatMessage, AiChatSession };

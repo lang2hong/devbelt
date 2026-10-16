@@ -294,6 +294,36 @@ export class ConsoleAdminService {
     return { userId: String(user.id), status };
   }
 
+  /**
+   * 管理员角色授予/撤销（后台可配置管理员）：防自锁（不可改自己的角色——撤销会把自己
+   * 锁出后台）；审计 granted/revoked；幂等（角色相同直接返回）。
+   */
+  async setUserRoleInTx(
+    tx: Queryable,
+    actorUserId: number,
+    targetUserId: number,
+    role: 'user' | 'platform_admin',
+    reason: string,
+  ): Promise<{ userId: string; role: string }> {
+    if (targetUserId === actorUserId) {
+      throw new ForbiddenError('cannot change own role');
+    }
+    const user = await this.userRepo.lockById(tx, targetUserId);
+    if (!user) throw new EntityNotFoundError('user', targetUserId);
+    if (user.role === role) return { userId: String(user.id), role: user.role };
+    await this.userRepo.setRole(user.id, role);
+    await this.auditWriter.writeInTx(tx, {
+      eventType: role === 'platform_admin' ? 'admin.role.granted' : 'admin.role.revoked',
+      result: 'success',
+      actorUserId,
+      actorRole: 'platform_admin',
+      targetType: 'user',
+      targetId: String(user.id),
+      reason,
+    });
+    return { userId: String(user.id), role };
+  }
+
   // ── 个人订阅调整（乐观并发）──
 
   async adjustUserSubscriptionInTx(

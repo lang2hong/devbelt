@@ -48,6 +48,11 @@ export class AiTopupService {
   }
 
   /** 用户全部 grants（含历史状态；管理后台配额明细，P9.1b）。 */
+  /** 用户加油包订单聚合（管理后台用户视图：笔数/实付/退款/最近支付）。 */
+  topupOrderStats(userId: number): Promise<{ totalCount: number; paidCount: number; paidCents: number; refundedCount: number; lastPaidTime: Date | null }> {
+    return this.repo.topupStatsByUser(userId);
+  }
+
   async listGrants(userId: number, limit = 50): Promise<AiGrantDetail[]> {
     return this.repo.listGrantsByUser(userId, limit);
   }

@@ -6,6 +6,7 @@ export * from './sse.js';
 export * from './openaiCompatible.js';
 export * from './schemaContext.js';
 export * from './sqlSafety.js';
+export * from './identifierQuoting.js';
 export * from './sensitive.js';
 export * from './nl2sqlOutput.js';
 export * from './redisOutput.js';

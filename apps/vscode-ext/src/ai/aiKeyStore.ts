@@ -40,6 +40,11 @@ export class AiKeyStore {
     return this.cached;
   }
 
+  /** 同步读取缓存（未加载过返回 undefined；同步出站序列化用，不触发 SecretStorage 读取）。 */
+  peekApiKey(): string | undefined {
+    return this.loaded ? this.cached : undefined;
+  }
+
   async hasApiKey(): Promise<boolean> {
     return (await this.getApiKey()) !== undefined;
   }

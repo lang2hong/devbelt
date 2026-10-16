@@ -83,7 +83,7 @@ async function build(rateLimit = false) {
     };
   };
 
-  return { app, userRepo, auditRepo, topupRepo, makeAdmin, writeHeaders, tokenFor };
+  return { app, userRepo, auditRepo, topupRepo, usageRepo, makeAdmin, writeHeaders, tokenFor };
 }
 
 describe('console AI topup routes（P9.1b）', () => {
@@ -265,12 +265,30 @@ describe('console AI topup routes（P9.1b）', () => {
     expect(missing.statusCode).toBe(404);
   });
 
-  it('用户配额查询：快照 + grants 明细 + 审计', async () => {
+  it('用户配额查询：快照 + grants 明细 + 近月用量 + 订单实付聚合 + 审计', async () => {
     const b = await build();
     const admin = await b.makeAdmin();
     const buyer = await b.userRepo.create('buyer@b.com', 'hash');
     await new AiTopupService(b.topupRepo, (fn) => fn({} as Queryable), () => NOW)
       .createManualOrder({ userId: buyer.id, skuCode: 'sk_a' });
+    // 补一笔已支付订单（含 paidTime）+ 一笔退款订单 → 聚合可验证。
+    b.topupRepo.orders.set('ord-paid', {
+      id: 99, orderNo: 'ord-paid', userId: buyer.id, skuCode: 'sk_a', amountCents: 2900,
+      status: 'paid', channel: 'wechat', expiresTime: NOW, paidTime: new Date('2026-10-10T00:00:00Z'),
+    });
+    b.topupRepo.orders.set('ord-ref', {
+      id: 100, orderNo: 'ord-ref', userId: buyer.id, skuCode: 'sk_b', amountCents: 900,
+      status: 'refunded', channel: 'alipay', expiresTime: NOW,
+    });
+    // 近两月用量（计费 token 口径；先 ensure 行再入账）。
+    await b.usageRepo.ensureRowInTx({} as Queryable, buyer.id, '2026-10');
+    await b.usageRepo.ensureRowInTx({} as Queryable, buyer.id, '2026-09');
+    await b.usageRepo.settleInTx({} as Queryable, buyer.id, '2026-10', {
+      releaseReservedPromptTokens: 0, releaseReservedCompletionTokens: 0, promptTokens: 1200, completionTokens: 800,
+    });
+    await b.usageRepo.settleInTx({} as Queryable, buyer.id, '2026-09', {
+      releaseReservedPromptTokens: 0, releaseReservedCompletionTokens: 0, promptTokens: 300, completionTokens: 100,
+    });
 
     const res = await b.app.inject({
       method: 'GET',
@@ -281,11 +299,17 @@ describe('console AI topup routes（P9.1b）', () => {
     const body = res.json() as {
       snapshot: { topupRemaining: number; monthlyRemaining: number };
       grants: Array<{ skuCode: string; status: string; tokensTotal: number; expiresTime: string }>;
+      months: Array<{ usageMonth: string; promptTokens: number; completionTokens: number; requestCount: number }>;
+      topupOrders: { totalCount: number; paidCount: number; paidCents: number; refundedCount: number; lastPaidTime: string | null };
     };
     expect(body.snapshot.topupRemaining).toBe(5000);
     expect(body.grants).toHaveLength(1);
     expect(body.grants[0]).toMatchObject({ skuCode: 'sk_a', status: 'active', tokensTotal: 5000 });
     expect(new Date(body.grants[0].expiresTime).getTime()).toBe(NOW.getTime() + 30 * 24 * 3600 * 1000);
+    expect(body.months.map((m) => m.usageMonth)).toEqual(['2026-10', '2026-09']);
+    expect(body.months[0]).toMatchObject({ promptTokens: 1200, completionTokens: 800, requestCount: 1 });
+    expect(body.topupOrders).toMatchObject({ totalCount: 3, paidCount: 2, paidCents: 900 + 2900, refundedCount: 1 });
+    expect(body.topupOrders.lastPaidTime).toContain('2026-10-10');
     expect(b.auditRepo.events.some((e) => e.eventType === 'admin.ai.quota.read')).toBe(true);
   });
 

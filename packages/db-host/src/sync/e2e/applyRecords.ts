@@ -12,6 +12,7 @@ import { EntityStore, UnresolvedRefStore } from './entityStore.js';
 import type { SyncEntityType, SyncEntityRef } from './syncEntity.js';
 import type { SyncAuthenticatorEntryValue, SyncAuthenticatorGroup, SyncAuthenticatorTag } from './authenticatorTypes.js';
 import type { SyncSchemaNotesValue } from './schemaNotesTypes.js';
+import type { SyncAiModelAccessValue } from './aiModelAccessTypes.js';
 
 /**
  * 远端 record 的本地应用（A3：四类型 + 拓扑序 + 引用解析 + 环检测 + 级联）。
@@ -266,6 +267,7 @@ async function restoreEntity(ref: SyncEntityRef, original: unknown, ctx: ApplyCo
     case 'authenticatorTag': return ctx.entities.save(ref, original as SyncAuthenticatorTag, 'sync');
     case 'authenticatorEntry': return ctx.entities.save(ref, original as SyncAuthenticatorEntryValue, 'sync');
     case 'schemaNotes': return ctx.entities.save(ref, original as SyncSchemaNotesValue, 'sync');
+    case 'aiModelAccess': return ctx.entities.save(ref, original as SyncAiModelAccessValue, 'sync');
   }
 }
 
@@ -344,6 +346,11 @@ async function writeEntity(ref: SyncEntityRef, decoded: DecodedEntityPayload, ct
         await ctx.unresolved.add({ targetRecordId: decoded.data.connId, type: ref.type, localId: ref.localId, field: 'connId' });
       }
       await ctx.entities.save(ref, buildSchemaNotesFromPayload(decoded.data, ref.localId, connLocalId), 'sync');
+      return;
+    }
+    case 'aiModelAccess': {
+      // 无跨实体引用：直接以 payload 落地（updateTime 由本地存储层打点）。
+      await ctx.entities.save(ref, { id: ref.localId, ...decoded.data, updateTime: 0 }, 'sync');
       return;
     }
   }

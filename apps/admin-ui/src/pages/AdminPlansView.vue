@@ -459,10 +459,6 @@ onMounted(load);
 </template>
 
 <style scoped>
-.page { max-width: 960px; margin: 0 auto; color: #1f2328; }
-.head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 8px 0 16px; }
-h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 
 .tabs { display: inline-flex; gap: 4px; background: #eaeef2; padding: 3px; border-radius: 8px; }
 .tabs button { border: none; background: transparent; padding: 6px 14px; border-radius: 6px; font-size: 13px; color: var(--c-text-muted); cursor: pointer; }
@@ -515,20 +511,15 @@ input:focus, select:focus { outline: none; border-color: var(--c-accent); box-sh
 .savebar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; margin-top: 4px; background: linear-gradient(var(--c-surface-muted)00, var(--c-surface-muted) 40%); }
 .savebar.inline { position: static; margin-top: 16px; background: none; }
 .spacer { flex: 1; }
-.btn { background: var(--c-success); color: var(--c-surface); border: none; height: 34px; padding: 0 18px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .btn:hover { background: var(--c-success-text); }
-.btn:disabled { opacity: .6; cursor: default; }
 .btn.ghost { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); font-weight: 500; }
 
 .table-wrap { padding: 0; overflow: hidden; }
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th { text-align: left; font-weight: 600; color: var(--c-text-muted); font-size: 12px; padding: 10px 16px; background: var(--c-surface-muted); border-bottom: 1px solid var(--c-border); }
 .table td { padding: 11px 16px; border-bottom: 1px solid #eaeef2; }
 .table tr:last-child td { border-bottom: none; }
 .table tr.on td { background: var(--c-accent-bg); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--c-text-muted); }
 .link { border: none; background: none; color: var(--c-accent); cursor: pointer; font-size: 13px; padding: 0; }
-.error { color: var(--c-danger); font-size: 13px; }
 .ok { color: var(--c-success-text); font-size: 13px; }
-.muted { color: var(--c-text-muted); font-size: 12px; }
 </style>

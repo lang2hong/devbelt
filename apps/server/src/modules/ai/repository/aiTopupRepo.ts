@@ -30,6 +30,8 @@ export interface AiTopupOrder {
   status: 'pending' | 'paid' | 'fulfilled' | 'failed' | 'refunded' | 'expired';
   channel: 'wechat' | 'alipay' | 'manual';
   expiresTime: Date;
+  /** 支付完成时间（paid/fulfilled；订单聚合「最近支付」用）。 */
+  paidTime?: Date | null;
 }
 
 export interface AiGrantRow {
@@ -91,6 +93,8 @@ export interface IAiTopupRepo extends IAiGrantRepo {
   ): Promise<boolean>;
   /** 用户全部 grants（含 exhausted/expired/refunded；管理后台配额明细，P9.1b）。 */
   listGrantsByUser(userId: number, limit: number): Promise<AiGrantDetail[]>;
+  /** 用户加油包订单聚合（含各状态）：笔数/已支付金额/退款笔数/最近支付时间。 */
+  topupStatsByUser(userId: number): Promise<{ totalCount: number; paidCount: number; paidCents: number; refundedCount: number; lastPaidTime: Date | null }>;
 
   /** 新建加油包订单（channel/purpose='topup' 存档；同一事务内不入账）。返回订单行。 */
   insertTopupOrderInTx(
@@ -236,6 +240,28 @@ export class MysqlAiTopupRepo implements IAiTopupRepo {
       [...params, code],
     );
     return Number(result?.affectedRows ?? 0) > 0;
+  }
+
+  async topupStatsByUser(userId: number): Promise<{ totalCount: number; paidCount: number; paidCents: number; refundedCount: number; lastPaidTime: Date | null }> {
+    const [rows] = await this.db().query<any[]>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(status IN ('paid', 'fulfilled')), 0) AS paid_count,
+              COALESCE(SUM(CASE WHEN status IN ('paid', 'fulfilled') THEN amount_cents ELSE 0 END), 0) AS paid_cents,
+              COALESCE(SUM(status = 'refunded'), 0) AS refunded_count,
+              MAX(CASE WHEN status IN ('paid', 'fulfilled') THEN paid_time ELSE NULL END) AS last_paid
+         FROM orders
+        WHERE user_id = ? AND purpose = 'topup'`,
+      [userId],
+    );
+    const r = (rows[0] ?? {}) as Record<string, unknown>;
+    const lastPaid = r.last_paid === null || r.last_paid === undefined ? null : new Date(r.last_paid as string);
+    return {
+      totalCount: Number(r.total ?? 0),
+      paidCount: Number(r.paid_count ?? 0),
+      paidCents: Number(r.paid_cents ?? 0),
+      refundedCount: Number(r.refunded_count ?? 0),
+      lastPaidTime: lastPaid,
+    };
   }
 
   async listGrantsByUser(userId: number, limit: number): Promise<AiGrantDetail[]> {

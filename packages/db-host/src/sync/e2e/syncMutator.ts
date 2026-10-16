@@ -11,6 +11,7 @@ import { refKey, type SyncEntityRef } from './syncEntity.js';
 import type { SavedConnection } from '../../connection/connectionStore.js';
 import type { SyncAuthenticatorEntryValue, SyncAuthenticatorGroup, SyncAuthenticatorTag } from './authenticatorTypes.js';
 import type { SyncSchemaNotesValue } from './schemaNotesTypes.js';
+import type { SyncAiModelAccessValue } from './aiModelAccessTypes.js';
 
 /**
  * 本地实体变更 → 出站 mutation 生成（A4：全类型）。
@@ -211,6 +212,7 @@ export class SyncMutator {
       case 'authenticatorTag': return encodeEntityPayload({ type: 'authenticatorTag', entity: entity as SyncAuthenticatorTag }, resolveRef);
       case 'authenticatorEntry': return encodeEntityPayload({ type: 'authenticatorEntry', entity: entity as SyncAuthenticatorEntryValue }, resolveRef);
       case 'schemaNotes': return encodeEntityPayload({ type: 'schemaNotes', entity: entity as SyncSchemaNotesValue }, resolveRef);
+      case 'aiModelAccess': return encodeEntityPayload({ type: 'aiModelAccess', entity: entity as SyncAiModelAccessValue }, resolveRef);
     }
   }
 

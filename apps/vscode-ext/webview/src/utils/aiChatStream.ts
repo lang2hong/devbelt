@@ -14,6 +14,76 @@ export type AiMessageBlock =
 export type AiInlineSegment = { type: 'text' | 'code'; content: string };
 
 /** 解析消息为块序列（围栏代码块 + 文本块）。未闭合围栏按代码块处理。 */
+/** 自动执行的 SQL 块上限（P9.1 后续：防一条回复多查询刷屏/轰炸数据库）。 */
+export const AUTO_SQL_BLOCK_LIMIT = 3;
+
+/** 代码块的原始下标（MessageBubble v-for 的 index 口径）+ 内容。 */
+export interface AiSqlBlockRef {
+  blockIdx: number;
+  content: string;
+}
+
+/**
+ * 提取可自动执行的 SQL 代码块（口径与 CodeBlock.isSql 一致：lang 为 sql 或缺省），
+ * 携带**原始块下标**用于结果内联回填。上限 AUTO_SQL_BLOCK_LIMIT；
+ * 超出部分与写语句一样保留手动「Run in chat」按钮。
+ */
+export function autoExecutableSqlBlocks(text: string): AiSqlBlockRef[] {
+  const refs: AiSqlBlockRef[] = [];
+  parseMessageBlocks(text).forEach((b, i) => {
+    if (b.type === 'code' && (!b.lang || b.lang === 'sql')) {
+      const content = b.content.trim();
+      if (content) refs.push({ blockIdx: i, content });
+    }
+  });
+  return refs.slice(0, AUTO_SQL_BLOCK_LIMIT);
+}
+
+/**
+ * 分片/完成消息是否属于其它会话：仅当两端 sessionId 都有值且不等才判外来
+ * （新会话首发时 webview 尚无 activeSessionId，不得误丢合法分片）。
+ */
+export function isForeignSession(activeId: string | undefined, msgSessionId: unknown): boolean {
+  return !!activeId && typeof msgSessionId === 'string' && msgSessionId !== '' && msgSessionId !== activeId;
+}
+
+/** toolResult 下行的展示载荷（host 透传 blockRef；字段与 AiDownMessage 一致）。 */
+export interface AiToolResultPayload {
+  title?: string;
+  content?: string;
+  lang?: string;
+  format?: string;
+  isError?: boolean;
+  /** 用户消息命中图表意图（路径 A）→ 内联结果默认以图表呈现（可切回表格）。 */
+  preferChart?: boolean;
+  /** 实测执行耗时（ms；SQL in-chat）。 */
+  costMs?: number;
+  /** 用户取消或确认门禁未放行（无结果集）。 */
+  canceled?: boolean;
+}
+
+/** 执行中指示载荷（toolRunning 下行；toolResult 到达即清除）。 */
+export interface AiRunningPayload {
+  runId: string;
+  startedAt: number;
+}
+
+/**
+ * toolResult → 气泡/内联共用的展示内容（标题 + md 正文或代码块）。
+ * 与旧「尾部追加气泡」格式逐字一致（迁移抽纯函数）。
+ */
+export function formatToolResultContent(msg: AiToolResultPayload): { content: string; error: boolean } {
+  const title = String(msg.title ?? '');
+  const body = String(msg.content ?? '');
+  const content =
+    msg.format === 'markdown'
+      ? body
+        ? `${title}\n\n${body}`
+        : title
+      : `${title}\n\n\`\`\`${typeof msg.lang === 'string' ? msg.lang : ''}\n${body}\n\`\`\``;
+  return { content, error: !!msg.isError };
+}
+
 export function parseMessageBlocks(text: string): AiMessageBlock[] {
   const blocks: AiMessageBlock[] = [];
   const lines = text.split('\n');

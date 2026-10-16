@@ -533,6 +533,10 @@ export interface AdminAiQuota {
     resetAt: string | null;
   };
   grants: AdminAiGrant[];
+  /** 近 6 个月用量（计费 token 口径；月降序）。 */
+  months?: Array<{ usageMonth: string; promptTokens: number; completionTokens: number; requestCount: number }>;
+  /** 加油包订单实付聚合（用户管理视图）。 */
+  topupOrders?: { totalCount: number; paidCount: number; paidCents: number; refundedCount: number; lastPaidTime: string | null };
 }
 
 export interface AdminAiTopupOrderResult {
@@ -662,6 +666,251 @@ export async function getAdminAiQuota(
   try {
     const res = await authedFetch(`/api/admin/ai/users/${userId}/quota`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+// ── AI 模型厂商目录（自带 Key 预设）──
+
+export interface AdminAiProviderModel {
+  id: string;
+  label?: string;
+  default?: boolean;
+}
+
+export interface AdminAiProvider {
+  code: string;
+  name: { en: string; zh: string };
+  baseUrl: string;
+  models: AdminAiProviderModel[];
+  status: 'active' | 'disabled';
+  sortOrder: number;
+}
+
+/** 全量厂商（含停用；管理视图）。 */
+export async function listAdminAiProviders(
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ items: AdminAiProvider[] }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch('/api/admin/ai/providers', { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 新增厂商（code 唯一；reason 必填进审计）。 */
+export async function createAdminAiProvider(
+  input: { code: string; name: { en: string; zh: string }; baseUrl: string; models: AdminAiProviderModel[]; sortOrder?: number },
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ provider: AdminAiProvider }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      '/api/admin/ai/providers',
+      { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ ...input, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 更新厂商（名称/地址/模型/启停/排序；reason 必填）。 */
+export async function updateAdminAiProvider(
+  code: string,
+  patch: { name?: { en: string; zh: string }; baseUrl?: string; models?: AdminAiProviderModel[]; status?: 'active' | 'disabled'; sortOrder?: number },
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ provider: AdminAiProvider }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/ai/providers/${encodeURIComponent(code)}`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ ...patch, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+// ── AI 计费引擎（模型计价 / 计费设置 / 财务月报）──
+
+export interface AdminAiModelPricing {
+  model: string;
+  providerCode: string | null;
+  inputCentsPerM: number;
+  outputCentsPerM: number;
+  weightOverride: number | null;
+  status: 'active' | 'disabled';
+}
+
+export interface AdminAiBillingSettings {
+  activeModel: string | null;
+  upstreamBaseUrl: string | null;
+  upstreamApiKeyConfigured: boolean;
+  upstreamApiKeyHint: string | null;
+  globalMultiplier: number;
+  env: { model: string; baseUrl: string | null; apiKeyConfigured: boolean };
+}
+
+export interface AdminAiFinance {
+  usageMonth: string;
+  usage: { promptTokens: number; completionTokens: number; requestCount: number };
+  billing: { promptTokens: number; completionTokens: number };
+  costCents: number | null;
+  pricingModel: string | null;
+  weight: number;
+  multiplier: number;
+  revenue: { topupCents: number; planCents: number };
+  marginCents: number | null;
+}
+
+export async function getAdminAiBillingSettings(
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminAiBillingSettings>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch('/api/admin/ai/billing-settings', { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function updateAdminAiBillingSettings(
+  input: { activeModel?: string | null; upstreamBaseUrl?: string | null; upstreamApiKey?: string; clearUpstreamApiKey?: boolean; globalMultiplier?: number },
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminAiBillingSettings>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      '/api/admin/ai/billing-settings',
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ ...input, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function listAdminAiModelPricing(
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ items: AdminAiModelPricing[] }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch('/api/admin/ai/model-pricing', { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function createAdminAiModelPricing(
+  input: { model: string; providerCode?: string | null; inputCentsPerM?: number; outputCentsPerM?: number; weightOverride?: number | null },
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ pricing: AdminAiModelPricing }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      '/api/admin/ai/model-pricing',
+      { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ ...input, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function updateAdminAiModelPricing(
+  model: string,
+  patch: { providerCode?: string | null; inputCentsPerM?: number; outputCentsPerM?: number; weightOverride?: number | null; status?: 'active' | 'disabled' },
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ pricing: AdminAiModelPricing }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/ai/model-pricing/${encodeURIComponent(model)}`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ ...patch, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function getAdminAiFinance(
+  month: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminAiFinance>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/ai/finance?month=${encodeURIComponent(month)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await res.json() };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+/** 用户角色授予/撤销（管理员可在后台管理；不可改自己）。 */
+export async function setUserRole(
+  userId: string,
+  role: 'user' | 'platform_admin',
+  reason: string,
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ userId: string; role: string }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/users/${userId}/role`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify({ role, reason }) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: (await res.json()).user };
     return failure(res);
   } catch {
     return { kind: 'failure' };

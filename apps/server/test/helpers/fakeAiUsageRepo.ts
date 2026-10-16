@@ -25,6 +25,17 @@ export class MemoryAiUsageRepo implements IAiUsageRepo {
     return `${userId}:${usageMonth}`;
   }
 
+  async listMonthlyByUser(userId: number, months: number): Promise<Array<AiUsageRow & { usageMonth: string }>> {
+    const out: Array<AiUsageRow & { usageMonth: string }> = [];
+    for (const key of [...this.rows.keys()].sort().reverse()) {
+      const [uid, usageMonth] = key.split(':');
+      if (Number(uid) !== userId) continue;
+      if (out.length >= Math.max(1, Math.min(Math.floor(months), 24))) break;
+      out.push({ usageMonth, ...this.rows.get(key)! });
+    }
+    return out;
+  }
+
   async ensureRowInTx(_exec: Queryable, userId: number, usageMonth: string): Promise<void> {
     if (!this.rows.has(this.key(userId, usageMonth))) {
       this.rows.set(this.key(userId, usageMonth), {

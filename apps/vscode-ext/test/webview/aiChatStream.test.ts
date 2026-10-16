@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseInlineSegments, parseMessageBlocks } from '../../webview/src/utils/aiChatStream';
+import { autoExecutableSqlBlocks, AUTO_SQL_BLOCK_LIMIT, formatToolResultContent, isForeignSession, parseInlineSegments, parseMessageBlocks } from '../../webview/src/utils/aiChatStream';
 
 describe('parseMessageBlocks（围栏代码块 + 文本）', () => {
   it('纯文本：单个文本块，首尾空行裁剪', () => {
@@ -95,5 +95,59 @@ describe('parseInlineSegments（行内 code）', () => {
 
   it('跨行不匹配（`a\\nb` 不算行内 code）', () => {
     expect(parseInlineSegments('`a\nb`')).toEqual([{ type: 'text', content: '`a\nb`' }]);
+  });
+});
+
+describe('autoExecutableSqlBlocks（SQL 自动执行提取，P9 受控例外）', () => {
+  it('提取 sql 与无 lang 的代码块（带原始块下标，与 CodeBlock.isSql 同口径）', () => {
+    const text = '说明\n```sql\nSELECT 1;\n```\n中间\n```\nSELECT 2;\n```\n```redis\nGET k\n```';
+    expect(autoExecutableSqlBlocks(text)).toEqual([
+      { blockIdx: 1, content: 'SELECT 1;' },
+      { blockIdx: 3, content: 'SELECT 2;' },
+    ]);
+  });
+
+  it('超过上限只取前 N 块（其余保留手动）', () => {
+    const blocks = Array.from({ length: AUTO_SQL_BLOCK_LIMIT + 2 }, (_, i) => '```sql\nSELECT ' + i + ';\n```').join('\n');
+    const out = autoExecutableSqlBlocks(blocks);
+    expect(out).toHaveLength(AUTO_SQL_BLOCK_LIMIT);
+    expect(out[0]).toEqual({ blockIdx: 0, content: 'SELECT 0;' }); // 连续围栏无中间文本块
+  });
+
+  it('无 SQL 块返回空数组', () => {
+    expect(autoExecutableSqlBlocks('纯文本回复，没有代码块')).toEqual([]);
+    expect(autoExecutableSqlBlocks('```json\n{"a":1}\n```')).toEqual([]);
+  });
+});
+
+describe('formatToolResultContent（toolResult 展示格式化，内联/尾泡共用）', () => {
+  it('markdown：标题 + 正文', () => {
+    const r = formatToolResultContent({ title: 'Query result · 2 rows', content: '| a |\n|---|\n| 1 |', format: 'markdown' });
+    expect(r.content).toBe('Query result · 2 rows\n\n| a |\n|---|\n| 1 |');
+    expect(r.error).toBe(false);
+  });
+
+  it('非 markdown：标题 + 围栏代码块（带 lang）', () => {
+    const r = formatToolResultContent({ title: 'Redis', content: 'OK', lang: 'redis' });
+    expect(r.content).toBe('Redis\n\n```redis\nOK\n```');
+  });
+
+  it('错误结果带 error 标记', () => {
+    expect(formatToolResultContent({ title: 'x failed', isError: true }).error).toBe(true);
+  });
+});
+
+describe('isForeignSession（生成中切会话的分片守卫）', () => {
+  it('两端都有值且不等 → 外来', () => {
+    expect(isForeignSession('s1', 's2')).toBe(true);
+  });
+  it('同会话 → 非外来', () => {
+    expect(isForeignSession('s1', 's1')).toBe(false);
+  });
+  it('新会话首发（webview 尚无 activeId）/ 消息无 sessionId → 不丢', () => {
+    expect(isForeignSession(undefined, 's1')).toBe(false);
+    expect(isForeignSession('', 's1')).toBe(false);
+    expect(isForeignSession('s1', undefined)).toBe(false);
+    expect(isForeignSession('s1', '')).toBe(false);
   });
 });

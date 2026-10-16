@@ -52,6 +52,10 @@ describe('prompts', () => {
     const content = userContent(buildNl2SqlMessages({ request: '统计每日 GMV', schemaText: '# Database: MYSQL' }));
     expect(content).toContain('schema linking');
     expect(content).toContain('Do NOT guess enum values from world knowledge');
+    expect(content).toContain('reserved words');
+    expect(content).toContain('must be declared as a table alias');
+    expect(content).toContain('do NOT emit SQL containing placeholder identifiers');
+    expect(content).toContain('Never emit a reserved word as a bare identifier');
     expect(content).toContain('**意图理解：**');
     expect(content).toContain('Assumptions: none');
     expect(content).toContain('at most 3 bullet points');

@@ -2187,6 +2187,28 @@
           "description": "Automatically sync personal connections/groups/queries when unlocked. When off, sync only runs on explicit Sync Now / Pull / Push.",
           "markdownDescription": "解锁后自动同步个人连接/分组/查询。关闭时仅在手动「立即同步 / 拉取 / 推送」时同步。"
         },
+        "devbelt.sync.items": {
+          "type": "object",
+          "default": { "connections": true, "queries": true, "notes": true, "authenticator": true, "aiModelAccess": true },
+          "description": "Per-machine choice of which entity types sync. Off = not pushed from this machine; incoming changes are parked (not applied) and replayed when re-enabled; local data is kept.",
+          "markdownDescription": "选择性同步（按本机生效，不随同步走）：关闭的类型——本机不推送、云端变更暂存不应用（重新打开后自动补齐，无需重拉）、本地数据保留。关闭「连接与分组」时，「保存的查询」与「表注记」随之停用（它们引用连接）。",
+          "properties": {
+            "connections": { "type": "boolean", "default": true, "description": "Sync connections and groups.", "markdownDescription": "同步连接与分组。" },
+            "queries": { "type": "boolean", "default": true, "description": "Sync saved queries and folders (requires connections).", "markdownDescription": "同步保存的查询与文件夹（依赖「连接与分组」）。" },
+            "notes": { "type": "boolean", "default": true, "description": "Sync table/column notes (requires connections).", "markdownDescription": "同步表/列注记（依赖「连接与分组」）。" },
+            "authenticator": { "type": "boolean", "default": true, "description": "Sync authenticator entries, groups and tags.", "markdownDescription": "同步验证器条目/分组/标签。" },
+            "aiModelAccess": { "type": "boolean", "default": true, "description": "Sync AI model access settings (the API key still obeys its own per-item toggle).", "markdownDescription": "同步 AI 模型接入配置（API Key 仍受其自身「同步 API Key」开关控制）。" }
+          },
+          "additionalProperties": false
+        },
+        "devbelt.sql.queryTimeoutSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 0,
+          "maximum": 86400,
+          "description": "SQL statement execution timeout in seconds (0 = no timeout). Applies to every SQL session; the per-connection request timeout in the connection form overrides it. Changes take effect immediately.",
+          "markdownDescription": "SQL 语句执行超时（秒，默认 300；0 = 不超时）。作用于所有 SQL 会话；连接表单的「请求超时」可按连接覆盖。改动实时生效，无需重连。"
+        },
         "devbelt.pg.syncEnabled": {
           "type": "boolean",
           "default": false,
@@ -2220,6 +2242,12 @@
           "default": true,
           "description": "Send column comments as schema context (improves NL2SQL accuracy for Chinese databases; comments are treated as untrusted metadata).",
           "markdownDescription": "列注释参与 schema 上下文（中文库 NL2SQL 准确率关键；注释按不可信元数据处理）。AI 面板状态条显示发送条数。"
+        },
+        "devbelt.ai.autoRunReadOnlySql": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically run read-only SQL blocks in AI Chat replies (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN only; never on production connections; writes and DDL are never auto-run).",
+          "markdownDescription": "AI 对话回复中的只读 SQL 块（仅 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN）自动执行并内联展示结果。生产连接不自动执行；写与 DDL 永不自动执行。关闭后保留手动「Run in chat」按钮。"
         },
         "devbelt.ai.temperature": {
           "type": "number",

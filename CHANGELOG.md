@@ -61,6 +61,143 @@
   路由与月额度/权益矩阵）与 `docs/产品介绍.md`。验证：ai-core 88、vscode-ext 1636 通过/4 跳过
   （+14 条 S6）、server 585 回归、全仓 typecheck/lint 全绿。多模型手工矩阵/F5 真机走查/真机大库
   预筛留发布硬门禁（未执行）。
+- **AI Chat 结果图表（2026-10-15，结果驱动 + 手写 SVG 零依赖）**：内联查询结果支持
+  **柱状（含分组）/折线（多线）/饼**三种图表——①用户消息命中图表意图词（图表/柱状/
+  趋势/占比/chart…）→ 查询完成后按结果形态**自动渲染**（仍可一键切回表格）；②未命中 →
+  默认表格 + 形态可用的图型按钮手动切换。类型判定纯前端确定性推断（`inferCharts`：时间样
+  x→线优先、两列小额全正→饼、≤60 行→柱；行/点/扇区上限与多序列 6 条封顶，不满足不给按钮
+  fail-open 回表格）；悬停数值提示 + 图例；AI 零额外 token、host/协议/执行链零改动。
+  验证：vscode-ext 1771（+12）全绿。**修（同日）**：雪花/手机号/编号类「数字型 ID 列」
+  （如 tenant_id）误判为度量导致不出图——`idLikeColumn`（列名 id/no/phone…、超 2^53 整数、
+  ≥11 位非指标名整数）判类别列；真机 tenant_id 用例回归。
+  验证：vscode-ext 1775（+4）。**补（同日）**：图表语义三件套——标题（「按 {维度} 统计：{指标}」+
+  原结果标题副行）、轴标签（x=维度名 / y=指标名·多序列「数值」）、提示行（共 N 项·总计·悬停查看数值）。
+  验证：vscode-ext 1775 全绿（bundle 重建）。**再补（同日）**：①自动执行门禁拒绝模板占位符
+  （`<tenant_id>`/`...`/`{{x}}` —— 缺 schema 时 AI 吐的待替换模板不再被自动跑出语法错）；
+  ②柱状图单序列数值标注阈值放宽至 30 行；③数字型长 ID 轴标签/图例改显示**尾段**（…后 6 位，
+  雪花 ID 高位相同，截头分不清柱子；完整值在悬停提示）。**再补**：提示词增加别名一致性指令
+  （列引用前缀必须在 FROM/JOIN 有声明；单表用无限定列名——修「t.<col> 但无 t 别名」类格式错）；
+  缺 schema 时**禁止**在 sql 块输出占位符模板（改为文字追问表名）。验证：ai-core 113 / vscode-ext 1776 全绿。
+  **图表视觉重做**：①按容器实测宽度（ResizeObserver）绘制，去掉 viewBox 缩放——宽面板下字号不再放大 2~3 倍；
+  ②`niceTicks` 顶刻度保证 ≥ 最大值（修柱子/顶值冲出绘图区）；③x 标签水平显示 + 公共前缀折叠（雪花 ID 只显示区分尾段，
+  截断保尾）+ 放不下抽稀，不再旋转裁切；④柱宽封顶 + 顶部圆角，多序列也标顶值（放得下才显示）；分组悬停高亮，提示列完整 x 值与各序列值；
+  ⑤折线：竖向游标 + 单序列面积淡填充；⑥饼图改环形（中心总计）+ HTML 图例（标签/数值/占比）；⑦去掉图内大号轴标题（标题行已说明含义）。
+  纯函数抽到 `charts/chartMath.ts`（DOM 无关，可单测）。验证：vscode-ext 1795（+19）/ typecheck 全绿。
+- **AI 保留字标识符修复（2026-10-15，提示词 + 本地兜底双保险）**：模型直出裸
+  MySQL 保留字列名（如 `condition`）导致语法错的真机问题——① nl2sql prompt 增加保留字
+  引号指令（方言引号：MySQL/SQLite 反引号、PG 双引号）；② ai-core 新增
+  `quoteReservedIdentifiers`（精选保留字表 + 上下文守卫：ORDER BY/GROUP BY/LIMIT n/
+  RANK()/INTERVAL 'n'/排序方向不误伤；字符串/注释/已引段不动；限定列 `t.condition`
+  照样补引；未知方言 fail-open）；③ host 收流完成后对 ```sql 块改写，经
+  `AiFinishDown.content`（新增，权威最终版）下发——显示 = 落库 = 自动执行 = 插入编辑器
+  四者一致。验证：ai-core 113（+11，含真机复现用例）/ vscode-ext 1759 全绿。
+- **AI Chat 结果内联渲染（2026-10-15）**：SQL/Redis/ES 的 in-chat 执行结果不再堆在回复
+  末尾，而是**渲染在对应代码块正下方**（`blockRef` 消息下标+块下标+代次绑定，host 原样
+  透传；代次守卫防会话切换后迟到的结果回填错位，失效回退尾部气泡）。旧路径/无 ref 结果
+  保持尾部气泡行为不变。
+- **AI Chat 只读 SQL 自动执行（2026-10-15，P9 §6.7.1E 红线受控例外）**：AI 回复完成后，
+  其中的 SQL 代码块经 `classifyAiSql` 判定为**无风险只读语句**即自动执行并在对话中渲染
+  结果 md 表（每条回复上限 3 块；沿用行数上限/确认/只读/生产门禁/审计的既有执行路径）；
+  **写与 DDL 一律不自动**，保留手动「Run in chat」。验证：vscode-ext 1756（+6）。
+- **P9-AI 评审跟进修复（2026-10-16，自动执行/内联/图表/补引）**：①自动执行增加**语句形态
+  白名单**（骨架化后逐语句必须 SELECT/WITH/SHOW/DESC/DESCRIBE/EXPLAIN 起始，叠加原
+  `classifyAiSql` 风险分类）——修「BEGIN/COMMIT/ROLLBACK/SET/USE/KILL/FLUSH/LOCK TABLES
+  被分类器判 read 后自动执行」的共享会话风险（ROLLBACK/KILL/LOCK 会波及其它面板）；
+  ②Stop 中断（aborted）的回复不再自动执行半截 SQL；③自动执行限定关系引擎（Redis/ES 下
+  不再误走 SQL 路径、误开非 SQL 会话）；④内联结果表格视图补渲染标题/摘要（含 LIMIT
+  追加/多语句提示，与图表视图信息口径一致）；⑤柱/线图要求数值全非负（负值不再钳成
+  0 基线误导，fail-open 回表格）；⑥保留字补引覆盖 CASE WHEN/THEN/ELSE 起始位；⑦
+  MessageList 类型对齐 `AiToolResultPayload` / CodeBlock inject 兜底直发 / catalog 缩进。
+  验证：ai-core 114（+1：CASE 起始位用例）/ vscode-ext 1799 通过/4 跳过（+4：控制语句、
+  多语句夹带、注释前缀/字符串分号、负值形态用例）/ typecheck 全绿。
+- **AI Chat 复审修复（2026-10-16，自动执行目标一致性）**：①回复级自动执行门禁
+  `canAutoRunForReply`——连接/库须与**回复发起时**一致（生成期间切换连接或库，按旧 schema
+  生成的 SQL 不再跑到新目标）、**生产连接不自动执行**（保留手动按钮）、仅关系引擎；
+  ②webview `chunk`/`finish` 丢弃不属于当前会话的消息（`isForeignSession`；生成中切走会话
+  不再把旧回复流进新会话并在那里自动执行；新会话首发无 activeId 时不误丢）；③清理图表死代码
+  （`CHART_META.comp`、Bar/Line 未使用的 `yAxis` prop）。验证：vscode-ext 1807 通过/4 跳过
+  （+8）/ typecheck 全绿。
+  **补**：新增设置 `devbelt.ai.autoRunReadOnlySql`（默认开）——关闭后 AI 回复里的只读 SQL 一律不自动执行，
+  保留手动「Run in chat」（红线例外的用户侧安全阀）。
+- **AI Chat「业务规则」入口（2026-10-16）**：Chat 侧栏新增「业务规则」折叠区（头部显示
+  已配置/未配置，展开显示术语/规则字数），「编辑」打开弹层——**UI 合并、存储与提示词保持分离**：
+  上下两个多行文本框分别写入 `domainContext` / `defaultDirectives`（`maxlength=2000` 与 host 截断
+  一致、字数计数、无改动时保存置灰、Ctrl/Cmd+Enter 保存、Esc 关闭、未保存关闭确认；编辑中
+  host 快照刷新不覆盖输入；未选连接时按钮禁用并提示）。解决连接树 `showInputBox` 只能单行、
+  入口不可见、配置是否生效无从确认的问题；连接树右键命令保留。新增 `ai/businessRules.ts`
+  （载荷校验/摘要纯函数）。验证：vscode-ext 1813 通过/4 跳过（+6）/ typecheck 全绿。
+- **AI Chat 执行可见/可取消 + 慢查询优化 + 注入措辞对齐（2026-10-16）**：①in-chat SQL 内联
+  执行时代码块下方显示「执行中 N.Ns」实时计时与「取消」按钮（`toolRunning` 下行，host 开始时间
+  为准），≥10s 追加「查询较慢，可继续等待或取消」；取消走单查询 token（`runHeadless` 新增可选
+  `onStart` 句柄，返回 `userCanceled`，不记历史/审计；确认门禁被拒也会结束执行中指示）；新建
+  会话/面板销毁时取消全部在途查询，「Stop」仍只停止 AI 生成。②完成或取消且耗时 ≥5s 时结果区显示
+  「耗时 N，较慢」+「让 AI 优化」——在**当前会话**追加用户消息，先 EXPLAIN（不带 ANALYZE）再走
+  optimize prompt 流式回复；该回复不触发自动执行；`runExplain` 抽到 `ai/explainPlan.ts` 与编辑器
+  命令共用。③Chat/数据问答的业务规则注入改为与 NL2SQL 同一套两个区块（`DOMAIN_CONTEXT_HEADER`/
+  `BUSINESS_RULES_HEADER` 共用常量：术语“优先于先验”、规则“列存在才适用”），不再合成单块。
+  验证：vscode-ext 1819 通过/4 跳过（+6）/ ai-core 114 / typecheck 全绿。
+- **AI 模型接入（2026-10-16，弹层 + 厂商目录 + 选择性同步）**：自带 Key 从「设置页改 3 项 +
+  单行密码框输 Key + 右下角看测试结果」收敛为 Chat 状态条一个「模型接入」弹层——模式 / 厂商 /
+  baseUrl / 模型 / API Key / 同步项一次配齐。①**厂商目录**：服务端迁移 010 新表 `ai_providers`
+  （预置 OpenAI/阿里百炼/DeepSeek/智谱/小米/Moonshot/硅基流动/MiniMax），管理后台新页「AI 模型
+  厂商」（增改/启停/模型列表，console+CSRF+幂等+审计+reason）；客户端 `GET /api/ai/providers`
+  （公开只读限流）+ Memento 缓存（1h TTL）+ 内置兜底，目录响应按不可信输入校验（仅 https）。
+  ②**弹层**：厂商下拉（预设 ∪ 自定义 ∪「＋自定义厂商」）、baseUrl 可编辑（https 强制，回环
+  http 例外）、模型下拉 + 自定义模型、Key 密码框（显示开关/已保存占位/清除）、**明示密钥发往
+  地址**且未知主机告警、「测试连接」直连 chat/completions 并把失败映射为稳定原因码内联展示
+  （auth/model/network/timeout/rate/server）、「保存」后即生效。③**选择性同步（本机勾选，双向
+  生效）**：新同步实体 `aiModelAccess`（db-host codec/apply/mutator + 宿主后端；无跨实体引用）——
+  payload 分「当前选择/自定义厂商与模型/API Key」三组，**发送端只编码勾选组、接收端按组合并**
+  （缺省组保留本机值；Key 端到端加密只在勾选时传输、接收端写 SecretStorage、对端关闭不清空本机）；
+  本机记录永不存 Key（stripKey 兜底 + 治理测试钉住）；勾选项存本机 Memento 不随同步走。运行时
+  落地：模式/baseUrl/model 写用户级设置（readAiConfig 数据源）；同步到达但本机无 Key → 提示输入。
+  顺带修复：`sessionFactory` 此前未把 `schemaNotesBackend` 转发给会话（S7f 注记同步实际未接入、
+  收到记录会因缺后端抛错）——本次接线 `aiModelAccessBackend` 时一并补上。验证：server 628 /
+  admin-ui 44 / vscode-ext 1836 全绿（+codec 合并/勾选门禁/纯函数/治理 29 例）+ 全仓 typecheck；
+  迁移 010 未在真实 MySQL 执行（部署前须在测试库验证）。**修（同日）**：①服务端代理模式隐藏
+  「测试连接」（测试的是自带 Key 的直连地址，代理模式下按钮无意义）；②「自定义模型…」选中后
+  输入框不出现——原实现 set 时清空 model、get 又按空值回退导致 v-if 永不成立，改显式选中态
+  `customModelSelected`（换厂商复位；已保存的自定义模型初始即选中）。
+- **选择性同步（2026-10-16，`devbelt.sync.items`）**：新增按机器生效的同步项开关——连接与
+  分组 / 保存的查询 / 表注记 / 验证器 / AI 模型接入 五类可分别关闭（默认全开，行为与现状一致）。
+  **关闭语义**：本机不推送该项；云端变更入 deferred 暂存、不覆盖本机（重新打开后自动重放补齐，
+  无需重拉）；本地数据保留不清除；同步体检不把该类型计为「本地缺少云端记录」。**依赖级联**
+  （引擎侧强制）：查询/文件夹/表注记引用连接，关闭「连接与分组」时随停。AI 模型接入的三组
+  子项（选择/自定义/Key）是类型内部粒度，仍由模型接入弹层控制。实现：db-host `EntityStore`
+  类型过滤 + 引擎 `typeEnabled`（pull 跳过入 deferred / 体检过滤）+ 结果计数 `skippedDisabled`；
+  扩展端 `sync/syncItems.ts`（解析/级联/实时读取纯函数）+ 装配。测试：引擎停用/重放/出站/体检
+  四路径 + 级联矩阵。验证：vscode-ext 1846 通过/4 跳过 / db-host 23 / typecheck 全绿。
+- **SQL 执行超时可设置（2026-10-16，默认 300 秒）**：新增设置 `devbelt.sql.queryTimeoutSeconds`
+  （默认 300，范围 0–86400，0 = 不超时；**改动实时生效**，无需重连——`QueryService` 每次查询读取
+  静态值）。db-core 静态默认由 30s 调整为 300s，作用于全部 SQL 会话（结果面板 / Chat in-chat /
+  表面板 / 元数据 / EXPLAIN）；长查询可用 Chat 内联「取消」中止。连接表单「请求超时 (ms)」仍按
+  连接覆盖全局值；新连接默认改为**留空 = 跟随全局**（原硬编码 30000ms 会一直压住全局设置，
+  占位提示说明）；已保存连接的显式值不变（清空字段即跟随全局）。Redis/ES 的命令超时不受影响
+  （各自仍读连接级 requestTimeout）。测试：`utils/sqlTimeout` 解析/装配 +3；db-core 682 /
+  vscode-ext 1849 全绿 + typecheck。顺带修复：同步引擎选择性同步测试遗留的重复导入与未用变量
+  （该阶段当时只跑了 vitest 未跑 tsc）。
+- **AI 计费引擎 + 管理员后台化（2026-10-16，迁移 011）**：一切业务参数显性进管理后台——
+  ①**模型计价表** `ai_model_pricing`（模型唯一；输入/输出分价——分/1M token；权重 k 可覆盖，
+  缺省由单价推导）；②**计费设置** `ai_billing_settings`（单行：激活模型、上游 baseUrl、
+  **上游 API Key（只写不读**——GET 仅回 configured+尾号提示，幂等请求体与审计均脱敏**）**、
+  全局调整系数；60s 缓存 + 写后即时失效；全空回退 env（兼容现状）；③**统一 token 口径**：
+  计费 token = (输入 + 输出 × k) × 系数，**预占与结算同口径**（并发保护不失效），quota 空间
+  整体即计费 token；审计分列原始/计费/成本（costCents 按分价折算，缓存价不分=保守高估）；
+  ④**财务月报** `GET /api/admin/ai/finance`（按月：原始/计费 token、折算成本、加油包+套餐实收、
+  毛利——成本按激活模型现价折算，历史为近似）；⑤admin-ui 新页「AI 计费」（设置/计价表/月报
+  全可视可改，reason 必填）；⑥**管理员后台化**：用户页新增「设为/撤销管理员」（防自锁：不可改
+  自己角色；审计 granted/revoked）。验证：server 644（+16：计费数学/生效配置回退与缓存/路由
+  鉴权与脱敏/角色防自锁）/ admin-ui 46（+2）/ typecheck 全绿；迁移 011 未在真实 MySQL 执行。
+- **后台界面重构（2026-10-16）**：admin-ui 改为左侧分组侧栏（运营/商业化/AI/系统）；用户页行内操作收进
+  「更多 ▾」下拉，状态/角色改徽标；db-ui 导航分「账户」「订阅与账单」两组 + 子导航（补 AI 加油包入口）。
+  `theme.css` 统一页头/筛选条/表格/按钮层级/徽标/下拉，两端页面 scoped 中重复样式已移除。纯视觉，无 API/路由变更。
+- **用户管理 · AI 数据视图（2026-10-16）**：用户页新增「AI 用量」弹层——本月配额（已用/预占/
+  月剩余/加油包/重置时间）、**近 6 个月用量**（计费 token 口径，输入/输出/请求数分列）、
+  **加油包购买**（笔数/已支付笔数与金额/退款笔数/最近支付时间）、活跃加油包余额明细
+  （档位/总量/已用/过期）。实现：`GET /api/admin/ai/users/:id/quota` 增量返回 `months`
+  （`ai_token_usage` 近 N 月行，降序）+ `topupOrders`（orders 表 purpose='topup' 聚合）；
+  `AiTopupOrder` 增补 `paidTime`。验证：server 644（配额端点用例扩展）/ admin-ui 48（+2：
+  弹层渲染与空态）/ typecheck + build 全绿。
 - **P9.1c 已交付（2026-10-15，客户端购买闭环；P9.1 全量收口）**：用户侧下单
   `POST /api/ai/topup-orders`（console + CSRF + 限流 10/h + 支付开关/渠道 fail-closed 503；
   同人同 SKU 同渠道 pending 复用 P1b 语义；金额以库内 SKU 为准）；支付回调在 paid 推进后

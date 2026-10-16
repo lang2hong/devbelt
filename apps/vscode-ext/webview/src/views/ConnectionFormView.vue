@@ -37,7 +37,7 @@ const defaultForm = {
   clientCertPath: '',
   clientKeyPath: '',
   connectTimeout: '5000',
-  requestTimeout: '30000',
+  requestTimeout: '',
   socketPath: '',
   sshHost: '',
   sshPort: '22',
@@ -405,7 +405,7 @@ function save(): void {
       </div>
       <div class="row">
         <div class="field"><label>{{ t('wv.form.connTimeout') }}</label><input v-model="form.connectTimeout" type="number"></div>
-        <div class="field"><label>{{ t('wv.form.reqTimeout') }}</label><input v-model="form.requestTimeout" type="number"></div>
+        <div class="field"><label>{{ t('wv.form.reqTimeout') }}</label><input v-model="form.requestTimeout" type="number" :placeholder="t('wv.form.reqTimeoutPlaceholder')"></div>
       </div>
       <div class="field"><label>{{ t('wv.form.socketPath') }}</label><input v-model="form.socketPath"></div>
     </details>

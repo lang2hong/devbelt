@@ -36,6 +36,10 @@ export interface SyncSessionFactoryDeps {
   readonly authenticatorBackend?: EntityBackend;
   /** S7f：表/列注记实体后端（宿主注入）。 */
   readonly schemaNotesBackend?: EntityBackend;
+  /** AI 模型接入配置实体后端（宿主注入）。 */
+  readonly aiModelAccessBackend?: EntityBackend;
+  /** 选择性同步（按机器）：false 的类型不推送不应用（透传到会话/引擎）。 */
+  readonly typeEnabled?: (type: import('./e2e/syncEntity.js').SyncEntityType) => boolean;
   /** P6：推送成功 / 配额拒绝回调（扩展接线标 localOnly/syncError）。 */
   readonly onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   readonly onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
@@ -68,7 +72,7 @@ export class SyncSessionFactory {
       this.deps.dekStore,
       this.deps.connectionStore,
       this.deps.createClient(),
-      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend, onEntityPushed: this.deps.onEntityPushed, onQuotaRejected: this.deps.onQuotaRejected, onSyncStart: this.deps.onSyncStart, onSyncProgress: this.deps.onSyncProgress },
+      { entitlement: this.deps.entitlement, onSyncResult: this.deps.onSyncResult, onSessionState: this.deps.onSessionState, autoSyncEnabled: this.deps.autoSyncEnabled, authenticatorBackend: this.deps.authenticatorBackend, schemaNotesBackend: this.deps.schemaNotesBackend, aiModelAccessBackend: this.deps.aiModelAccessBackend, typeEnabled: this.deps.typeEnabled, onEntityPushed: this.deps.onEntityPushed, onQuotaRejected: this.deps.onQuotaRejected, onSyncStart: this.deps.onSyncStart, onSyncProgress: this.deps.onSyncProgress },
     );
     return this.session;
   }

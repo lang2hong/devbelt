@@ -158,18 +158,5 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 960px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-.bar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
 input { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
-.table { width: 100%; border-collapse: collapse; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eaeef2; font-size: 13px; }
-.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
-.load-more { margin: 16px 0; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

@@ -1,5 +1,6 @@
 import type { ServerResponse } from 'node:http';
 import { estimateTokens, type TokenUsage } from '@devbelt/ai-core';
+import { AiBillingService, billingTokens, costCents, type EffectiveUpstream } from './aiBillingService.js';
 import { parseSse } from '@devbelt/ai-core/sse';
 import { DomainError, ValidationError } from '../../../domain/errors.js';
 import { errorStatus } from '../../../middleware/errorHandler.js';
@@ -53,6 +54,12 @@ export interface AiProxyOptions {
   log: (msg: string, data?: unknown) => void;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * 计费引擎（管理后台可配置；可选注入）：模型/上游连接/统一 token 权重/调整系数均以
+   * billing 的生效配置为准（60s 缓存），env config 仅为缺省回退。计费口径：
+   * 计费 token = (输入 + 输出 × k) × 系数；预占与结算同口径。
+   */
+  billing?: AiBillingService;
 }
 
 export interface AiForwardArgs {
@@ -152,11 +159,14 @@ export class AiProxyService {
    * 此时尚未写任何响应头，由路由转成 JSON 错误。
    */
   async begin(userId: number, body: ValidatedChatRequest): Promise<AiReservation> {
-    this.assertConfigured();
+    const upstream = await this.effectiveUpstream();
+    this.assertConfigured(upstream);
     const estimatedPromptTokens = estimatePromptTokens(body.messages);
+    // 预占按计费 token：prompt × 系数；输出上限 × k × 系数（与结算同口径，并发保护不失效）。
+    const weighted = billingTokens(estimatedPromptTokens, body.maxTokens, upstream.weight, upstream.multiplier);
     return this.opts.quota.reserve(userId, {
-      estimatedPromptTokens,
-      maxCompletionTokens: body.maxTokens,
+      estimatedPromptTokens: weighted.prompt,
+      maxCompletionTokens: weighted.completion,
     });
   }
 
@@ -189,10 +199,11 @@ export class AiProxyService {
     res.on('close', onClientClose);
 
     try {
-      const response = await this.fetchImpl(`${this.opts.config.baseUrl}/chat/completions`, {
+      const upstream = await this.effectiveUpstream();
+      const response = await this.fetchImpl(`${upstream.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: this.upstreamHeaders(),
-        body: JSON.stringify(this.upstreamPayload(body)),
+        headers: this.upstreamHeaders(upstream),
+        body: JSON.stringify(this.upstreamPayload(body, upstream)),
         signal: controller.signal,
       });
       if (!response.ok) throw await mapUpstreamHttpError(response);
@@ -274,7 +285,8 @@ export class AiProxyService {
       if (headersTimer) clearTimeout(headersTimer);
       res.off('close', onClientClose);
 
-      const charge = upstreamAccepted
+      // 原始 token（权威 usage 优先；缺省回退估算）→ 计费 token（× k × 系数，预占同口径）。
+      const raw = upstreamAccepted
         ? {
             promptTokens:
               usage && usage.promptTokens > 0 ? usage.promptTokens : reservation.estimatedPromptTokens,
@@ -282,9 +294,12 @@ export class AiProxyService {
           }
         : { promptTokens: 0, completionTokens: 0 };
       const usageEstimated = upstreamAccepted && usage === undefined;
+      const upstreamConf = await this.effectiveUpstream();
+      const weighted = billingTokens(raw.promptTokens, raw.completionTokens, upstreamConf.weight, upstreamConf.multiplier);
+      const charge = { prompt: weighted.prompt, completion: weighted.completion };
 
       try {
-        await this.opts.quota.settle(reservation, charge);
+        await this.opts.quota.settle(reservation, { promptTokens: charge.prompt, completionTokens: charge.completion });
       } catch (err) {
         // 响应已发出；结算失败只告警（额度可能滞留预占，运维可见）。
         this.opts.log('ai quota settle failed', { userId, err: String(err) });
@@ -292,10 +307,16 @@ export class AiProxyService {
 
       const meta = {
         provider: 'server-proxy',
-        model: this.opts.config.model,
+        model: upstreamConf.model,
         feature: body.feature,
-        promptTokens: charge.promptTokens,
-        completionTokens: charge.completionTokens,
+        // 原始 token 与计费口径分列：审计可对账“统一 token”折算过程。
+        promptTokens: raw.promptTokens,
+        completionTokens: raw.completionTokens,
+        billingPromptTokens: weighted.prompt,
+        billingCompletionTokens: weighted.completion,
+        billingWeight: upstreamConf.weight,
+        billingMultiplier: upstreamConf.multiplier,
+        costCents: costCents(raw.promptTokens, raw.completionTokens, upstreamConf.pricing),
         latencyMs: Date.now() - startedAt,
         usageEstimated,
       };
@@ -322,24 +343,38 @@ export class AiProxyService {
     }
   }
 
-  private assertConfigured(): void {
-    if (!this.opts.config.configured || !this.opts.config.baseUrl) {
+  /** 生效上游（计费引擎优先；未注入/未配置回退 env）。 */
+  private async effectiveUpstream(): Promise<EffectiveUpstream> {
+    if (this.opts.billing) return this.opts.billing.upstream();
+    return {
+      configured: this.opts.config.configured,
+      model: this.opts.config.model,
+      baseUrl: this.opts.config.baseUrl,
+      ...(this.opts.config.apiKey ? { apiKey: this.opts.config.apiKey } : {}),
+      weight: 1,
+      multiplier: 1,
+      pricing: null,
+    };
+  }
+
+  private assertConfigured(upstream: EffectiveUpstream): void {
+    if (!upstream.configured || !upstream.baseUrl) {
       throw new AiProviderError('AI upstream is not configured');
     }
   }
 
-  private upstreamHeaders(): Record<string, string> {
+  private upstreamHeaders(upstream: EffectiveUpstream): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
     };
-    if (this.opts.config.apiKey) headers.Authorization = `Bearer ${this.opts.config.apiKey}`;
+    if (upstream.apiKey) headers.Authorization = `Bearer ${upstream.apiKey}`;
     return headers;
   }
 
-  private upstreamPayload(body: ValidatedChatRequest): Record<string, unknown> {
+  private upstreamPayload(body: ValidatedChatRequest, upstream: EffectiveUpstream): Record<string, unknown> {
     const payload: Record<string, unknown> = {
-      model: this.opts.config.model,
+      model: upstream.model,
       messages: body.messages,
       stream: true,
       // 强制携带：否则 OpenAI/DashScope 流式默认不返回 usage，无法对账。

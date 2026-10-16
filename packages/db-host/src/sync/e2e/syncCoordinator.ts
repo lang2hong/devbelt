@@ -230,7 +230,7 @@ export class SyncCoordinator {
     let last: SyncRunResult | undefined;
     // 跨轮**累加**：第 1 轮推送、第 2 轮无 generated 时，若用第 2 轮结果覆盖，会把已推送/已落地数丢掉，
     // 立即同步就误报「无变更」。
-    const acc = { applied: 0, pushed: 0, changes: 0, ignoredTombstone: 0, skippedRemote: 0, skippedEntitlement: 0, skippedUnsupported: 0 };
+    const acc = { applied: 0, pushed: 0, changes: 0, ignoredTombstone: 0, skippedRemote: 0, skippedEntitlement: 0, skippedUnsupported: 0, skippedDisabled: 0 };
     const merge = (r: SyncRunResult): SyncRunResult => ({
       ...r,
       applied: acc.applied,
@@ -240,6 +240,7 @@ export class SyncCoordinator {
       skippedRemote: acc.skippedRemote,
       skippedEntitlement: acc.skippedEntitlement,
       skippedUnsupported: acc.skippedUnsupported,
+      skippedDisabled: acc.skippedDisabled,
     });
     for (let i = 0; i < SyncCoordinator.MAX_DRAIN_ROUNDS; i++) {
       const { generated, skipped } = await this.mutator.reconcile();
@@ -257,6 +258,7 @@ export class SyncCoordinator {
       acc.skippedRemote += result.skippedRemote ?? 0;
       acc.skippedEntitlement += result.skippedEntitlement ?? 0;
       acc.skippedUnsupported += result.skippedUnsupported ?? 0;
+      acc.skippedDisabled += result.skippedDisabled ?? 0;
       const merged = merge(result);
       this._lastRun = merged;
       last = merged;

@@ -26,6 +26,21 @@ import { defaultConfirm, executeRedisCommands } from '../ai/redisExec.js';
 import { executeEsDsl } from '../ai/esExec.js';
 import { formatSqlChatResult } from '../ai/sqlChatResult.js';
 import { ensureSelectRowLimit, AI_SELECT_ROW_LIMIT } from '../ai/rowLimit.js';
+import { isAutoExecutableSql } from '../ai/autoRun.js';
+import { canAutoRunForReply, isRelationalDbType, type ReplyBinding } from '../ai/autoRunGuard.js';
+import { runExplain } from '../ai/explainPlan.js';
+import { formatElapsed } from '../ai/slowQuery.js';
+import { parseBusinessRulesPayload } from '../ai/businessRules.js';
+import {
+  chatEndpointOf,
+  classifyTestError,
+  normalizeBaseUrl,
+  parseModelAccessSave,
+} from '../ai/modelAccess.js';
+import { AiModelAccessStore } from '../ai/aiModelAccessStore.js';
+import { ProviderCatalog } from '../ai/providerCatalog.js';
+import { applyModelAccessRuntime } from '../ai/modelAccessRuntime.js';
+import { quoteReservedIdentifiersInMarkdown } from '@devbelt/ai-core';
 import { dialectScanOptions } from '../utils/sqlDialectOptions.js';
 import { splitSqlStatements } from '../utils/sql.js';
 import { RedisView } from './redisView.js';
@@ -34,10 +49,13 @@ import type { ConnectionManager } from '../connection/connectionManager.js';
 import type { SqlConnectionSession } from '../connection/connectionSession.js';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import { AiSqlRegistry } from '../ai/aiSqlRegistry.js';
-import { injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
+import { assembleOptimizeMessages, injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
 import type { ExternalAiRequest } from '../ai/aiBridge.js';
 import type { QueryExecutor } from './queryExecutor.js';
 import type {
+  AiSaveModelAccessUp,
+  AiTestModelAccessUp,
+  AiBlockRef,
   AiContextState,
   AiDownMessage,
   AiQuotaState,
@@ -63,6 +81,9 @@ export interface AiChatViewDeps {
   /** Chat 代码块"执行"复用现有执行路径/门禁（QueryExecutor → TableQueryView runner）。 */
   executor: QueryExecutor;
   schemaBuilder?: AiSchemaContextBuilder;
+  /** 模型接入配置本地存储（同步实体真身）+ 厂商目录（服务端/内置兜底）。 */
+  modelAccessStore: AiModelAccessStore;
+  providerCatalog: ProviderCatalog;
 }
 
 /**
@@ -80,6 +101,11 @@ export class AiChatView extends BaseWebView {
   private selectedConnId?: string;
   /** S7a：选中作用域（库/逻辑库/索引，单选；随 buildContext 解析并持久化）。 */
   private selectedScope?: string;
+  /** 在途 in-chat SQL 查询（runId → 取消句柄）：Cancel 按钮 / 新建会话 / 面板销毁时取消。 */
+  private readonly runs = new Map<string, { cancel(): void }>();
+  private runSeq = 0;
+  /** 最近一次回复发起时的连接/库（自动执行门禁比对用）。 */
+  private replyBinding?: ReplyBinding;
   private activeSessionId?: string;
   private activeStream?: AiMutableStream<ChatStreamChunk>;
   /** 流序号：新请求/中止后旧流的迟到 chunk 一律丢弃。 */
@@ -137,6 +163,7 @@ export class AiChatView extends BaseWebView {
         this.abortStream();
         return;
       case 'newChat':
+        this.cancelAllRuns();
         this.activeSessionId = this.deps.sessions.create(this.selectedConnId).id;
         this.pushSessionList();
         this.pushActiveSession();
@@ -192,6 +219,39 @@ export class AiChatView extends BaseWebView {
         await this.pushContextDetail();
         return;
       }
+      case 'optimizeSql': {
+        if (typeof msg.text === 'string') await this.onOptimizeSql(msg.text, msg.costMs);
+        return;
+      }
+      case 'cancelQuery': {
+        if (typeof msg.runId === 'string') this.runs.get(msg.runId)?.cancel();
+        return;
+      }
+      case 'requestModelAccess': {
+        await this.pushModelAccess();
+        return;
+      }
+      case 'saveModelAccess': {
+        await this.onSaveModelAccess(msg);
+        return;
+      }
+      case 'testModelAccess': {
+        await this.onTestModelAccess(msg);
+        return;
+      }
+      case 'requestBusinessRules': {
+        this.pushBusinessRules();
+        return;
+      }
+      case 'saveBusinessRules': {
+        const conn = this.selectedConnection();
+        const payload = parseBusinessRulesPayload(msg);
+        if (!conn || !payload) return;
+        await this.deps.contextStore.setDomainContext(conn.id, payload.domainContext);
+        await this.deps.contextStore.setDefaultDirectives(conn.id, payload.defaultDirectives);
+        this.pushBusinessRules(true);
+        return;
+      }
       case 'requestTableNote': {
         if (typeof msg.table === 'string' && msg.table) await this.pushTableNote(msg.table);
         return;
@@ -238,11 +298,27 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'executeSqlInChat': {
-        if (typeof msg.text === 'string' && msg.text.trim()) await this.executeSqlInChat(msg.text);
+        if (typeof msg.text === 'string' && msg.text.trim()) await this.executeSqlInChat(msg.text, msg.blockRef);
+        return;
+      }
+      case 'autoExecuteSql': {
+        // 只读 SELECT 自动执行（P9 §6.7.1E 红线受控例外）：分类不是 read 一律不自动，
+        // 写/DDL 维持手动「Run in chat」按钮。行数上限/确认/只读/生产门禁走既有执行路径。
+        if (typeof msg.text !== 'string' || !msg.text.trim()) return;
+        // 用户设置开关（默认开）：关闭后一律不自动执行，手动按钮保留。
+        if (!vscode.workspace.getConfiguration('devbelt').get<boolean>('ai.autoRunReadOnlySql', true)) return;
+        const conn = this.selectedConnection();
+        if (!conn) return;
+        // 回复级门禁：连接/库须与回复发起时一致、非生产、关系引擎（Redis/ES 下
+        // 偶发 ```sql 块不得走 SQL 路径）。不满足静默跳过，手动按钮保留。
+        if (!canAutoRunForReply(this.replyBinding, { connId: this.selectedConnId, scope: this.selectedScope }, conn)) return;
+        const options = this.deps.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType);
+        if (!isAutoExecutableSql(msg.text, options)) return;
+        await this.executeSqlInChat(msg.text, msg.blockRef);
         return;
       }
       case 'runRedis': {
-        if (typeof msg.text === 'string' && msg.text.trim()) await this.runRedisCommands(msg.text);
+        if (typeof msg.text === 'string' && msg.text.trim()) await this.runRedisCommands(msg.text, msg.blockRef);
         return;
       }
       case 'runRedisInPanel': {
@@ -250,7 +326,7 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'runEsDsl': {
-        if (typeof msg.text === 'string' && msg.text.trim()) await this.runEsDsl(msg.text);
+        if (typeof msg.text === 'string' && msg.text.trim()) await this.runEsDsl(msg.text, msg.blockRef);
         return;
       }
       case 'runEsDslInPanel': {
@@ -283,6 +359,7 @@ export class AiChatView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.cancelAllRuns();
     this.abortStream();
     if (AiChatView.current === this) AiChatView.current = undefined;
   }
@@ -307,16 +384,17 @@ export class AiChatView extends BaseWebView {
       feature: 'chat',
       ...(conn ? { connName: conn.name } : {}),
       ...(database ? { database } : {}),
-    });
+    }, conn?.dbType);
   }
 
   /**
    * 流式请求核心（send / 外部入口共用）：abort 在途流 → streamChat → post chunk/finish →
    * 会话落盘 → 配额刷新。`messages` 为完整请求消息（已含历史与系统上下文）。
    */
-  private async runRequest(session: AiChatSession, messages: ChatMessage[], meta: AiRequestMeta): Promise<void> {
+  private async runRequest(session: AiChatSession, messages: ChatMessage[], meta: AiRequestMeta, dialect?: string): Promise<void> {
     this.abortStream();
     const streamId = ++this.streamSeq;
+    this.replyBinding = { connId: this.selectedConnId, scope: this.selectedScope };
     const config = readAiConfig();
     const stream = this.deps.service.streamChat(
       {
@@ -339,20 +417,29 @@ export class AiChatView extends BaseWebView {
         }
       }
       if (this.streamSeq !== streamId) return;
+      // P9 保留字补引（本地兜底，提示词之外的双保险）：对 ```sql 块补方言引号后，
+      // 落库/finish 下发/显示/自动执行共用同一份修正正文（finish.content 为权威版）。
+      if (assistant && dialect) {
+        assistant = quoteReservedIdentifiersInMarkdown(assistant, dialect);
+      }
       if (assistant) {
         session.messages.push({ role: 'assistant', content: assistant });
         this.saveSession(session);
       }
-      this.post({ type: 'finish', sessionId: session.id } as never);
+      this.post({ type: 'finish', sessionId: session.id, ...(assistant ? { content: assistant } : {}) } as never);
     } catch (err) {
       if (this.streamSeq !== streamId) return;
       const aborted = (err as { code?: string } | null)?.code === 'AI_ABORTED';
+      // 与正常完成同口径：先补引再落库/下发（下方 push 只此一处）。
+      if (assistant && dialect) {
+        assistant = quoteReservedIdentifiersInMarkdown(assistant, dialect);
+      }
       if (assistant) {
         session.messages.push({ role: 'assistant', content: assistant });
       }
       if (aborted) {
         if (assistant) this.saveSession(session);
-        this.post({ type: 'finish', sessionId: session.id, aborted: true } as never);
+        this.post({ type: 'finish', sessionId: session.id, aborted: true, ...(assistant ? { content: assistant } : {}) } as never);
       } else {
         const code = (err as { code?: string } | null)?.code ?? 'AI_ERROR';
         const message = err instanceof Error ? err.message : String(err);
@@ -388,7 +475,7 @@ export class AiChatView extends BaseWebView {
       feature: request.feature,
       ...(request.connName ? { connName: request.connName } : {}),
       ...(request.database ? { database: request.database } : {}),
-    });
+    }, request.connId ? this.deps.connectionStore.get(request.connId)?.dbType : undefined);
   }
 
   /** Alt+A "在 Chat 中细化"：新建会话 + 上下文卡片（用户直接改述，下一条消息即带上下文）。 */
@@ -452,7 +539,7 @@ export class AiChatView extends BaseWebView {
   }
 
   /** S7i：在对话中执行 SQL 代码块（无面板；结果以 Markdown 表格回帖）。 */
-  private async executeSqlInChat(text: string): Promise<void> {
+  private async executeSqlInChat(text: string, blockRef?: AiBlockRef): Promise<void> {
     const conn = this.selectedConnection();
     if (!conn) {
       void vscode.window.showInformationMessage(l10n('ai.execute.noConnection'));
@@ -460,8 +547,30 @@ export class AiChatView extends BaseWebView {
     }
     const sql = ensureSelectRowLimit(text, this.deps.manager.scanOptionsFor?.(conn) ?? dialectScanOptions(conn.dbType));
     AiSqlRegistry.tryGet()?.mark(sql);
-    const outcome = await this.deps.executor.runHeadless(conn, sql, this.selectedScope ?? conn.database);
-    if (outcome.canceled) return;
+    const runId = `q${++this.runSeq}`;
+    // 内联绑定的执行才有「执行中」指示与取消入口（尾部气泡路径无位置承载，沿用旧行为）。
+    if (blockRef) this.post({ type: 'toolRunning', runId, startedAt: Date.now(), blockRef } as never);
+    const outcome = await this.deps.executor.runHeadless(conn, sql, this.selectedScope ?? conn.database, {
+      onStart: (handle) => this.runs.set(runId, handle),
+    });
+    this.runs.delete(runId);
+    if (outcome.canceled) {
+      // 用户取消 / 确认门禁未放行：内联场景必须回一条结果以结束「执行中」指示。
+      if (blockRef) {
+        const ms = outcome.costTime;
+        this.post({
+          type: 'toolResult',
+          title: outcome.userCanceled ? l10n('ai.sql.userCanceled', { ms }) : l10n('ai.sql.notRun'),
+          content: '',
+          format: 'markdown',
+          canceled: true,
+          runId,
+          costMs: ms,
+          blockRef,
+        } as never);
+      }
+      return;
+    }
     const formatted = formatSqlChatResult(outcome);
     if (!formatted.isError) {
       if (sql !== text) {
@@ -471,7 +580,61 @@ export class AiChatView extends BaseWebView {
         formatted.title = `${formatted.title} ${l10n('ai.sql.multiStmtNote')}`;
       }
     }
-    this.post({ type: 'toolResult', ...formatted } as never);
+    this.post({
+      type: 'toolResult',
+      ...formatted,
+      runId,
+      costMs: outcome.costTime,
+      ...(blockRef ? { blockRef } : {}),
+    } as never);
+  }
+
+  /**
+   * 慢查询优化（Chat 内「让 AI 优化」）：在**当前会话**追加一条用户消息（含耗时），
+   * 先 EXPLAIN（不带 ANALYZE，无副作用），再以 optimize prompt 流式回复。
+   */
+  private async onOptimizeSql(text: string, costMs?: number): Promise<void> {
+    const sql = text.trim();
+    const conn = this.selectedConnection();
+    if (!sql || !conn || !isRelationalDbType(conn.dbType)) {
+      // webview 已乐观进入生成态：回一个空 finish 复位。
+      this.post({ type: 'finish', sessionId: this.activeSessionId ?? '' } as never);
+      return;
+    }
+    const session = this.resolveSession(this.activeSessionId ?? '');
+    session.messages.push({
+      role: 'user',
+      // SQL 不经 l10n 占位符替换（$& 等序列会被 String.replace 误解释），直接拼接。
+      content: `${l10n('ai.optimize.userPrefix', { sec: formatElapsed(typeof costMs === 'number' ? costMs : 0) })}\n\`\`\`sql\n${sql}\n\`\`\``,
+    });
+    if (!session.title.trim()) session.title = AiSessionStore.titleFromFirstMessage(sql);
+    if (this.selectedConnId) session.connId = this.selectedConnId;
+    this.saveSession(session);
+
+    const { state, schemaText } = await this.buildContext();
+    const database = this.selectedScope ?? conn.database;
+    const explainText = await runExplain(this.deps.manager, conn, database, sql);
+    const messages = assembleOptimizeMessages(sql, explainText, {
+      conn,
+      ...(database ? { database } : {}),
+      dbType: conn.dbType,
+      ...(schemaText ? { schemaText } : {}),
+      tableCount: state.tableCount,
+      totalTables: state.totalTables,
+      commentCount: state.commentCount,
+    });
+    await this.runRequest(
+      session,
+      messages,
+      { feature: 'optimize', connName: conn.name, ...(database ? { database } : {}) },
+      conn.dbType,
+    );
+  }
+
+  /** 取消全部在途 in-chat 查询（新建会话/面板销毁）。 */
+  private cancelAllRuns(): void {
+    for (const handle of this.runs.values()) handle.cancel();
+    this.runs.clear();
   }
 
   /** S7i：在 Redis 控制台面板执行代码块（注入执行；确认/只读/审计门禁照旧）。 */
@@ -502,7 +665,7 @@ export class AiChatView extends BaseWebView {
   }
 
   /** S7b：执行 Redis 代码块（host 侧确认/只读/审计门禁；执行结果回帖为 toolResult）。 */
-  private async runRedisCommands(text: string): Promise<void> {
+  private async runRedisCommands(text: string, blockRef?: AiBlockRef): Promise<void> {
     const conn = this.selectedConnection();
     if (!conn || conn.dbType !== DatabaseType.REDIS) {
       void vscode.window.showInformationMessage(l10n('ai.redis.notRedis'));
@@ -515,11 +678,11 @@ export class AiChatView extends BaseWebView {
     }
     const db = Number(this.selectedScope ?? session.db ?? conn.redisDb ?? 0) || 0;
     const result = await executeRedisCommands(conn, session, text.split(/\r?\n/), db, { confirm: defaultConfirm });
-    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError, lang: 'redis-result' } as never);
+    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError, lang: 'redis-result', ...(blockRef ? { blockRef } : {}) } as never);
   }
 
   /** S7c：执行 ES DSL 代码块（固定 POST /<index>/_search 只读路径；结果摘要回帖）。 */
-  private async runEsDsl(text: string): Promise<void> {
+  private async runEsDsl(text: string, blockRef?: AiBlockRef): Promise<void> {
     const conn = this.selectedConnection();
     if (!conn || conn.dbType !== DatabaseType.ELASTICSEARCH) {
       void vscode.window.showInformationMessage(l10n('ai.es.notEs'));
@@ -535,10 +698,109 @@ export class AiChatView extends BaseWebView {
       return;
     }
     const result = await executeEsDsl(session, this.selectedScope, text);
-    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError, lang: 'es-result' } as never);
+    this.post({ type: 'toolResult', title: result.title, content: result.content, isError: result.isError, lang: 'es-result', ...(blockRef ? { blockRef } : {}) } as never);
   }
 
   /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
+  /** 模型接入快照（配置/目录/勾选；不含 Key 值）。 */
+  private async pushModelAccess(saveError?: string): Promise<void> {
+    const fields = this.deps.modelAccessStore.current();
+    const prefs = this.deps.modelAccessStore.getPrefs();
+    const hasKey = await this.deps.keyStore.hasApiKey();
+    const catalog = await this.deps.providerCatalog.get();
+    this.post({
+      type: 'modelAccess',
+      mode: fields.mode,
+      vendorId: fields.vendorId,
+      baseUrl: fields.baseUrl,
+      model: fields.model,
+      customVendors: fields.customVendors,
+      customModels: fields.customModels,
+      hasKey,
+      prefs,
+      catalog,
+      ...(saveError ? { saveError } : {}),
+    } as never);
+  }
+
+  private async onSaveModelAccess(msg: AiSaveModelAccessUp): Promise<void> {
+    const parsed = parseModelAccessSave(msg);
+    if (!parsed.ok) {
+      await this.pushModelAccess(parsed.error);
+      return;
+    }
+    const value = parsed.value;
+    await this.deps.modelAccessStore.setPrefs(value.prefs);
+    await this.deps.modelAccessStore.saveLocal({
+      mode: value.mode,
+      vendorId: value.vendorId,
+      baseUrl: value.baseUrl,
+      model: value.model,
+      customVendors: value.customVendors,
+      customModels: value.customModels,
+    });
+    if (value.clearKey) await this.deps.keyStore.clearApiKey();
+    else if (value.apiKey) await this.deps.keyStore.setApiKey(value.apiKey);
+    await applyModelAccessRuntime({ mode: value.mode, baseUrl: value.baseUrl, model: value.model });
+    // 保存回执：新快照 + 刷新 provider 状态（配额/提示条随模式变化）。
+    await this.pushInit();
+    await this.pushModelAccess();
+  }
+
+  /** 测试连接（不保存）：直连 chat/completions 最小请求，失败映射稳定原因码。 */
+  private async onTestModelAccess(msg: AiTestModelAccessUp): Promise<void> {
+    const base = normalizeBaseUrl(msg.baseUrl);
+    if (!base.ok) {
+      this.post({ type: 'modelAccessTest', result: { ok: false, code: 'unknown', latencyMs: 0, detail: 'invalid baseUrl' } } as never);
+      return;
+    }
+    const typed = typeof msg.apiKey === 'string' ? msg.apiKey.trim() : '';
+    const key = typed || (await this.deps.keyStore.getApiKey()) || '';
+    if (!key) {
+      this.post({ type: 'modelAccessTest', result: { ok: false, code: 'nokey', latencyMs: 0 } } as never);
+      return;
+    }
+    const started = Date.now();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10_000);
+    try {
+      const res = await fetch(chatEndpointOf(base.url), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model: String(msg.model ?? ''), messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+        signal: ctrl.signal,
+      });
+      const latencyMs = Date.now() - started;
+      if (res.ok) {
+        this.post({ type: 'modelAccessTest', result: { ok: true, code: 'ok', latencyMs } } as never);
+        return;
+      }
+      let snippet = '';
+      try {
+        snippet = (await res.text()).replace(/\s+/g, ' ').slice(0, 160);
+      } catch {
+        // 响应体不可读时仅按状态码分类。
+      }
+      this.post({ type: 'modelAccessTest', result: classifyTestError({ status: res.status, message: `HTTP ${res.status} ${snippet}` }, latencyMs) } as never);
+    } catch (err) {
+      this.post({ type: 'modelAccessTest', result: classifyTestError(err, Date.now() - started) } as never);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** 当前连接的业务规则快照（未选连接时回空串，弹层入口在 webview 侧禁用）。 */
+  private pushBusinessRules(saved = false): void {
+    const conn = this.selectedConnection();
+    this.post({
+      type: 'businessRules',
+      ...(conn ? { connId: conn.id } : {}),
+      domainContext: conn ? this.deps.contextStore.getDomainContext(conn.id) : '',
+      defaultDirectives: conn ? this.deps.contextStore.getDefaultDirectives(conn.id) : '',
+      ...(saved ? { saved: true } : {}),
+    } as never);
+  }
+
   private async pushContextDetail(): Promise<void> {
     // 快照只含"实际注入的表 + 统计"：schema 原文/术语/规则原文均不再下发（排障走 Diagnostics，
     // 术语/规则配置走命令面板）。
@@ -624,6 +886,8 @@ export class AiChatView extends BaseWebView {
   private async pushContext(): Promise<void> {
     const { state } = await this.buildContext();
     this.post({ type: 'contextChanged', context: state } as never);
+    // 连接/作用域变化时同步业务规则摘要（侧栏状态行随连接切换）。
+    this.pushBusinessRules();
   }
 
   private pushSessionList(): void {

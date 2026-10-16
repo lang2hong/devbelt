@@ -36,6 +36,8 @@ export interface BuildSyncRuntimeDeps {
   /** 生成本地实体 id（连接可注入稳定 id）。 */
   uniqueId: (type: SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
+  /** 选择性同步（按机器）：透传到引擎（入站跳过/体检过滤）；出站由 EntityStore 过滤。 */
+  typeEnabled?: (type: SyncEntityType) => boolean;
   onSettled?: (result: SyncRunResult | undefined) => void;
   /** 自动同步开关（按机器）；缺省开启。 */
   autoSyncEnabled?: () => boolean;
@@ -77,6 +79,7 @@ export function buildSyncRuntime(deps: BuildSyncRuntimeDeps): SyncRuntime {
     signSeed: deps.signSeed,
     uniqueId: deps.uniqueId,
     entitlement: deps.entitlement,
+    typeEnabled: deps.typeEnabled,
     seedConflictCarrier: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
     buildLocalPut: (recordId, ref, baseVersion) => mutator.rebasePut(recordId, ref, baseVersion),
     buildLocalDelete: (recordId, ref, baseVersion) => mutator.rebaseDelete(recordId, ref, baseVersion),

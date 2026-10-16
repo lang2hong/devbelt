@@ -94,6 +94,8 @@ export interface SyncRunResult {
   skippedEntitlement?: number;
   /** 入站因引擎本客户端不支持（如未来新增引擎）被跳过、进 deferred 的记录数（H3 向前兼容）。 */
   skippedUnsupported?: number;
+  /** 入站因「同步项本机关闭」被跳过、进 deferred 的记录数（重开该项后 drain 重放，无需重拉）。 */
+  skippedDisabled?: number;
   /** 出站因编码失败/引擎不支持被跳过的本地变更数（由 coordinator 从 reconcile 结果补入）。 */
   skippedOutbound?: number;
   /** 出站跳过原因（取首个；用于把提示映射为可读文案）。 */
@@ -206,6 +208,8 @@ export interface SyncEngineDeps {
   buildCloudDelete?: (recordId: string, type: import('./syncEntity').SyncEntityType, baseVersion: string) => PendingMutation;
   uniqueId: (type: import('./syncEntity').SyncEntityType) => string;
   entitlement?: () => CachedEntitlement | undefined;
+  /** 选择性同步（按机器）：false 的类型——入站跳过入 deferred、出站被 EntityStore 过滤、体检不计。 */
+  typeEnabled?: (type: import('./syncEntity.js').SyncEntityType) => boolean;
   feedPageLimit?: number;
   /** P6：某条 put 推送成功并确认映射后回调（用于清除本地“未同步”标记）。 */
   onEntityPushed?: (ref: import('./syncEntity').SyncEntityRef) => void | Promise<void>;
@@ -374,7 +378,9 @@ export class SyncEngine {
     const built = findingsFromScan(actions, latestByRecord, openPayload, ctx);
     findings.push(...built.findings);
     findings.push(...cloudOnlyFindings(latestByRecord, this.deps.mapStore.list(), this.deps.outbox.list(), this.deps.entities, openPayload, findings));
-    return { findings, latestByRecord, scanComplete };
+    // 选择性同步：关闭类型不进体检（否则「云端有本机没有」会误报为可修复缺失）。
+    const enabledFindings = this.deps.typeEnabled ? findings.filter((f) => this.deps.typeEnabled!(f.type)) : findings;
+    return { findings: enabledFindings, latestByRecord, scanComplete };
   }
 
   /**
@@ -675,6 +681,7 @@ export class SyncEngine {
     let applied = 0;
     let skippedEntitlement = 0;
     let skippedUnsupported = 0;
+    let skippedDisabled = 0;
     // 落地/忽略/跳过计数：让 UI 与诊断能区分「真变更」与「处理了但没变」。
     let changes = 0;
     let ignoredTombstone = 0;
@@ -722,7 +729,25 @@ export class SyncEngine {
           return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
         }
         typed.sort((a, b) => applyOrder(a.type) - applyOrder(b.type));
-        for (const { rec } of typed) {
+        for (const { rec, type } of typed) {
+          // 选择性同步：本机关闭的类型不应用（不覆盖本机）、入 deferred 暂存、游标前进——
+          // 重新打开后 drainDeferred 重放，无需重拉 feed。
+          if (this.typeDisabled(type)) {
+            try {
+              await this.deps.deferred?.put({
+                recordId: rec.recordId,
+                version: rec.version,
+                changeSequence: rec.changeSequence,
+                deleteTime: rec.deleteTime,
+                nonce: rec.nonce,
+                ciphertext: rec.ciphertext,
+                tag: rec.tag,
+              });
+            } catch { /* deferred 不可用/写失败不阻断游标前进 */ }
+            skippedDisabled += 1;
+            applied += 1; // 与 skipped-entitlement 同口径：处理了但未落地。
+            continue;
+          }
           try {
             const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
             // 权益跳过一律入 deferred（无论是否已映射）；版本重放的 'skipped' 不入队。
@@ -764,7 +789,7 @@ export class SyncEngine {
                 remoteVersion: rec.version,
               });
               await this.persistConflict(rec, err);
-              return { stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, changeSequence: lastCommitted };
+              return { stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, skippedDisabled, changeSequence: lastCommitted };
             }
             return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
@@ -803,7 +828,7 @@ export class SyncEngine {
 
     // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
     // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
-    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, changeSequence: lastCommitted };
+    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, skippedDisabled, changeSequence: lastCommitted };
   }
 
   private parseState(raw: unknown): RemoteState {
@@ -975,7 +1000,7 @@ export class SyncEngine {
     const payload = this.openRemotePayload(rec, this.deps.keyEpoch) as { type?: unknown };
     if (payload.type === 'connection' || payload.type === 'group' || payload.type === 'queryFolder' || payload.type === 'query'
       || payload.type === 'authenticatorEntry' || payload.type === 'authenticatorGroup' || payload.type === 'authenticatorTag'
-      || payload.type === 'schemaNotes') {
+      || payload.type === 'schemaNotes' || payload.type === 'aiModelAccess') {
       return payload.type;
     }
     throw new FeedProtocolError('record payload missing valid type');
@@ -996,6 +1021,11 @@ export class SyncEngine {
    * 冲突并入本轮回 conflicts（不吞掉用户可见冲突）；解密/写盘等错误**保留条目**重试，
    * 不再静默丢弃（游标已越过，删掉即永久丢失）。
    */
+  /** 选择性同步：该类型本机是否关闭（未配置 = 全开）。 */
+  private typeDisabled(type: import('./syncEntity.js').SyncEntityType): boolean {
+    return this.deps.typeEnabled ? !this.deps.typeEnabled(type) : false;
+  }
+
   private async drainDeferred(ctx: ApplyContext, conflicts: SyncConflictEntry[]): Promise<number> {
     const deferred = this.deps.deferred;
     if (!deferred) return 0;
@@ -1011,6 +1041,8 @@ export class SyncEngine {
         tag: entry.tag,
       };
       try {
+        // 选择性同步：仍关闭的类型保留条目待重开（不入 apply，避免覆盖本机）。
+        if (this.typeDisabled(this.typeOfRemote(rec))) continue;
         const disposition = await this.applyRemote(rec, this.deps.keyEpoch, ctx);
         // 仍无权益 / 仍不支持该引擎：保留待下次（未来支持后可重放）。
         if (disposition === 'skipped-entitlement' || disposition === 'skipped-unsupported') continue;

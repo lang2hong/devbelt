@@ -302,10 +302,6 @@ function goAccount(): void {
 </template>
 
 <style scoped>
-.page { max-width: 720px; margin: 0 auto; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 .sku-grid { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
 .sku-card {
   display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
@@ -318,16 +314,10 @@ function goAccount(): void {
 .sku-tokens { font-size: 13px; color: var(--c-text-muted); }
 .sku-price { font-size: 18px; font-weight: 700; color: var(--c-accent); }
 .sku-valid { font-size: 12px; color: var(--c-text-muted); }
-.bar { display: flex; gap: 10px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
 select { padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
-.btn { padding: 9px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .btn.accent { background: var(--c-accent); color: #fff; }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
-.btn:disabled { opacity: 0.6; cursor: default; }
 .pay-panel { margin: 20px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .qr { width: 200px; height: 200px; border: 1px solid var(--c-border-strong); border-radius: 8px; }
-.muted { color: var(--c-text-muted); font-size: 13px; }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
-.error { color: var(--c-danger); font-size: 13px; }
 .success { color: var(--c-success-text); font-size: 13px; }
 </style>

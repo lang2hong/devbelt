@@ -11,7 +11,7 @@ import {
 } from '../../src/ai/nl2sqlRunner';
 import type { AiEditorContext } from '../../src/ai/nl2sqlRunner';
 import type { AiContextStore } from '../../src/ai/aiContextStore';
-import type { ChatMessage } from '@devbelt/ai-core';
+import { BUSINESS_RULES_HEADER, DOMAIN_CONTEXT_HEADER, type ChatMessage } from '@devbelt/ai-core';
 
 function contextStore(domain = '', directives = ''): AiContextStore {
   return {
@@ -100,12 +100,24 @@ describe('injectBusinessRules（场景白名单）', () => {
     for (const feature of ['data-qa', 'nl2sql', 'chat']) {
       const out = injectBusinessRules(base, contextStore('术语', '规则'), 'c1', feature);
       expect(out).toHaveLength(3);
-      expect(out[1].content).toContain('business rules');
+      expect(out[1].content).toContain('User-provided domain context');
+      expect(out[1].content).toContain('User-provided business rules');
       expect(out[1].content).toContain('术语');
     }
     for (const feature of ['explain', 'optimize', 'error-diagnose', 'schema-design']) {
       expect(injectBusinessRules(base, contextStore('术语', '规则'), 'c1', feature)).toBe(base);
     }
+  });
+
+  it('两段分为独立区块（与 NL2SQL 同标题）；只配一段时只出一段', () => {
+    const both = injectBusinessRules(base, contextStore('GMV=订单', '排除软删除'), 'c1', 'chat')[1].content as string;
+    expect(both).toContain(`${DOMAIN_CONTEXT_HEADER}\nGMV=订单`);
+    expect(both).toContain(`${BUSINESS_RULES_HEADER}\n排除软删除`);
+    expect(both.indexOf(DOMAIN_CONTEXT_HEADER)).toBeLessThan(both.indexOf(BUSINESS_RULES_HEADER));
+
+    const onlyRules = injectBusinessRules(base, contextStore('', '排除软删除'), 'c1', 'chat')[1].content as string;
+    expect(onlyRules).not.toContain('domain context');
+    expect(onlyRules).toContain(BUSINESS_RULES_HEADER);
   });
 
   it('无 connId / 无文本 时不注入', () => {

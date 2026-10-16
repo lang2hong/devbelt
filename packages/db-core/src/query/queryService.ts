@@ -212,7 +212,8 @@ export class QueryService {
    * @param values 可选参数（预编译/占位符）
    */
   /** 默认查询超时（ms），0 = 不超时 */
-  static queryTimeout = 30_000;
+  /** 全局默认查询超时（ms）。默认 300 秒；宿主（vscode-ext）用 `devbelt.sql.queryTimeoutSeconds` 实时覆盖，连接级 `requestTimeout` 优先于本值。 */
+  static queryTimeout = 300_000;
   /** Maximum number of rows retained in an arbitrary query result. */
   static maxResultRows = 10_000;
 

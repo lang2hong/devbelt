@@ -310,10 +310,6 @@ onUnmounted(() => { disposed = true; resetState(); }); // 离开页面保留缓�
 </template>
 
 <style scoped>
-.page { max-width: 980px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
-.head h2 { margin: 0; letter-spacing: -0.01em; }
 .unlock { display: flex; align-items: center; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
 .remember { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-muted); }
 input { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
@@ -340,10 +336,4 @@ input { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-bor
 .card.warn .meter > span { background: var(--c-danger); }
 .secs { font-size: 11px; color: var(--c-text-muted); min-width: 30px; text-align: right; font-variant-numeric: tabular-nums; }
 .copied { position: absolute; top: 6px; right: 8px; font-size: 11px; color: var(--c-text-muted); }
-.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
-.btn:disabled { opacity: 0.6; cursor: default; }
-.btn.small { padding: 5px 10px; font-size: 13px; }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
 </style>

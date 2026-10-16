@@ -28,6 +28,7 @@ const LOCAL_ID_PREFIX: Record<SyncEntityType, string> = {
   authenticatorGroup: 'ag',
   authenticatorTag: 'at',
   schemaNotes: 'sn',
+  aiModelAccess: 'ma',
 };
 
 /**
@@ -63,6 +64,10 @@ export interface SyncSessionOptions {
   authenticatorBackend?: EntityBackend;
   /** S7f：表/列注记实体后端（宿主注入，底层 AiContextStore）。 */
   schemaNotesBackend?: EntityBackend;
+  /** AI 模型接入配置实体后端（宿主注入，底层 Memento 记录式存储）。 */
+  aiModelAccessBackend?: EntityBackend;
+  /** 选择性同步（按机器）：false 的类型不推送不应用（入站入 deferred，重开后重放）。 */
+  typeEnabled?: (type: SyncEntityType) => boolean;
   /** P6：推送成功 / 按类型配额拒绝回调（由扩展接线标记本地实体）。 */
   onEntityPushed?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
   onQuotaRejected?: (ref: import('./e2e/syncEntity.js').SyncEntityRef) => void | Promise<void>;
@@ -96,7 +101,7 @@ export class PersonalSyncSession {
     private readonly opts: SyncSessionOptions = {},
   ) {
     this.stateStore = new StateStore(memento, userId);
-    this.entities = new EntityStore(store, opts.authenticatorBackend, opts.schemaNotesBackend);
+    this.entities = new EntityStore(store, opts.authenticatorBackend, opts.schemaNotesBackend, opts.aiModelAccessBackend, opts.typeEnabled);
     this.epochTx = new EpochTransitionCoordinator({
       memento,
       userId,
@@ -416,6 +421,7 @@ export class PersonalSyncSession {
         signSeed: this.signSeedThunk,
         uniqueId: (type) => this.uniqueEntityId(type),
         entitlement: this.opts.entitlement,
+        typeEnabled: this.opts.typeEnabled,
         onSettled: this.opts.onSyncResult,
         autoSyncEnabled: this.opts.autoSyncEnabled,
         onEntityPushed: this.opts.onEntityPushed,

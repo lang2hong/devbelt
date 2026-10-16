@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { provide, computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { setLanguage, useI18n } from '../composables/useI18n';
 import MessageList from '../components/ai/MessageList.vue';
@@ -9,6 +9,10 @@ import ContextBar from '../components/ai/ContextBar.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TableNoteDialog, { type TableNoteColumn } from '../components/ai/TableNoteDialog.vue';
 import TableScopeDialog from '../components/ai/TableScopeDialog.vue';
+import BusinessRulesDialog from '../components/ai/BusinessRulesDialog.vue';
+import ModelAccessDialog from '../components/ai/ModelAccessDialog.vue';
+import type { CatalogProvider, CustomVendor, ModelAccessSyncPrefs, ModelAccessTestResult } from '../../../src/ai/modelAccess';
+import { summarizeBusinessRules } from '../../../src/ai/businessRules';
 
 interface SessionSummary {
   id: string;
@@ -21,6 +25,10 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   error?: boolean;
+  /** 代码块下标 → 内联执行结果（P9：blockRef 绑定；瞬态，不进会话存储）。 */
+  blockResults?: Record<number, AiToolResultPayload>;
+  /** 代码块下标 → 执行中指示（toolRunning；toolResult 到达即清除；瞬态）。 */
+  blockRunning?: Record<number, AiRunningPayload>;
 }
 
 /**
@@ -37,6 +45,53 @@ interface ChatMessage {
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
 
+/** in-chat 执行统一派发：在此补齐消息代次（blockRef 守卫的必要字段）。 */
+provide(RUN_IN_CHAT_KEY, (payload: RunInChatPayload) => {
+  const blockRef = payload.msgIdx !== undefined && payload.blockIdx !== undefined
+    ? { gen: messageGeneration, msgIdx: payload.msgIdx, blockIdx: payload.blockIdx }
+    : undefined;
+  const type = payload.kind === 'sql' ? 'executeSqlInChat' : payload.kind === 'redis' ? 'runRedis' : 'runEsDsl';
+  post({ type, text: payload.text, ...(blockRef ? { blockRef } : {}) });
+});
+
+import { autoExecutableSqlBlocks, formatToolResultContent, isForeignSession, type AiRunningPayload, type AiToolResultPayload } from '../utils/aiChatStream';
+import { hasChartIntent } from '../utils/chartInference';
+import { OPTIMIZE_SQL_KEY, RUN_IN_CHAT_KEY, type RunInChatPayload } from '../utils/runInChat';
+import { formatElapsed } from '../../../src/ai/slowQuery';
+
+/**
+ * 消息代次（blockRef 守卫）：会话切换/新会话/重置消息时 +1。迟到的 toolResult 若
+ * 带着旧代次 blockRef，目标下标已不可信 → 回退尾部气泡，绝不内联回填错消息。
+ */
+let messageGeneration = 0;
+function resetMessages(next: ChatMessage[]): void {
+  messageGeneration += 1;
+  messages.value = next;
+}
+
+/** AI 回复中的只读 SQL 自动执行（宿主分类门禁：仅 SELECT；写/DDL 维持手动按钮）。 */
+function autoRunSqlBlocks(content: string): void {
+  if (!selectedConnId.value) return;
+  const msgIdx = messages.value.length - 1;
+  const gen = messageGeneration;
+  for (const ref of autoExecutableSqlBlocks(content)) {
+    post({ type: 'autoExecuteSql', text: ref.content, blockRef: { gen, msgIdx, blockIdx: ref.blockIdx } });
+  }
+}
+
+/** 「让 AI 优化」派发：追加用户消息、进入生成态并上行（host 在当前会话 EXPLAIN + optimize）。 */
+let skipAutoRunOnce = false;
+provide(OPTIMIZE_SQL_KEY, (rawSql: string, costMs?: number) => {
+  if (streaming.value !== null) return;
+  const sql = rawSql.trim();
+  if (!sql) return;
+  const prefix = t('ai.optimize.userPrefix', { sec: formatElapsed(costMs ?? 0) });
+  messages.value.push({ role: 'user', content: `${prefix}\n\`\`\`sql\n${sql}\n\`\`\`` });
+  streaming.value = { content: '' };
+  skipAutoRunOnce = true;
+  post({ type: 'optimizeSql', text: sql, ...(costMs !== undefined ? { costMs } : {}) });
+});
+
 const provider = ref<any>(null);
 const quota = ref<any>(null);
 const context = ref<any>(null);
@@ -52,7 +107,7 @@ const includeColumnComments = ref(true);
  * 侧栏折叠视图组（VSCode 侧栏风格：上下堆叠、各自 ▸/▾，可同时展开）：
  * 注入的表（点表名打开说明弹层）/ 会话记录。
  */
-const sidebarOpen = reactive({ context: false, sessions: true });
+const sidebarOpen = reactive({ context: false, rules: false, sessions: true });
 function toggleSection(key: keyof typeof sidebarOpen): void {
   sidebarOpen[key] = !sidebarOpen[key];
   if (key === 'context' && sidebarOpen.context) requestContextDetailIfNeeded();
@@ -79,6 +134,60 @@ const sampleErrors = ref<Record<string, string>>({});
 const sampleFill = ref<{ column: string; text: string; seq: number } | null>(null);
 let sampleSeq = 0;
 
+/** 连接级业务规则（业务术语 + 默认业务规则；UI 合并，host 侧存储/提示词分离）。 */
+const businessRules = ref({ domainContext: '', defaultDirectives: '' });
+const showRulesDialog = ref(false);
+/** 模型接入（自带 Key/服务端代理）：快照 + 弹层 + 测试结果（Key 值永不下行）。 */
+const modelAccess = ref<{
+  mode: 'server-proxy' | 'openai-compatible';
+  vendorId: string;
+  baseUrl: string;
+  model: string;
+  customVendors: CustomVendor[];
+  customModels: Record<string, string[]>;
+  hasKey: boolean;
+  prefs: ModelAccessSyncPrefs;
+  catalog: CatalogProvider[];
+  saveError?: string;
+}>({ mode: 'server-proxy', vendorId: '', baseUrl: '', model: '', customVendors: [], customModels: {}, hasKey: false, prefs: { selection: true, custom: true, key: true }, catalog: [] });
+const showModelAccessDialog = ref(false);
+const maTestResult = ref<ModelAccessTestResult | null>(null);
+const maTesting = ref(false);
+let savingModelAccess = false;
+function openModelAccess(): void {
+  post({ type: 'requestModelAccess' });
+  showModelAccessDialog.value = true;
+}
+function saveModelAccess(payload: {
+  mode: 'server-proxy' | 'openai-compatible';
+  vendorId: string;
+  baseUrl: string;
+  model: string;
+  customVendors: CustomVendor[];
+  customModels: Record<string, string[]>;
+  apiKey: string;
+  clearKey: boolean;
+  prefs: ModelAccessSyncPrefs;
+}): void {
+  savingModelAccess = true;
+  post({ type: 'saveModelAccess', ...payload });
+}
+function testModelAccess(payload: { baseUrl: string; model: string; apiKey: string }): void {
+  maTesting.value = true;
+  maTestResult.value = null;
+  post({ type: 'testModelAccess', ...payload });
+}
+const rulesSummary = computed(() => summarizeBusinessRules(businessRules.value.domainContext, businessRules.value.defaultDirectives));
+const rulesConnName = computed(() => connections.value.find((c) => c.id === selectedConnId.value)?.name);
+function openRulesDialog(): void {
+  if (!selectedConnId.value) return;
+  post({ type: 'requestBusinessRules' });
+  showRulesDialog.value = true;
+}
+function saveBusinessRules(payload: { domainContext: string; defaultDirectives: string }): void {
+  post({ type: 'saveBusinessRules', ...payload });
+}
+
 const generating = computed(() => streaming.value !== null);
 
 let cleanup: (() => void) | undefined;
@@ -97,17 +206,18 @@ onMounted(() => {
         includeColumnComments.value = !!msg.includeColumnComments;
         activeSessionId.value = msg.activeSessionId || undefined;
         selectedConnId.value = msg.context?.connId;
-        if (!msg.activeSessionId) messages.value = [];
+        if (!msg.activeSessionId) resetMessages([]);
+        post({ type: 'requestBusinessRules' });
         break;
       case 'sessionLoaded': {
         const session = msg.session;
         if (!session || !session.id) {
-          messages.value = [];
+          resetMessages([]);
           activeSessionId.value = undefined;
           break;
         }
         activeSessionId.value = session.id;
-        messages.value = Array.isArray(session.messages) ? [...session.messages] : [];
+        resetMessages(Array.isArray(session.messages) ? [...session.messages] : []);
         streaming.value = null;
         if (session.connId) selectedConnId.value = session.connId;
         break;
@@ -117,16 +227,62 @@ onMounted(() => {
         if (msg.activeSessionId !== undefined) activeSessionId.value = msg.activeSessionId || undefined;
         break;
       case 'chunk':
+        // 生成中切走会话：旧会话分片不得流进当前视图。
+        if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
         if (!streaming.value) streaming.value = { content: '' };
         streaming.value.content += msg.delta ?? '';
         break;
       case 'finish': {
-        const content = streaming.value?.content ?? '';
+        if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
+        // host 传权威最终版（保留字补引后的 ```sql 块）时以它为准替换流式缓冲，
+        // 保证显示 = 落库 = 自动执行 = 插入编辑器四者一致。
+        const content = typeof msg.content === 'string' ? msg.content : (streaming.value?.content ?? '');
         streaming.value = null;
         if (content) messages.value.push({ role: 'assistant', content });
         if (msg.error) messages.value.push({ role: 'assistant', content: msg.error.message, error: true });
+        // 自动执行仅限正常完成：Stop 中断（aborted）后的半截/完整 SQL 不跑，
+        // 用户中断即表达「不要继续」，自动执行与之相悖。
+        // 「让 AI 优化」的回复不自动执行（优化后的查询可能同样很慢，避免无人值守反复重跑）。
+        const skipAutoRun = skipAutoRunOnce;
+        skipAutoRunOnce = false;
+        if (content && !msg.error && !msg.aborted && !skipAutoRun) autoRunSqlBlocks(content);
         break;
       }
+      case 'modelAccess': {
+        modelAccess.value = {
+          mode: msg.mode === 'openai-compatible' ? 'openai-compatible' : 'server-proxy',
+          vendorId: String(msg.vendorId ?? ''),
+          baseUrl: String(msg.baseUrl ?? ''),
+          model: String(msg.model ?? ''),
+          customVendors: Array.isArray(msg.customVendors) ? msg.customVendors : [],
+          customModels: (msg.customModels && typeof msg.customModels === 'object') ? msg.customModels : {},
+          hasKey: !!msg.hasKey,
+          prefs: {
+            selection: msg.prefs?.selection !== false,
+            custom: msg.prefs?.custom !== false,
+            key: msg.prefs?.key !== false,
+          },
+          catalog: Array.isArray(msg.catalog) ? msg.catalog : [],
+          ...(msg.saveError ? { saveError: String(msg.saveError) } : {}),
+        };
+        // 保存回执：成功关弹层；失败保留并显示错误码。
+        if (savingModelAccess) {
+          savingModelAccess = false;
+          if (!msg.saveError) showModelAccessDialog.value = false;
+        }
+        break;
+      }
+      case 'modelAccessTest':
+        maTesting.value = false;
+        maTestResult.value = (msg.result && typeof msg.result === 'object') ? msg.result : null;
+        break;
+      case 'businessRules':
+        businessRules.value = {
+          domainContext: String(msg.domainContext ?? ''),
+          defaultDirectives: String(msg.defaultDirectives ?? ''),
+        };
+        if (msg.saved) showRulesDialog.value = false;
+        break;
       case 'quotaUpdate':
         quota.value = msg.quota ?? null;
         break;
@@ -187,16 +343,42 @@ onMounted(() => {
         }
         break;
       }
+      case 'toolRunning': {
+        // 与 toolResult 同一套 blockRef 校验（代次一致、目标仍是 assistant 消息）。
+        const ref = msg.blockRef as { gen?: number; msgIdx?: number; blockIdx?: number } | undefined;
+        const target = ref && ref.msgIdx !== undefined && (ref.gen ?? -1) === messageGeneration
+          ? messages.value[ref.msgIdx]
+          : undefined;
+        if (ref && target && target.role === 'assistant' && !target.error && ref.blockIdx !== undefined) {
+          (target.blockRunning ??= {})[ref.blockIdx] = { runId: String(msg.runId ?? ''), startedAt: Number(msg.startedAt ?? Date.now()) };
+        }
+        break;
+      }
       case 'toolResult': {
-        const title = String(msg.title ?? '');
-        const body = String(msg.content ?? '');
-        const content =
-          msg.format === 'markdown'
-            ? body
-              ? `${title}\n\n${body}`
-              : title
-            : `${title}\n\n\`\`\`${typeof msg.lang === 'string' ? msg.lang : ''}\n${body}\n\`\`\``;
-        messages.value.push({ role: 'assistant', content, error: !!msg.isError });
+        // 带 blockRef（且代次一致、目标仍是本会话 assistant 消息）→ 结果内联回填到代码块下方；
+        // 其余（旧路径/迟到的跨会话结果）→ 维持尾部气泡。
+        const ref = msg.blockRef as { gen?: number; msgIdx?: number; blockIdx?: number } | undefined;
+        const target = ref && ref.msgIdx !== undefined && (ref.gen ?? -1) === messageGeneration
+          ? messages.value[ref.msgIdx]
+          : undefined;
+        if (ref && target && target.role === 'assistant' && !target.error && ref.blockIdx !== undefined) {
+          // 路径 A：本轮最后一条用户消息命中图表意图 → 该轮结果默认以图表呈现。
+          const lastUser = [...messages.value].reverse().find((m) => m.role === 'user');
+          if (target.blockRunning) delete target.blockRunning[ref.blockIdx];
+          (target.blockResults ??= {})[ref.blockIdx] = {
+            title: msg.title,
+            content: msg.content,
+            lang: msg.lang,
+            format: msg.format,
+            isError: msg.isError,
+            costMs: typeof msg.costMs === 'number' ? msg.costMs : undefined,
+            canceled: !!msg.canceled,
+            preferChart: !!lastUser && hasChartIntent(lastUser.content),
+          };
+          break;
+        }
+        const formatted = formatToolResultContent(msg as AiToolResultPayload);
+        messages.value.push({ role: 'assistant', content: formatted.content, error: formatted.error });
         break;
       }
       default:
@@ -222,7 +404,7 @@ function stop(): void {
 }
 
 function newChat(): void {
-  messages.value = [];
+  resetMessages([]);
   streaming.value = null;
   post({ type: 'newChat' });
 }
@@ -327,9 +509,7 @@ function openContextDetail(): void {
       @select-scope="selectScope"
       @open-console="buyTopup"
       @open-settings="post({ type: 'openSettings' })"
-      @set-api-key="post({ type: 'setApiKey' })"
-      @clear-api-key="post({ type: 'clearApiKey' })"
-      @test-connection="post({ type: 'testConnection' })"
+      @open-model-access="openModelAccess"
       @request-context-detail="openContextDetail"
     />
     <div class="ai-toolbar">
@@ -352,6 +532,24 @@ function openContextDetail(): void {
               <button class="ai-btn" @click="openScopeDialog">{{ scopeLabel }}</button>
             </div>
             <ContextDetailDrawer :detail="contextDetail" @edit-table="editTableNote" />
+          </div>
+        </div>
+        <div class="ai-side-section">
+          <button class="ai-side-head" @click="toggleSection('rules')">
+            <span class="ai-side-chevron">{{ sidebarOpen.rules ? '▾' : '▸' }}</span>
+            <span>{{ t('wv.ai.rules.title') }}</span>
+            <span class="ai-rules-badge" :class="{ on: rulesSummary.configured }">{{ rulesSummary.configured ? t('wv.ai.rules.configured') : t('wv.ai.rules.empty') }}</span>
+          </button>
+          <div v-show="sidebarOpen.rules" class="ai-side-content">
+            <div class="ai-rules-summary">
+              {{ rulesSummary.configured ? t('wv.ai.rules.summary', { domain: rulesSummary.domainChars, directives: rulesSummary.directivesChars }) : t('wv.ai.rules.emptyHint') }}
+            </div>
+            <button
+              class="ai-btn"
+              :disabled="!selectedConnId"
+              :title="selectedConnId ? '' : t('wv.ai.rules.needConnection')"
+              @click="openRulesDialog"
+            >{{ t('wv.ai.rules.edit') }}</button>
           </div>
         </div>
         <div class="ai-side-section">
@@ -389,6 +587,32 @@ function openContextDetail(): void {
       @close="showNoteDialog = false"
       @save="saveTableNote"
       @fetch-sample="fetchColumnSample"
+    />
+    <ModelAccessDialog
+      v-if="showModelAccessDialog"
+      :mode="modelAccess.mode"
+      :vendor-id="modelAccess.vendorId"
+      :base-url="modelAccess.baseUrl"
+      :model="modelAccess.model"
+      :custom-vendors="modelAccess.customVendors"
+      :custom-models="modelAccess.customModels"
+      :has-key="modelAccess.hasKey"
+      :prefs="modelAccess.prefs"
+      :catalog="modelAccess.catalog"
+      :save-error="modelAccess.saveError"
+      :test-result="maTestResult"
+      :testing="maTesting"
+      @close="showModelAccessDialog = false"
+      @save="saveModelAccess"
+      @test="testModelAccess"
+    />
+    <BusinessRulesDialog
+      v-if="showRulesDialog"
+      :domain-context="businessRules.domainContext"
+      :default-directives="businessRules.defaultDirectives"
+      :conn-name="rulesConnName"
+      @close="showRulesDialog = false"
+      @save="saveBusinessRules"
     />
     <TableScopeDialog
       v-if="showScopeDialog"
@@ -483,5 +707,17 @@ function openContextDetail(): void {
 }
 .ai-spacer {
   flex: 1;
+}
+.ai-rules-badge {
+  margin-left: auto;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
+  color: var(--vscode-descriptionForeground);
+}
+.ai-rules-badge.on {
+  color: var(--vscode-testing-iconPassed, #4caf50);
+}
+.ai-rules-summary {
+  margin-bottom: 4px;
+  color: var(--vscode-descriptionForeground);
 }
 </style>

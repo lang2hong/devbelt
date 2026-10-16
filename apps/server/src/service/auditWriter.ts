@@ -43,6 +43,17 @@ const ALLOWED_EVENT_TYPES = [
   'admin.ai.topup.manual_created',
   'admin.ai.topup.fulfilled',
   'admin.ai.topup.refunded',
+  // AI 模型厂商目录（自带 Key 预设）：后台维护。
+  'admin.ai.providers.read',
+  'admin.ai.provider.created',
+  'admin.ai.provider.updated',
+  // AI 计费引擎：计价表/计费设置/财务报表；管理员角色撤销（授予已有）。
+  'admin.ai.billing.read',
+  'admin.ai.model_pricing.created',
+  'admin.ai.model_pricing.updated',
+  'admin.ai.billing_settings.updated',
+  'admin.ai.finance.read',
+  'admin.role.revoked',
   'sync.reset.handoff.created',
   'sync.reset.handoff.consumed',
   'sync.reset.handoff.failed',

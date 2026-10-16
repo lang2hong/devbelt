@@ -97,17 +97,29 @@ export class QueryExecutor {
     conn: SavedConnection,
     sql: string,
     database?: string,
-  ): Promise<{ result?: any; error?: Error; canceled?: boolean; costTime: number }> {
+    opts?: { onStart?: (handle: { cancel(): void }) => void },
+  ): Promise<{ result?: any; error?: Error; canceled?: boolean; userCanceled?: boolean; costTime: number }> {
     const start = Date.now();
     const secret = containsSecretSql(sql);
     let called = false;
     let captured: { result?: any; error?: Error } = {};
     const runner = new QueryRunner(conn, this.manager, undefined, database, () => {});
+    // 调用方（AI Chat）可经句柄取消在途查询：dispose 置 disposed（尚未开跑则直接跳过）
+    // 并取消当前语句的 token（单查询取消，不牵连会话上其它查询）。
+    let userCanceled = false;
+    opts?.onStart?.({
+      cancel: () => {
+        userCanceled = true;
+        runner.dispose();
+      },
+    });
     await runner.execute(sql, (result, error) => {
       called = true;
       captured = { ...(result !== undefined ? { result } : {}), ...(error ? { error } : {}) };
     });
     const costTime = Date.now() - start;
+    // 用户主动取消：不记历史/审计（没有完成的执行），与「确认门禁被拒」的 canceled 区分。
+    if (userCanceled) return { canceled: true, userCanceled: true, costTime };
     if (!called) {
       // 确认门禁未通过（用户取消）：无结果、无历史/审计。
       return { canceled: true, costTime };

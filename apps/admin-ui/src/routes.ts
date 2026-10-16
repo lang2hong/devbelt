@@ -15,6 +15,8 @@ export const ADMIN_ROUTES: RouteConfig[] = [
   { pattern: '/audit', name: 'admin-audit' },
   { pattern: '/plans', name: 'admin-plans' },
   { pattern: '/ai-topup', name: 'admin-ai-topup' },
+  { pattern: '/ai-providers', name: 'admin-ai-providers' },
+  { pattern: '/ai-billing', name: 'admin-ai-billing' },
   { pattern: '/version', name: 'admin-version' },
 ];
 

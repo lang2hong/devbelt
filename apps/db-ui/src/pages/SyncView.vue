@@ -57,15 +57,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page { max-width: 720px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
 .card { background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 20px 24px; margin-top: 16px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0; }
 dt { font-size: 13px; color: var(--c-text-muted); }
 dd { margin: 4px 0 0; font-size: 18px; font-weight: 600; color: var(--c-text); }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

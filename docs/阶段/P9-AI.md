@@ -667,6 +667,28 @@ Assumptions 中明确 `未找到与"XX"匹配的表/列` + 生成尽力而为的
 **E. （后续增量，不在 S4）验证式生成**：用户点击"运行并继续"后，将 AI 生成的**只读 SELECT**
 经现有只读/生产 gate 执行，把结果样本回喂模型自检并二次修正——把 Chat2DB 的 `execute_sql`
 自动工具循环改为**用户授权的显式回路**（DevBelt 不自动执行的红线不变）。见 §十三。
+**红线受控例外（2026-10-15 落地）**：AI Chat 回复中的 SQL 代码块**仅无风险只读语句**
+（`classifyAiSql.label='read'`，与执行门禁同一分类器）自动执行并就地渲染结果表（每条回复
+上限 3 块）；**写/DDL（UPDATE/INSERT/DELETE/ALTER/CREATE/DROP/TRUNCATE…）一律不自动**，
+保留手动「Run in chat」按钮由人工过目后执行。行数上限/确认/只读/生产门禁/审计全部沿用
+既有执行路径（`executeSqlInChat → runHeadless`）。
+**（2026-10-16 收紧）** 自动执行叠加**语句形态白名单**——骨架化后**逐语句**必须以
+SELECT/WITH/SHOW/DESC/DESCRIBE/EXPLAIN 起始：BEGIN/COMMIT/ROLLBACK/SET/USE/KILL/
+FLUSH/LOCK TABLES 等控制语句即便被风险分类器判 `read` 也不自动（共享会话上
+ROLLBACK/KILL/LOCK 会波及其它面板）；同时仅关系引擎（MySQL/PG/SQLite）触发、
+Stop 中断（aborted）的回复不执行。
+**（2026-10-16 复审）** 另须：连接/库与回复发起时一致、非生产连接（生产保留手动按钮）。用户可通过设置 `devbelt.ai.autoRunReadOnlySql`（默认开）整体关闭自动执行。
+**（2026-10-16）连接级业务规则入口**：Chat 侧栏「业务规则」弹层统一编辑业务术语（域上下文）与默认业务规则——UI 合并，存储键与 prompt 区块（术语“优先于模型先验”/规则“列存在才适用”）保持分离；连接树右键命令保留作兜底。
+**（2026-10-16）模型接入**：Chat 状态条「模型接入」弹层统一配置模式/厂商/baseUrl/模型/Key/同步项；
+厂商目录由管理后台维护（迁移 010 + `GET /api/ai/providers` 公开只读 + admin 页），客户端带内置兜底；
+`aiModelAccess` 同步实体按三组**选择性同步**（勾选为本机设置；接收按组合并；Key 仅勾选时端到端
+加密传输，本机记录永不存 Key）；连接树 setApiKey/clearApiKey 命令保留作兜底。
+**（2026-10-16）计费引擎 + 管理员后台化（迁移 011）**：模型计价表 + 单行计费设置（激活模型/
+上游连接含 API Key——只写不读/调整系数）+ 财务月报全部进管理后台「AI 计费」页；统一 token 口径
+`计费 = (输入 + 输出×k) × 系数`（k 可覆盖或由单价推导），预占/结算/配额同口径；审计分列原始/
+计费/成本；env 全空回退（兼容现状）。用户页可授予/撤销管理员（防自锁）。毛利护栏：
+加油包折合单价 ≥ 输入分价 × (1+目标毛利率) 恒成立（与用户输入/输出占比无关）。
+**（2026-10-16）in-chat 执行体验**：执行中显示实时计时与「取消」（单查询 token；耗时 ≥10s 提示较慢）；完成/取消且耗时 ≥5s 提供「让 AI 优化」（当前会话内 EXPLAIN + optimize，回复不自动执行）；Chat/数据问答的业务规则注入与 NL2SQL 统一为两个区块。
 
 **F. prompt 契约测试**（新增）：prompt 单测钉住——nl2sql prompt 含 schema-linking 指令、
 枚举严格映射指令、意图复述契约、Assumptions 契约、引用表优先声明、域上下文区块、默认业务指令区块；
@@ -1397,6 +1419,11 @@ docker exec ollama ollama pull qwen2.5-coder:7b
 - 向量 RAG：为大库建本地 embedding 索引做 schema 检索（替代 200 表关键词预筛，覆盖跨模块冷门表）。
 - Function calling 让 AI 直接驱动 GUI（例如"打开这张表的设计器"、"把这个 SQL 存为保存查询"）。
 - AI 生成可视化（从结果集直接画折线/饼图；参考 Chat2DB 的 ` ```chart ` 输出协议思路）。
+  **注（2026-10-15）**：「结果集驱动」路径已先行落地——Chat 内联查询结果支持柱/折线/饼
+  （用户命中图表意图自动渲染 + 形态可用按钮手动切换，`inferCharts` 确定性推断 + 手写 SVG
+  零依赖）；本条剩余的「模型 ```chart 协议（AI 主动建议画图）」仍为后续扩展。
+  **（2026-10-16）** 柱/线资格收紧为**数值全非负**（负值不再钳成 0 基线误导，
+  fail-open 回表格）。
 - 多轮数据问答上下文压缩（长会话 token 超限自动摘要历史）。
 - 团队共享 prompt 模板 / 企业自定义 system prompt（服务端下发）。
 - 图像/多模态（结果集截图/ER 图发给多模态模型）。
@@ -1625,4 +1652,16 @@ docker exec ollama ollama pull qwen2.5-coder:7b
 - **S7k.9 方向抉择 + 目标缺失兜底（2026-10-14 晚）**：`repairFindings(ids, direction)`——`'local'` 用本机覆盖云端（rebasePut/rebaseDelete 以云端当前版本为 base 入 outbox，面板修复后立即推送）；面板逐条双方向按钮（漂移/双向删除/复活），批量仅云端方向；refDrift 目标本机缺失 → 白话「（本机缺失）」+ 兜底产出目标缺失发现（补 pending 映射盲区）+ 二次扫描补云端名。真机反馈驱动：单方向强制云端覆盖不符合「交给用户抉择」。vscode-ext 1743、db-host 23 全绿。
 - **S7k.11 对账域重构（2026-10-14 深夜）**：新模块 `reconcileFindings.ts` 唯一事实源——状态矩阵（本机态×云端态→发现；类别×方向→原语 applyCloudPut/applyCloudTombstone/pushPut/pushDelete/mergeThenPush/sweepLocal/skip，未列格子单一规则回退 cloud）；`syncEngine` 纯机制层、`repairFindings` 单循环；`RepairOutcome` 7 字段用户可读计数。删除 inspectLocalIntegrity/countLocalMissing/localMissing/toFindingViews 及引擎内迁走的全部函数（-470 行）。67 场景测试保留为回归网。vscode-ext 1746、db-host 23 全绿。
 - **S7k.12 全量对账（2026-10-15 上午）**：检测只看映射过的记录 → 云端无映射记录不可见（面板谎报一致）。全量云端扫描 + `cloudOnlyFindings`（云端存活+无映射/孤儿 pending → missing，带云端名）；对称引用比对（本机有云端无也算漂移）；missing 使用本机=删除云端（`buildCloudDelete` 定向推送）；删二次扫描（全量覆盖）。vscode-ext 1749、db-host 23 全绿。
+- **选择性同步（2026-10-16，`devbelt.sync.items` 按机器）**：五类同步项——连接与分组 / 保存的
+  查询 / 表注记 / 验证器 / AI 模型接入（后者内部再分三组子项，见模型接入条目）。语义：**关闭 =
+  本机不推送该项 + 入站入 deferred 暂存不应用（重新打开后 drainDeferred 重放，无需重拉 feed，
+  与权益跳过同一机制）+ 本地数据保留 + 体检不将该类型计为缺失**（`computeFindings` 过滤，否则
+  cloudOnlyFindings 会把停用类型误报为「本地缺少云端记录」）。依赖级联在引擎侧强制
+  （`typeEnabledOf`）：query/queryFolder/schemaNotes 以 connId 引用 connection，关「连接与分组」
+  时三者随停。实现：`EntityStore` 构造器注入 `typeEnabled`（listForSync 过滤 → 出站 mutator/
+  孤儿候选自然排除）；引擎 deps 增 `typeEnabled` + 结果计数 `skippedDisabled`（诊断透传）；
+  coordinator 跨轮累并；session/sessionFactory 透传；扩展端 `sync/syncItems.ts` 纯函数（解析/
+  级联/实时读取）+ `typeEnabled` 装配（与 autoSync 同口径，改动下一轮同步生效）。
+  aiModelAccess 的三组子项不受此项影响（类型内部的粒度）。测试：引擎 +3（停用入 deferred/
+  重开重放/出站排除/体检不计）、syncItems +7。vscode-ext 1846、db-host 23 全绿。
 - **S7l.1 ES 连接接入同步（2026-10-15 上午）**：ES_PAYLOAD_FIELDS 白名单 + encode/decode round-trip（esAuth 校验/requestTimeout 上界）；connectionEngineUnsupported 仅兜未知引擎；删 ES_CONNECTIONS_NOT_SYNCABLE 与文案映射，跳过原因如实显示。vscode-ext 1750、db-host 23 全绿。

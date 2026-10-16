@@ -1,7 +1,11 @@
 import {
+  BUSINESS_RULES_HEADER,
+  DOMAIN_CONTEXT_HEADER,
   buildExplainMessages,
   buildNl2SqlMessages,
   buildOptimizeMessages,
+  joinSections,
+  section,
   type ChatMessage,
 } from '@devbelt/ai-core';
 import { DatabaseType } from '@devbelt/db-core';
@@ -132,10 +136,11 @@ export function injectBusinessRules(
   const domain = contextStore.getDomainContext(connId);
   const directives = contextStore.getDefaultDirectives(connId);
   if (!domain && !directives) return messages;
-  const parts = ['User-provided business rules (apply only when the referenced tables/columns exist):'];
-  if (domain) parts.push(`Terminology: ${domain}`);
-  if (directives) parts.push(`Default rules: ${directives}`);
-  const block: ChatMessage = { role: 'user', content: parts.join('\n') };
+  // 与 NL2SQL 同一套区块标题与约束措辞（术语“优先于先验”/规则“列存在才适用”）。
+  const block: ChatMessage = {
+    role: 'user',
+    content: joinSections([section(DOMAIN_CONTEXT_HEADER, domain), section(BUSINESS_RULES_HEADER, directives)]),
+  };
   return [messages[0], block, ...messages.slice(1)];
 }
 

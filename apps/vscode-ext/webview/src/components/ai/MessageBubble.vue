@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
 import CodeBlock from './CodeBlock.vue';
+import ToolResultInline from './ToolResultInline.vue';
+import ToolRunningInline from './ToolRunningInline.vue';
 import { useI18n } from '../../composables/useI18n';
-import { parseInlineSegments, parseMessageBlocks, type AiInlineSegment } from '../../utils/aiChatStream';
+import { parseInlineSegments, parseMessageBlocks, type AiInlineSegment, type AiRunningPayload, type AiToolResultPayload } from '../../utils/aiChatStream';
 
 const props = defineProps<{
-  message: { role: 'user' | 'assistant'; content: string; error?: boolean };
+  message: { role: 'user' | 'assistant'; content: string; error?: boolean; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> };
   streaming?: boolean;
   /** 当前连接引擎（传给 CodeBlock 决定运行按钮显隐）。 */
   dbType?: string;
+  /** 消息在消息流中的下标（blockRef 绑定用，P9）。 */
+  msgIdx?: number;
 }>();
 
 const { t } = useI18n();
@@ -45,7 +49,11 @@ watch(
   >
     <template v-if="message.role === 'assistant' && !message.error">
       <template v-for="(block, index) in blocks" :key="index">
-        <CodeBlock v-if="block.type === 'code'" :code="block.content" :lang="block.lang" :db-type="props.dbType" />
+        <template v-if="block.type === 'code'">
+          <CodeBlock :code="block.content" :lang="block.lang" :db-type="props.dbType" :msg-idx="props.msgIdx" :block-idx="index" />
+          <ToolRunningInline v-if="message.blockRunning?.[index]" :run-id="message.blockRunning[index]!.runId" :started-at="message.blockRunning[index]!.startedAt" />
+          <ToolResultInline v-if="message.blockResults?.[index]" :result="message.blockResults[index]!" :sql="block.content" />
+        </template>
         <div v-else-if="block.type === 'table'" class="ai-table-block">
           <button class="ai-table-head" @click="toggleTable(index)">
             <span class="ai-table-chevron">{{ closedTables.has(index) ? '▸' : '▾' }}</span>

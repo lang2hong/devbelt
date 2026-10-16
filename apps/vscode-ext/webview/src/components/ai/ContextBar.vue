@@ -55,9 +55,8 @@ const emit = defineEmits<{
   selectScope: [value: string];
   openConsole: [path: string];
   openSettings: [];
-  setApiKey: [];
-  clearApiKey: [];
-  testConnection: [];
+  /** 模型接入弹层（替代原 设置/清除 Key/测试 三个散按钮；Key 管理并入弹层）。 */
+  openModelAccess: [];
   requestContextDetail: [];
 }>();
 
@@ -174,9 +173,7 @@ function onSelect(event: Event): void {
         @click="emit('openConsole', '/db/ai-topup')"
       >{{ t('wv.ai.quota.buy') }}</button>
       <span class="ai-spacer"></span>
-      <button class="ai-btn" @click="emit('testConnection')">{{ t('wv.ai.testConnection') }}</button>
-      <button class="ai-btn" @click="emit('setApiKey')">{{ t('wv.ai.setApiKey') }}</button>
-      <button class="ai-btn" @click="emit('clearApiKey')">{{ t('wv.ai.clearApiKey') }}</button>
+      <button class="ai-btn" @click="emit('openModelAccess')">{{ t('wv.ai.modelAccess') }}</button>
       <button class="ai-btn" @click="emit('openSettings')">{{ t('wv.ai.settings') }}</button>
     </div>
   </div>

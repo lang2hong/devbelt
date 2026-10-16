@@ -7,6 +7,7 @@ import { RecordMapStore } from '@devbelt/db-host/sync/e2e/recordMapStore';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '@devbelt/db-host/sync/e2e/pendingMutationStore';
 import type { SyncStateSnapshot } from '@devbelt/db-host/sync/e2e/stateStore';
 import { EntityStore, UnresolvedRefStore, type EntityBackend } from '@devbelt/db-host/sync/e2e/entityStore';
+import type { SyncEntityType } from '@devbelt/db-host/sync/e2e/syncEntity';
 import { SyncMutator } from '@devbelt/db-host/sync/e2e/syncMutator';
 import type { SavedConnection, ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
 import type { StateDto } from '@devbelt/db-host/sync/e2e/types';
@@ -109,12 +110,14 @@ interface EngineOpts {
   signSeed?: () => Uint8Array;
   onEntityPushed?: (ref: { type: string; localId: string }) => void | Promise<void>;
   onQuotaRejected?: (ref: { type: string; localId: string }) => void | Promise<void>;
+  /** 选择性同步：false 的类型停用（入站 deferred / 出站过滤 / 体检不计）。 */
+  typeEnabled?: (type: SyncEntityType) => boolean;
 }
 
 function engine(opts: EngineOpts) {
   const store = opts.store ?? makeStore();
   const memento = makeMemento();
-  const entities = new EntityStore(store, opts.authenticatorBackend);
+  const entities = new EntityStore(store, opts.authenticatorBackend, undefined, undefined, opts.typeEnabled);
   const signSeed = opts.signSeed ?? (() => new Uint8Array(32));
   const mutator = new SyncMutator({
     userId: '7', keyEpoch: '1', entities, mapStore: opts.mapStore, outbox: opts.outbox,
@@ -138,6 +141,7 @@ function engine(opts: EngineOpts) {
     buildCloudDelete: (recordId, type, baseVersion) => mutator.buildCloudDelete(recordId, type, baseVersion),
     onEntityPushed: opts.onEntityPushed,
     onQuotaRejected: opts.onQuotaRejected,
+    typeEnabled: opts.typeEnabled,
   });
 }
 
@@ -1853,5 +1857,115 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(v.findings).toEqual([
       { id: `refDrift:connection:c-1`, kind: 'refDrift', type: 'connection', recordId: cRid, localId: 'c-1', localValue: 'c', ref: { field: 'groupId', local: 'G1', remote: undefined } },
     ]);
+  });
+});
+
+describe('SyncEngine · 选择性同步（类型停用，按机器）', () => {
+  const u8 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64url');
+
+  function mysqlRecord(recordId: string) {
+    const payload = { type: 'connection', name: 'parked', dbType: 'mysql', host: 'h', port: 3306, user: 'u', password: 'p' };
+    const nonce = new Uint8Array(12).fill(7);
+    const box = sealRecord(
+      new Uint8Array(32),
+      nonce,
+      new Uint8Array(Buffer.from(JSON.stringify(payload), 'utf8')),
+      { userId: '7', keyEpoch: '1', recordId, recordVersion: '1' },
+    );
+    return {
+      recordId, version: '1', changeSequence: '5', deleteTime: null,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
+      nonce: u8(nonce), ciphertext: u8(box.ciphertext), tag: u8(box.tag),
+    };
+  }
+
+  const NO_CONNECTIONS = (type: SyncEntityType) => type !== 'connection';
+
+  it('停用类型：入站入 deferred 不落地（skippedDisabled 计数）；重开后 drain 落地', async () => {
+    const store = makeStore();
+    const memento = makeMemento();
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const unresolved = new UnresolvedRefStore(memento, '7', '1');
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const dek = () => new Uint8Array(32);
+    const rec = mysqlRecord('C'.repeat(22));
+
+    const build = (client: PersonalSyncClient, typeEnabled?: (type: SyncEntityType) => boolean) => {
+      const ents = new EntityStore(store, undefined, undefined, undefined, typeEnabled);
+      return new SyncEngine({
+        userId: '7', keyEpoch: '1', client,
+        stateStore: makeStateStore(SNAP) as never,
+        mapStore, outbox, entities: ents, unresolved, deferred,
+        dek, signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+        typeEnabled,
+        seedConflictCarrier: seedConflictStub,
+      });
+    };
+
+    const client1 = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+    });
+    const r1 = await build(client1, NO_CONNECTIONS).sync();
+    expect(r1.stage).toBe('ok');
+    expect(r1.skippedDisabled).toBe(1);
+    expect(deferred.list()).toHaveLength(1);
+    expect(store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted)).toHaveLength(0);
+
+    const client2 = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [] })),
+    });
+    const r2 = await build(client2, undefined).sync();
+    expect(r2.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(0);
+    const conns = store.listForSync().filter((c) => !(c as unknown as { deleted?: boolean }).deleted);
+    expect(conns).toHaveLength(1);
+    expect(conns[0].name).toBe('parked');
+  });
+
+  it('出站：停用类型不生成 mutation（EntityStore.listForSync 过滤）', async () => {
+    const seed = { id: 'c-1', name: 'local', dbType: 'MYSQL', host: 'h', port: 3306, user: 'u', password: 'p', updateTime: 100 } as unknown as import('@devbelt/db-host/connection/connectionStore').SavedConnection;
+    const store = makeStore([seed]);
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+
+    const off = new SyncMutator({
+      userId: '7', keyEpoch: '1', entities: new EntityStore(store, undefined, undefined, undefined, NO_CONNECTIONS),
+      mapStore, outbox, dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32),
+    });
+    expect((await off.reconcile()).generated).toBe(0);
+    expect(outbox.list()).toHaveLength(0);
+
+    const on = new SyncMutator({
+      userId: '7', keyEpoch: '1', entities: new EntityStore(store),
+      mapStore, outbox, dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32),
+    });
+    expect((await on.reconcile()).generated).toBe(1);
+  });
+
+  it('体检：停用类型不产生 missing 发现（否则误报「本地缺少云端记录」）', async () => {
+    const rec = mysqlRecord('D'.repeat(22));
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+    });
+    const disabled = engine({
+      client, snap: SNAP,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      typeEnabled: NO_CONNECTIONS,
+    });
+    expect((await disabled.inspectFindings()).findings).toEqual([]);
+
+    const enabled = engine({
+      client, snap: SNAP,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+    });
+    const findings = (await enabled.inspectFindings()).findings;
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ kind: 'missing', type: 'connection' });
   });
 });

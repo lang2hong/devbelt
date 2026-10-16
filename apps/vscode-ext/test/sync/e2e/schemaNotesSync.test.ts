@@ -44,6 +44,7 @@ function setup() {
     connection: 'c', group: 'g', queryFolder: 'qf', query: 'q',
     authenticatorEntry: 'ae', authenticatorGroup: 'ag', authenticatorTag: 'at',
     schemaNotes: 'sn',
+    aiModelAccess: 'ma',
   };
   const uniqueId = (type: SyncEntityType) => `${prefix[type]}-${++counter}`;
   return { memento, store, backend, entities, mapStore, unresolved, uniqueId };

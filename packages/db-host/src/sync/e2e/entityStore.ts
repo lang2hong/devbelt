@@ -4,6 +4,7 @@ import type { QueryFolder, ChangeSource } from '../../connection/queryStore.js';
 import { SYNC_ENTITY_TYPES, type SyncEntityRef, type SyncEntityType } from './syncEntity.js';
 import type { SyncAuthenticatorGroup, SyncAuthenticatorTag, SyncAuthenticatorEntryValue } from './authenticatorTypes.js';
 import type { SyncSchemaNotesValue } from './schemaNotesTypes.js';
+import type { SyncAiModelAccessValue } from './aiModelAccessTypes.js';
 import { assertU64Decimal } from './types.js';
 import type { MementoLike } from './stateStore.js';
 
@@ -32,7 +33,7 @@ export interface EntitySyncRecord {
 export type EntityValue =
   | SavedConnection | ConnectionGroup | SavedQuery | QueryFolder
   | SyncAuthenticatorGroup | SyncAuthenticatorTag | SyncAuthenticatorEntryValue
-  | SyncSchemaNotesValue;
+  | SyncSchemaNotesValue | SyncAiModelAccessValue;
 
 /**
  * 同步实体后端（P6）：把一类实体的读写收敛到同一端口，供 EntityStore 按类型分派。
@@ -124,6 +125,9 @@ export class EntityStore {
     store: ConnectionStore,
     private readonly authenticator?: EntityBackend,
     private readonly schemaNotes?: EntityBackend,
+    private readonly aiModelAccess?: EntityBackend,
+    /** 选择性同步（按机器）：false 的类型不出现在 listForSync（出站不推送、孤儿候选不参与）；读写不受影响。 */
+    private readonly typeEnabled?: (type: SyncEntityType) => boolean,
   ) {
     this.personal = new PersonalEntityBackend(store);
   }
@@ -143,16 +147,22 @@ export class EntityStore {
       case 'schemaNotes':
         if (!this.schemaNotes) throw new Error(`no sync backend for entity type ${type}`);
         return this.schemaNotes;
+      case 'aiModelAccess':
+        if (!this.aiModelAccess) throw new Error(`no sync backend for entity type ${type}`);
+        return this.aiModelAccess;
     }
   }
 
   /** 全部后端实体（含墓碑）摘要。 */
   listForSync(): EntitySyncRecord[] {
-    return [
+    const enabled = this.typeEnabled ?? (() => true);
+    const all: EntitySyncRecord[] = [
       ...this.personal.listForSync(),
       ...(this.authenticator ? this.authenticator.listForSync() : []),
       ...(this.schemaNotes ? this.schemaNotes.listForSync() : []),
+      ...(this.aiModelAccess ? this.aiModelAccess.listForSync() : []),
     ];
+    return this.typeEnabled ? all.filter((r) => enabled(r.ref.type)) : all;
   }
 
   /** 按 typed ref 读取本地实体（含墓碑），不存在返回 undefined。 */
@@ -186,6 +196,8 @@ export function applyOrder(type: SyncEntityType): number {
     case 'authenticatorEntry': return 1;
     // S7f：注记引用连接（connId），连接（1）之后应用即可。
     case 'schemaNotes': return 4;
+    // 无跨实体引用，任意顺序皆可。
+    case 'aiModelAccess': return 0;
   }
 }
 

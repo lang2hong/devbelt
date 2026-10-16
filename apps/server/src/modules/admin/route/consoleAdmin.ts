@@ -223,6 +223,28 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
         reply.code(result.status).send(result.body);
       });
 
+      child.patch('/api/admin/users/:userId/role', { schema: { params: adminUserIdParam, body: adminUserRoleBody } }, async (req, reply) => {
+        if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
+        const actor = userIdOf(req);
+        const target = Number((req.params as Record<string, unknown>).userId);
+        const { role, reason } = req.body as { role: 'user' | 'platform_admin'; reason: string };
+        const result = await opts.idempotencyService.run({
+          actorUserId: actor,
+          sessionId: sessionIdOf(req),
+          method: 'PATCH',
+          normalizedPath: `/api/admin/users/${target}/role`,
+          idempotencyKey: adminWriteKey(req),
+          requestBody: req.body,
+          retentionMs: ADMIN_RETENTION_MS,
+          beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
+          business: async (tx: Queryable) => {
+            const r = await svc.setUserRoleInTx(tx, actor, target, role, reason);
+            return { status: 200, body: { user: r } };
+          },
+        });
+        reply.code(result.status).send(result.body);
+      });
+
       child.patch('/api/admin/users/:userId/subscription', { schema: { params: adminUserIdParam, body: adminUserSubscriptionBody } }, async (req, reply) => {
         if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
         const actor = userIdOf(req);
@@ -558,6 +580,16 @@ const adminUserStatusBody = {
   additionalProperties: false,
   properties: {
     status: { type: 'string', enum: ['active', 'disabled'] },
+    reason: { type: 'string', minLength: 1, maxLength: 500 },
+  },
+} as const;
+
+const adminUserRoleBody = {
+  type: 'object',
+  required: ['role', 'reason'],
+  additionalProperties: false,
+  properties: {
+    role: { type: 'string', enum: ['user', 'platform_admin'] },
     reason: { type: 'string', minLength: 1, maxLength: 500 },
   },
 } as const;

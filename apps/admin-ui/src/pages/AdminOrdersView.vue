@@ -220,30 +220,10 @@ async function confirmRefund(): Promise<void> {
 </template>
 
 <style scoped>
-.page { max-width: 960px; margin: 0 auto; }
-h2 { font-size: 20px; font-weight: 700; color: var(--c-text); }
-.bar { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
-input, select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; }
-.table { width: 100%; border-collapse: collapse; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: 8px; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eaeef2; font-size: 13px; }
-th { white-space: nowrap; color: var(--c-text-muted); font-weight: 600; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
 .badge.pending { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .badge.paid { background: var(--c-accent-bg); color: var(--c-accent); }
 .badge.fulfilled { background: #dafbe1; color: var(--c-success-text); }
 .badge.failed, .badge.expired, .badge.refunded { background: #ffebe9; color: var(--c-danger); }
-.btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
-.btn.secondary { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); }
-.btn.small { padding: 5px 10px; font-size: 13px; }
-.btn.danger { background: var(--c-danger); }
-.btn:disabled { opacity: 0.6; cursor: default; }
-.actions { display: flex; gap: 6px; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
-.load-more { margin: 16px 0; }
-.head { margin-bottom: 16px; }
-.head h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sub { margin: 4px 0 0; font-size: 13px; color: var(--c-text-muted); }
 </style>

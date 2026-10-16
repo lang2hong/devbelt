@@ -730,6 +730,42 @@ describe('console admin routes', () => {
     await b.app.close();
   });
 
+  it('role: grant/revoke platform_admin + 审计；改自己角色 403（防自锁）；幂等重放同值', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const target = await b.userRepo.create('role@b.com', 'hash');
+
+    const grant = await b.app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${target.id}/role`,
+      headers: await b.writeHeaders(admin.id, randomUUID()),
+      payload: { role: 'platform_admin', reason: '新运营' },
+    });
+    expect(grant.statusCode).toBe(200);
+    expect(grant.json().user.role).toBe('platform_admin');
+    expect((await b.userRepo.findById(target.id))?.role).toBe('platform_admin');
+    expect(b.auditRepo.events.some((e) => e.eventType === 'admin.role.granted' && e.targetId === String(target.id))).toBe(true);
+
+    const revoke = await b.app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${target.id}/role`,
+      headers: await b.writeHeaders(admin.id, randomUUID()),
+      payload: { role: 'user', reason: '离职' },
+    });
+    expect(revoke.statusCode).toBe(200);
+    expect((await b.userRepo.findById(target.id))?.role).toBe('user');
+    expect(b.auditRepo.events.some((e) => e.eventType === 'admin.role.revoked' && e.targetId === String(target.id))).toBe(true);
+
+    const self = await b.app.inject({
+      method: 'PATCH',
+      url: `/api/admin/users/${admin.id}/role`,
+      headers: await b.writeHeaders(admin.id, randomUUID()),
+      payload: { role: 'user', reason: '手滑' },
+    });
+    expect(self.statusCode).toBe(403);
+    await b.app.close();
+  });
+
   it('orders: non-positive-int userId filter is rejected 422', async () => {
     const b = await build();
     const admin = await b.makeAdmin();

@@ -42,6 +42,8 @@ export interface IAiUsageRepo {
   settleInTx(exec: Queryable, userId: number, usageMonth: string, settlement: AiSettlement): Promise<void>;
   /** 只读查询当月行（不存在返回 undefined，用于 GET /api/ai/usage 与 409 上下文）。 */
   find(userId: number, usageMonth: string): Promise<AiUsageRow | undefined>;
+  /** 近 N 个月的用量行（按 usage_month 降序；计费 token 口径；管理后台用户视图）。 */
+  listMonthlyByUser(userId: number, months: number): Promise<Array<AiUsageRow & { usageMonth: string }>>;
 }
 
 const ROW_COLS =
@@ -119,6 +121,25 @@ export class MysqlAiUsageRepo implements IAiUsageRepo {
         usageMonth,
       ],
     );
+  }
+
+  async listMonthlyByUser(userId: number, months: number): Promise<Array<AiUsageRow & { usageMonth: string }>> {
+    const [rows] = await this.db().query<any[]>(
+      `SELECT usage_month, prompt_tokens, completion_tokens, reserved_prompt_tokens, reserved_completion_tokens, request_count
+         FROM ai_token_usage
+        WHERE user_id = ?
+        ORDER BY usage_month DESC
+        LIMIT ${Math.max(1, Math.min(Math.floor(months), 24))}`,
+      [userId],
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      usageMonth: String(r.usage_month),
+      promptTokens: Number(r.prompt_tokens ?? 0),
+      completionTokens: Number(r.completion_tokens ?? 0),
+      reservedPromptTokens: Number(r.reserved_prompt_tokens ?? 0),
+      reservedCompletionTokens: Number(r.reserved_completion_tokens ?? 0),
+      requestCount: Number(r.request_count ?? 0),
+    }));
   }
 
   async find(userId: number, usageMonth: string): Promise<AiUsageRow | undefined> {
