@@ -90,9 +90,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; z-index: 1000; }
-.modal { background: var(--c-surface); border-radius: 8px; padding: 20px 24px; min-width: min(360px, 90vw); max-width: 90vw; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px 24px; z-index: 1000; overflow-y: auto; }
+.modal { background: var(--c-surface); border-radius: 8px; padding: 20px 24px; min-width: min(360px, 90vw); max-width: 90vw; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); max-height: 88vh; display: flex; flex-direction: column; margin: auto; }
 .modal { outline: none; }
-.modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--c-text); }
-.modal-body { display: flex; flex-direction: column; gap: 8px; }
+.modal-title { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--c-text); flex-shrink: 0; }
+.modal-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; flex: 1; }
 </style>
