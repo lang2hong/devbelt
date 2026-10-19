@@ -4,6 +4,7 @@ import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import ResultGrid from '../components/ResultGrid.vue';
 import { deleteRowsMessage, updateCellMessage } from '../utils/gridOps';
+import { compareCellValues } from '../utils/gridSort';
 import ResultChart from '../components/ResultChart.vue';
 
 const { post, onMessage } = useVsCode();
@@ -73,10 +74,7 @@ const displayRows = computed(() => {
     if (an && bn) return 0;
     if (an) return 1;
     if (bn) return -1;
-    const na = typeof a === 'number' ? a : Number(a);
-    const nb = typeof b === 'number' ? b : Number(b);
-    if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na < nb ? -1 : na > nb ? 1 : 0) * dir;
-    return String(a).localeCompare(String(b)) * dir;
+    return compareCellValues(a, b) * dir;
   });
 });
 

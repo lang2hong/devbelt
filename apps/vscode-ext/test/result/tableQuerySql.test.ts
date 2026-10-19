@@ -217,3 +217,47 @@ describe('筛选值引号按列类型决定', () => {
       .toBe("SELECT * FROM `db`.`t` WHERE `id` = '1' LIMIT 100 OFFSET 0");
   });
 });
+
+/**
+ * BIGINT 的十进制文本可超过 2^53。筛选值必须逐位保留：
+ * 一旦经过 Number，`2082672181952057345` 会被折叠成 `2082672181952057300`，
+ * 生成一条指向另一个 ID 的 SQL（查询 0 行、更新/删除命中错误行）。
+ */
+describe('BIGINT 精度（> 2^53）', () => {
+  const types = { order_id: 'bigint' };
+  const ids = [
+    '2082672181952057300',
+    '2082672181952057344',
+    '2082672181952057345',
+    '9007199254740993',
+    '-9007199254740993',
+  ];
+
+  it('等值筛选字面量逐位保留', () => {
+    for (const id of ids) {
+      expect(buildCondition(DatabaseType.MYSQL, { column: 'order_id', op: 'eq', value: id }, types))
+        .toBe(`\`order_id\` = ${id}`);
+    }
+  });
+
+  it('BETWEEN / IN 同样逐位保留', () => {
+    expect(buildCondition(
+      DatabaseType.MYSQL,
+      { column: 'order_id', op: 'between', value: '2082672181952057344', value2: '2082672181952057345' },
+      types,
+    )).toBe('`order_id` BETWEEN 2082672181952057344 AND 2082672181952057345');
+    expect(buildCondition(
+      DatabaseType.MYSQL,
+      { column: 'order_id', op: 'in', value: '2082672181952057344, 2082672181952057345' },
+      types,
+    )).toBe('`order_id` IN (2082672181952057344, 2082672181952057345)');
+  });
+
+  it('非字符串入参先转字符串，不进入数值拼接口径', () => {
+    expect(buildCondition(
+      DatabaseType.MYSQL,
+      { column: 'age', op: 'eq', value: 18 as unknown as string },
+      { age: 'int' },
+    )).toBe('`age` = 18');
+  });
+});

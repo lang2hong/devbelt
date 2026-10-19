@@ -597,7 +597,8 @@ watch(() => props.filterConditions, (conds) => {
                 :value="temporalInputValue(cond.column, cond.value)"
                 @change="onTemporalFilterInput(cond, 'value', $event)" />
               <input v-else-if="isNumberColumn(cond.column) && !MULTI_VALUE_OPS.includes(cond.op)"
-                v-model="cond.value" class="input" type="number" />
+                v-model="cond.value" class="input" type="text" inputmode="decimal"
+                :placeholder="filterPlaceholderFor(cond)" />
               <input v-else v-model="cond.value" class="input"
                 :placeholder="filterPlaceholderFor(cond)" /></template>
             <button class="btn" @click="removeCondition(index)">✕</button>
@@ -659,7 +660,7 @@ watch(() => props.filterConditions, (conds) => {
               :value="insertInputValue(f.name)"
               @change="onTemporalInsertInput(f.name, $event)" />
             <input v-else-if="isNumberColumn(f.name)" v-model="newRow[f.name]" class="cell-edit"
-              type="number" :placeholder="t('wv.common.null')" />
+              type="text" inputmode="decimal" :placeholder="t('wv.common.null')" />
             <input v-else v-model="newRow[f.name]" class="cell-edit"
               :placeholder="insertPlaceholderFor(f.name)" />
           </td>
