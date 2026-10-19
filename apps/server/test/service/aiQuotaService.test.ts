@@ -272,6 +272,16 @@ describe('AiQuotaService 双段（月额度 + 加油包 grants FIFO，P9.1）', 
     expect(snapshot.remaining).toBe(1300);
   });
 
+describe('AiQuotaService · 并发上限（013）', () => {
+  it('读取套餐特性 maxAiConcurrentRequests：缺失回退 1', async () => {
+    const { quota, plans } = build();
+    expect(await quota.resolveConcurrencyLimit(7)).toBe(1); // 特性缺失 → 默认 1
+    const free = plans.plans.find((p: { code: string }) => p.code === 'free')!;
+    free.features = { ...free.features, maxAiConcurrentRequests: 2 };
+    expect(await quota.resolveConcurrencyLimit(7)).toBe(2); // free 特性生效
+  });
+});
+
 describe('AiQuotaService · 请求流水（012）', () => {
   it('settle 带 meta：同事务写 ai_request_log，月账本累计原始与计费两套口径', async () => {
     const { quota, repo, logRepo, plans } = build();

@@ -28,6 +28,14 @@ export class AiProviderAuthError extends DomainError {
 }
 
 /** 上游 AI 限流 → 429 AI_RATE_LIMITED（按上游 Retry-After 或 60s 默认值）。 */
+/** 每用户并发 AI 请求超套餐上限（free=1 / pro=3，特性 maxAiConcurrentRequests）→ 429。 */
+export class AiConcurrencyExceededError extends DomainError {
+  constructor(public readonly retryAfterSeconds: number) {
+    super('AI concurrency limit exceeded for your plan', 'AI_CONCURRENCY_EXCEEDED');
+    this.name = 'AiConcurrencyExceededError';
+  }
+}
+
 export class AiProviderRateLimitedError extends DomainError {
   constructor(public readonly retryAfterSeconds: number) {
     super('AI provider rate limited', 'AI_RATE_LIMITED');

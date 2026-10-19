@@ -256,6 +256,16 @@ export class AiQuotaService {
     const raw = entitlement.maxAiTokensMonthly;
     return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
   }
+
+  /** 并发 AI 请求上限（013：套餐特性 maxAiConcurrentRequests；缺省/非法回退 1）。 */
+  async resolveConcurrencyLimit(userId: number): Promise<number> {
+    const subscription = await this.personalSubscriptionRepo.findByUserId(userId);
+    const plan = subscription ? await this.planRepo.findById(subscription.planId) : undefined;
+    const freePlan = await this.planRepo.findByCode('free');
+    const entitlement = deriveEntitlement(subscription, plan, freePlan);
+    const raw = entitlement.maxAiConcurrentRequests;
+    return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1;
+  }
 }
 
 /** UTC 月份键（`YYYY-MM`）；账本按月分桶，下月 1 日 UTC 自动"重置"。 */

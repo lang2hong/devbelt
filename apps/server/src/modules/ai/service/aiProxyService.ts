@@ -1,6 +1,7 @@
 import type { ServerResponse } from 'node:http';
 import { estimateTokens, type TokenUsage } from '@devbelt/ai-core';
 import { AiBillingService, billingTokens, costCents, type EffectiveUpstream } from './aiBillingService.js';
+import { AiConcurrencyExceededError } from '../domain/errors.js';
 import { parseSse } from '@devbelt/ai-core/sse';
 import { DomainError, ValidationError } from '../../../domain/errors.js';
 import { errorStatus } from '../../../middleware/errorHandler.js';
@@ -14,7 +15,7 @@ import type { AiQuotaService, AiReservation } from './aiQuotaService.js';
 import type { AiUpstreamConfig } from '../aiConfig.js';
 
 /** 服务端 completion 上限（与 §6.5 schema 3-4K 预算对齐；客户端请求超过则收敛到此值）。 */
-export const MAX_COMPLETION_TOKENS = 4096;
+export const MAX_COMPLETION_TOKENS = 512;
 const MAX_MESSAGES = 64;
 const MAX_MESSAGE_CHARS = 60_000;
 const MAX_TOTAL_CHARS = 120_000;
@@ -83,6 +84,9 @@ export interface AiForwardArgs {
  * - finish/error/abort 都走 finally 结算（单段月额度）。
  */
 export class AiProxyService {
+  /** 每用户在途请求计数（并发闸门，013）。 */
+  private readonly inflight = new Map<number, number>();
+
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
@@ -159,6 +163,21 @@ export class AiProxyService {
    * 此时尚未写任何响应头，由路由转成 JSON 错误。
    */
   async begin(userId: number, body: ValidatedChatRequest): Promise<AiReservation> {
+    // 并发闸门（013）：按套餐特性 maxAiConcurrentRequests 限制在途请求数（free=1 / pro=3）。
+    // 槽位在 forward 的结算段 finally 释放（含 abort/失败路径）；进程内计数，重启自愈。
+    const concurrencyLimit = await this.opts.quota.resolveConcurrencyLimit(userId);
+    const inFlight = this.inflight.get(userId) ?? 0;
+    if (inFlight >= concurrencyLimit) throw new AiConcurrencyExceededError(5);
+    this.inflight.set(userId, inFlight + 1);
+    try {
+      return await this.beginWithSlot(userId, body);
+    } catch (err) {
+      this.releaseSlot(userId);
+      throw err;
+    }
+  }
+
+  private async beginWithSlot(userId: number, body: ValidatedChatRequest): Promise<AiReservation> {
     const upstream = await this.effectiveUpstream();
     this.assertConfigured(upstream);
     const estimatedPromptTokens = estimatePromptTokens(body.messages);
@@ -294,6 +313,11 @@ export class AiProxyService {
           }
         : { promptTokens: 0, completionTokens: 0 };
       const usageEstimated = upstreamAccepted && usage === undefined;
+      // 输出/输入比告警（013）：> 2 记日志 + 审计标记（不阻断、不改计费）。
+      const outputRatioExceeded = raw.promptTokens > 0 && raw.completionTokens / raw.promptTokens > 2;
+      if (outputRatioExceeded) {
+        this.opts.log('ai output ratio exceeded', { userId, promptTokens: raw.promptTokens, completionTokens: raw.completionTokens });
+      }
       const upstreamConf = await this.effectiveUpstream();
       const weighted = billingTokens(raw.promptTokens, raw.completionTokens, upstreamConf.weight, upstreamConf.multiplier);
       const charge = { prompt: weighted.prompt, completion: weighted.completion };
@@ -313,11 +337,15 @@ export class AiProxyService {
             status: clientAborted ? 'aborted' : failure ? 'failed' : 'completed',
             usageEstimated,
             latencyMs: Date.now() - startedAt,
+            ...(outputRatioExceeded ? { outputRatioExceeded: true } : {}),
           },
         );
       } catch (err) {
         // 响应已发出；结算失败只告警（额度可能滞留预占，运维可见）。
         this.opts.log('ai quota settle failed', { userId, err: String(err) });
+      } finally {
+        // 无论结算成败都释放并发槽位（含 abort/失败路径——本段在 forward 的 finally 内）。
+        this.releaseSlot(userId);
       }
 
       const meta = {
@@ -370,6 +398,12 @@ export class AiProxyService {
       multiplier: 1,
       pricing: null,
     };
+  }
+
+  private releaseSlot(userId: number): void {
+    const cur = this.inflight.get(userId) ?? 0;
+    if (cur <= 1) this.inflight.delete(userId);
+    else this.inflight.set(userId, cur - 1);
   }
 
   private assertConfigured(upstream: EffectiveUpstream): void {

@@ -3,7 +3,7 @@ import type { ServerResponse } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 import { AiProxyService, MAX_COMPLETION_TOKENS, estimatePromptTokens } from '../../src/modules/ai/service/aiProxyService.js';
 import type { AiQuotaService, AiReservation } from '../../src/modules/ai/service/aiQuotaService.js';
-import { AiProviderError } from '../../src/modules/ai/domain/errors.js';
+import { AiConcurrencyExceededError, AiProviderError } from '../../src/modules/ai/domain/errors.js';
 import { AuditWriter } from '../../src/service/auditWriter.js';
 import { FakeAuditRepo } from '../helpers/linkFlowFakes.js';
 
@@ -61,9 +61,10 @@ function recordingFetch(response: Response | (() => Promise<Response> | Response
   return { calls, fetchImpl };
 }
 
-function quotaStub(overrides: { settle?: (reservation: AiReservation, charge: { promptTokens: number; completionTokens: number }) => Promise<void> } = {}): {
+function quotaStub(overrides: { settle?: (reservation: AiReservation, charge: { promptTokens: number; completionTokens: number }) => Promise<void>; concurrencyLimit?: number } = {}): {
   reserve: ReturnType<typeof vi.fn>;
   settle: ReturnType<typeof vi.fn>;
+  resolveConcurrencyLimit: ReturnType<typeof vi.fn>;
   quota: AiQuotaService;
 } {
   const reserve = vi.fn(
@@ -79,7 +80,8 @@ function quotaStub(overrides: { settle?: (reservation: AiReservation, charge: { 
   );
   const settle = vi.fn(overrides.settle ?? (async () => {}));
   const getUsage = vi.fn();
-  return { reserve, settle, quota: { reserve, settle, getUsage } as unknown as AiQuotaService };
+  const resolveConcurrencyLimit = vi.fn(async () => overrides.concurrencyLimit ?? 8);
+  return { reserve, settle, resolveConcurrencyLimit, quota: { reserve, settle, getUsage, resolveConcurrencyLimit } as unknown as AiQuotaService };
 }
 
 function buildService(opts: {
@@ -180,6 +182,42 @@ describe('AiProxyService.begin', () => {
     expect(userId).toBe(1);
     expect(opts.estimatedPromptTokens).toBe(estimatePromptTokens(BODY.messages));
     expect(opts.maxCompletionTokens).toBe(MAX_COMPLETION_TOKENS);
+  });
+});
+
+describe('AiProxyService 并发闸门（013）', () => {
+  it('超过套餐并发上限 → AiConcurrencyExceededError，不预占额度', async () => {
+    const { fetchImpl } = recordingFetch(new Response('x', { status: 200 }));
+    const { reserve, quota } = quotaStub({ concurrencyLimit: 1 });
+    const { service } = buildService({ fetchImpl, quota });
+    await service.begin(7, BODY);
+    const err = await service.begin(7, BODY).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AiConcurrencyExceededError);
+    expect((err as AiConcurrencyExceededError).retryAfterSeconds).toBe(5);
+    expect(reserve).toHaveBeenCalledTimes(1);
+  });
+
+  it('forward 结束后释放槽位：可再次 begin', async () => {
+    const events = ['data: {"usage":{"prompt_tokens":100,"completion_tokens":8}}\n\n'];
+    const { fetchImpl } = recordingFetch(new Response(sseText(events), { status: 200 }));
+    const { quota } = quotaStub({ concurrencyLimit: 1 });
+    const { service } = buildService({ fetchImpl, quota });
+    const res = new FakeRes();
+    await service.forward({ userId: 7, body: BODY, reservation: RESERVATION, res: res.asServerResponse() });
+    await expect(service.begin(7, BODY)).resolves.toBeDefined();
+  });
+
+  it('begin 中途抛错（未配置上游）→ 槽位不残留', async () => {
+    const { quota } = quotaStub({ concurrencyLimit: 1 });
+    const svcNoUpstream = new AiProxyService({
+      config: { configured: false, model: '', baseUrl: '' },
+      quota,
+      audit: new AuditWriter(new FakeAuditRepo()),
+      log: () => {},
+    });
+    await svcNoUpstream.begin(7, BODY).catch(() => {});
+    const err2 = await svcNoUpstream.begin(7, BODY).catch((e: unknown) => e);
+    expect(err2).toBeInstanceOf(AiProviderError);
   });
 });
 

@@ -3,7 +3,7 @@ import { authScope, type GetAuthUser } from '../../../middleware/requireAuth.js'
 import { sendError } from '../../../middleware/errorHandler.js';
 import type { TokenService } from '../../../service/tokenService.js';
 import type { RateLimitService } from '../../../service/rateLimitService.js';
-import { AiQuotaExceededError } from '../domain/errors.js';
+import { AiConcurrencyExceededError, AiQuotaExceededError } from '../domain/errors.js';
 import type { AiProxyService, ValidatedChatRequest } from '../service/aiProxyService.js';
 import type { AiReservation } from '../service/aiQuotaService.js';
 
@@ -45,6 +45,14 @@ export async function aiChatRoutes(app: FastifyInstance, opts: AiChatRouteOption
             const reservation = await opts.proxy.begin(userId, body);
             return { body, reservation };
           } catch (e) {
+            if (e instanceof AiConcurrencyExceededError) {
+              reply.code(429).header('Retry-After', String(e.retryAfterSeconds)).send({
+                message: e.message,
+                code: e.code,
+                retryAfterSeconds: e.retryAfterSeconds,
+              });
+              return null;
+            }
             if (e instanceof AiQuotaExceededError) {
               reply.code(409).send({
                 message: e.message,

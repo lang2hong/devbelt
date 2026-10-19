@@ -11,12 +11,13 @@ import { aiTopupMigration } from './009_ai_topup.js';
 import { aiProvidersMigration } from './010_ai_providers.js';
 import { aiModelPricingMigration } from './011_ai_model_pricing.js';
 import { aiCreditsBillingMigration } from './012_ai_credits_billing.js';
+import { aiCreditTiersMigration } from './013_ai_credit_tiers.js';
 
 /**
  * 迁移集合（开发阶段 squash：原 001–024 已合并为单一基线）。
  * 新库/旧库均由基线重建；旧库的历史版本由 LEGACY_MIGRATION_VERSIONS 识别并放行。
  */
-export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration, planOrderingMigration, authenticatorQuotaMigration, syncEntityKindMigration, redisEngineMigration, auditQueryIndexesMigration, aiQuotaMigration, aiTopupMigration, aiProvidersMigration, aiModelPricingMigration, aiCreditsBillingMigration];
+export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration, planOrderingMigration, authenticatorQuotaMigration, syncEntityKindMigration, redisEngineMigration, auditQueryIndexesMigration, aiQuotaMigration, aiTopupMigration, aiProvidersMigration, aiModelPricingMigration, aiCreditsBillingMigration, aiCreditTiersMigration];
 
 /**
  * squash 前的历史版本登记（001–024）。基线会重建这些表；
