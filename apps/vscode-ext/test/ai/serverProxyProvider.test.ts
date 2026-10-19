@@ -52,6 +52,25 @@ describe('ServerProxyProvider', () => {
     await expect(iterate()).rejects.toBeInstanceOf(AiLoginRequiredError);
   });
 
+  it('推理模型：reasoning_content 作为 reasoning 增量下发，不进 delta', async () => {
+    const events = [
+      '{"choices":[{"delta":{"reasoning_content":"先想"}}]}',
+      '{"choices":[{"delta":{"reasoning_content":"一下"}}]}',
+      '{"choices":[{"delta":{"content":"答案"}}]}',
+      '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ];
+    const { fetchImpl } = recordingFetch(new Response(sseText(events), { status: 200 }));
+    const chunks = [];
+    for await (const chunk of provider(fetchImpl).chatStream({ model: 'm', messages: [{ role: 'user', content: 'hi' }] })) {
+      chunks.push(chunk);
+    }
+    expect(chunks[0]).toMatchObject({ reasoning: '先想', delta: undefined });
+    expect(chunks[1]).toMatchObject({ reasoning: '一下', delta: undefined });
+    expect(chunks[2]).toMatchObject({ delta: '答案' });
+    expect(chunks[2].reasoning).toBeUndefined();
+  });
+
   it('流式：URL/认证头/请求体正确，delta/finish/usage 解析', async () => {
     const events = [
       '{"choices":[{"delta":{"content":"你"}}]}',

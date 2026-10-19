@@ -7,7 +7,7 @@ import { useI18n } from '../../composables/useI18n';
 import { parseInlineSegments, parseMessageBlocks, type AiInlineSegment, type AiRunningPayload, type AiToolResultPayload } from '../../utils/aiChatStream';
 
 const props = defineProps<{
-  message: { role: 'user' | 'assistant'; content: string; error?: boolean; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> };
+  message: { role: 'user' | 'assistant'; content: string; reasoning?: string; error?: boolean; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> };
   streaming?: boolean;
   /** 当前连接引擎（传给 CodeBlock 决定运行按钮显隐）。 */
   dbType?: string;
@@ -48,6 +48,10 @@ watch(
     }"
   >
     <template v-if="message.role === 'assistant' && !message.error">
+      <details v-if="message.reasoning" class="ai-reasoning" :open="props.streaming">
+        <summary>{{ props.streaming ? t('wv.ai.reasoning.streaming') : t('wv.ai.reasoning') }}</summary>
+        <pre class="ai-reasoning-text">{{ message.reasoning }}</pre>
+      </details>
       <template v-for="(block, index) in blocks" :key="index">
         <template v-if="block.type === 'code'">
           <CodeBlock :code="block.content" :lang="block.lang" :db-type="props.dbType" :msg-idx="props.msgIdx" :block-idx="index" />
@@ -88,12 +92,46 @@ watch(
   </div>
 </template>
 
+.ai-reasoning {
+  margin: 2px 0 10px;
+  border: 1px solid var(--vscode-panel-border, rgba(127,127,127,.35));
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08));
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.ai-reasoning summary {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: .75;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-reasoning-text {
+  margin: 6px 0 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 12.5px;
+  opacity: .8;
+  max-height: 240px;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 <style scoped>
 .ai-bubble {
   padding: 6px 10px;
   border-radius: 6px;
   margin: 4px 0;
   max-width: 100%;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 .ai-bubble-user {
@@ -120,6 +158,8 @@ watch(
 }
 .ai-table-block {
   margin: 4px 0;
+  min-width: 0;
+  max-width: 100%;
 }
 .ai-table-head {
   display: flex;
@@ -151,6 +191,7 @@ watch(
 .ai-table-scroll {
   margin: 2px 0 4px 16px;
   max-width: calc(100% - 16px);
+  min-width: 0;
   overflow-x: auto;
 }
 .ai-table {

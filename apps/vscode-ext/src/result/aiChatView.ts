@@ -408,9 +408,14 @@ export class AiChatView extends BaseWebView {
     this.activeStream = stream;
 
     let assistant = '';
+    let reasoning = '';
     try {
       for await (const chunk of stream) {
         if (this.streamSeq !== streamId) return;
+        if (chunk.reasoning) {
+          reasoning += chunk.reasoning;
+          this.post({ type: 'chunk', sessionId: session.id, delta: '', reasoning: chunk.reasoning } as never);
+        }
         if (chunk.delta) {
           assistant += chunk.delta;
           this.post({ type: 'chunk', sessionId: session.id, delta: chunk.delta } as never);
@@ -422,8 +427,8 @@ export class AiChatView extends BaseWebView {
       if (assistant && dialect) {
         assistant = quoteReservedIdentifiersInMarkdown(assistant, dialect);
       }
-      if (assistant) {
-        session.messages.push({ role: 'assistant', content: assistant });
+      if (assistant || reasoning) {
+        session.messages.push({ role: 'assistant', content: assistant, ...(reasoning ? { reasoning } : {}) });
         this.saveSession(session);
       }
       this.post({ type: 'finish', sessionId: session.id, ...(assistant ? { content: assistant } : {}) } as never);

@@ -41,6 +41,8 @@ export interface ChatResponse {
 export interface ChatStreamChunk {
   /** 增量文本。 */
   delta?: string;
+  /** 推理模型的思考过程增量（reasoning_content / reasoning；仅展示，不计费、不入正文）。 */
+  reasoning?: string;
   finishReason?: 'stop' | 'length' | 'content_filter' | null;
   /** 通常在 finish chunk 返回（取决于上游是否开启 usage 上报）。 */
   usage?: TokenUsage;

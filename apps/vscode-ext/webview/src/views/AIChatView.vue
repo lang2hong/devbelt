@@ -24,6 +24,8 @@ interface SessionSummary {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** 推理模型的思考过程（可折叠展示；本地会话回看）。 */
+  reasoning?: string;
   error?: boolean;
   /** 代码块下标 → 内联执行结果（P9：blockRef 绑定；瞬态，不进会话存储）。 */
   blockResults?: Record<number, AiToolResultPayload>;
@@ -87,7 +89,7 @@ provide(OPTIMIZE_SQL_KEY, (rawSql: string, costMs?: number) => {
   if (!sql) return;
   const prefix = t('ai.optimize.userPrefix', { sec: formatElapsed(costMs ?? 0) });
   messages.value.push({ role: 'user', content: `${prefix}\n\`\`\`sql\n${sql}\n\`\`\`` });
-  streaming.value = { content: '' };
+  streaming.value = { content: '', reasoning: '' };
   skipAutoRunOnce = true;
   post({ type: 'optimizeSql', text: sql, ...(costMs !== undefined ? { costMs } : {}) });
 });
@@ -99,7 +101,7 @@ const connections = ref<{ id: string; name: string }[]>([]);
 const sessions = ref<SessionSummary[]>([]);
 const activeSessionId = ref<string | undefined>(undefined);
 const messages = ref<ChatMessage[]>([]);
-const streaming = ref<{ content: string } | null>(null);
+const streaming = ref<{ content: string; reasoning: string } | null>(null);
 const selectedConnId = ref<string | undefined>(undefined);
 const input = ref('');
 const includeColumnComments = ref(true);
@@ -229,7 +231,8 @@ onMounted(() => {
       case 'chunk':
         // 生成中切走会话：旧会话分片不得流进当前视图。
         if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
-        if (!streaming.value) streaming.value = { content: '' };
+        if (!streaming.value) streaming.value = { content: '', reasoning: '' };
+        if (msg.reasoning) streaming.value.reasoning += msg.reasoning;
         streaming.value.content += msg.delta ?? '';
         break;
       case 'finish': {
@@ -237,8 +240,9 @@ onMounted(() => {
         // host 传权威最终版（保留字补引后的 ```sql 块）时以它为准替换流式缓冲，
         // 保证显示 = 落库 = 自动执行 = 插入编辑器四者一致。
         const content = typeof msg.content === 'string' ? msg.content : (streaming.value?.content ?? '');
+        const reasoning = streaming.value?.reasoning ?? '';
         streaming.value = null;
-        if (content) messages.value.push({ role: 'assistant', content });
+        if (content || reasoning) messages.value.push({ role: 'assistant', content, ...(reasoning ? { reasoning } : {}) });
         if (msg.error) messages.value.push({ role: 'assistant', content: msg.error.message, error: true });
         // 自动执行仅限正常完成：Stop 中断（aborted）后的半截/完整 SQL 不跑，
         // 用户中断即表达「不要继续」，自动执行与之相悖。
@@ -284,7 +288,8 @@ onMounted(() => {
         if (msg.saved) showRulesDialog.value = false;
         break;
       case 'quotaUpdate':
-        quota.value = msg.quota ?? null;
+        // 刷新失败（null）时保留旧值，避免界面闪成"未登录"。
+        if (msg.quota) quota.value = msg.quota;
         break;
       case 'contextChanged': {
         const nextConnId = String(msg.context?.connId ?? '');
@@ -388,13 +393,34 @@ onMounted(() => {
   post({ type: 'ready' });
 });
 
-onUnmounted(() => cleanup?.());
+// 积分自动刷新：面板重新可见 / 窗口聚焦 / 可见时每 60s。
+function refreshQuota(): void {
+  post({ type: 'requestQuotaRefresh' });
+}
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'visible') refreshQuota();
+}
+function onWindowFocus(): void {
+  refreshQuota();
+}
+document.addEventListener('visibilitychange', onVisibilityChange);
+window.addEventListener('focus', onWindowFocus);
+const quotaTimer = window.setInterval(() => {
+  if (document.visibilityState === 'visible') refreshQuota();
+}, 60_000);
+
+onUnmounted(() => {
+  cleanup?.();
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('focus', onWindowFocus);
+  window.clearInterval(quotaTimer);
+});
 
 function send(): void {
   const text = input.value.trim();
   if (!text || generating.value) return;
   messages.value.push({ role: 'user', content: text });
-  streaming.value = { content: '' };
+  streaming.value = { content: '', reasoning: '' };
   post({ type: 'send', sessionId: activeSessionId.value ?? '', text });
   input.value = '';
 }
@@ -510,6 +536,7 @@ function openContextDetail(): void {
       @open-console="buyTopup"
       @open-settings="post({ type: 'openSettings' })"
       @open-model-access="openModelAccess"
+      @refresh-quota="refreshQuota"
       @request-context-detail="openContextDetail"
     />
     <div class="ai-toolbar">

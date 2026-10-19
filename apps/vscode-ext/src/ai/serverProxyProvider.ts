@@ -152,10 +152,13 @@ export class ServerProxyProvider implements AiProvider {
         const choice = Array.isArray(choices) ? (choices[0] as Record<string, unknown> | undefined) : undefined;
         const deltaRaw = choice?.delta as Record<string, unknown> | undefined;
         const delta = typeof deltaRaw?.content === 'string' && deltaRaw.content.length > 0 ? deltaRaw.content : undefined;
+        // 推理模型：DashScope/DeepSeek 用 reasoning_content，部分网关用 reasoning。
+        const reasoningRaw = deltaRaw?.reasoning_content ?? deltaRaw?.reasoning;
+        const reasoning = typeof reasoningRaw === 'string' && reasoningRaw.length > 0 ? reasoningRaw : undefined;
         const finishReason = normalizeFinishReason(choice?.finish_reason);
         const usage = mapUsage(parsed.usage);
-        if (delta !== undefined || finishReason !== undefined || usage !== undefined) {
-          yield { delta, finishReason, usage };
+        if (delta !== undefined || reasoning !== undefined || finishReason !== undefined || usage !== undefined) {
+          yield { delta, ...(reasoning !== undefined ? { reasoning } : {}), finishReason, usage };
         }
       }
     } catch (err) {

@@ -5,6 +5,8 @@ import type * as vscode from 'vscode';
 export interface AiChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** 推理模型的思考过程（仅本地展示，不进入后续请求上下文、不上传服务端）。 */
+  reasoning?: string;
   /** 该条为错误提示（如上游失败），渲染为警示样式且不进入后续请求上下文。 */
   error?: boolean;
 }
@@ -34,6 +36,9 @@ function normalizeMessage(message: AiChatMessage): AiChatMessage {
   return {
     role: message.role,
     content: message.content.length > MAX_MESSAGE_CHARS ? message.content.slice(0, MAX_MESSAGE_CHARS) : message.content,
+    ...(message.reasoning
+      ? { reasoning: message.reasoning.length > MAX_MESSAGE_CHARS ? message.reasoning.slice(0, MAX_MESSAGE_CHARS) : message.reasoning }
+      : {}),
     ...(message.error ? { error: true as const } : {}),
   };
 }

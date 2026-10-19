@@ -87,6 +87,8 @@ function runInChat(): void {
   border-radius: 4px;
   margin: 4px 0;
   overflow: hidden;
+  max-width: 100%;
+  min-width: 0;
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
 }
 .ai-code-actions {
@@ -106,6 +108,8 @@ function runInChat(): void {
   margin: 0;
   padding: 8px;
   overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 12px);
   white-space: pre;

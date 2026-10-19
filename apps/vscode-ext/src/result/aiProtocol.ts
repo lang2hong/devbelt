@@ -79,6 +79,8 @@ export interface AiChunkDown {
   type: 'chunk';
   sessionId: string;
   delta: string;
+  /** 思考过程增量（推理模型；仅展示，不进入正文/上下文）。 */
+  reasoning?: string;
 }
 
 export interface AiFinishDown {

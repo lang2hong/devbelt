@@ -58,6 +58,8 @@ const emit = defineEmits<{
   /** 模型接入弹层（替代原 设置/清除 Key/测试 三个散按钮；Key 管理并入弹层）。 */
   openModelAccess: [];
   requestContextDetail: [];
+  /** 手动刷新积分（宿主 requestQuotaRefresh）。 */
+  refreshQuota: [];
 }>();
 
 const { t } = useI18n();
@@ -173,6 +175,7 @@ function onSelect(event: Event): void {
     </div>
     <div class="ai-context-row">
       <span class="ai-context-summary">{{ quotaLabel }}</span>
+      <button class="ai-btn ai-quota-refresh" :title="t('wv.ai.quota.refresh')" @click="emit('refreshQuota')">↻</button>
       <button
         v-if="quota"
         class="ai-btn ai-quota-buy"

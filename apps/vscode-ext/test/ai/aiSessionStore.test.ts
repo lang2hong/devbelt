@@ -66,6 +66,21 @@ describe('AiSessionStore（会话历史，本地 Memento）', () => {
     expect(loaded.messages[199].content).toBe('m249');
   });
 
+  it('思考过程（reasoning）随消息持久化，且按同一上限截断', async () => {
+    const { store } = makeStore();
+    const s = store.create();
+    s.messages.push({ role: 'assistant', content: '答案', reasoning: '先想一下' });
+    store.save(s);
+    const loaded = store.list().find((x) => x.id === s.id)!;
+    expect(loaded.messages[0]).toMatchObject({ role: 'assistant', content: '答案', reasoning: '先想一下' });
+
+    const long = store.create();
+    long.messages.push({ role: 'assistant', content: 'c', reasoning: 'x'.repeat(120_000) });
+    store.save(long);
+    const longLoaded = store.list().find((x) => x.id === long.id)!;
+    expect(longLoaded.messages[0].reasoning).toHaveLength(100_000);
+  });
+
   it('rename / delete', () => {
     const { store } = makeStore();
     const s = store.create();
