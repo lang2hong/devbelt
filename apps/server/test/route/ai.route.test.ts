@@ -225,7 +225,7 @@ describe('POST /api/ai/chat（SSE 端到端）', () => {
 
 describe('GET /api/ai/usage', () => {
   it('GET /api/ai/skus 返回上架档位（P9.1）', async () => {
-    const { app, token, topupRepo } = await buildApp({});
+    const { app, token, topupRepo } = await buildApp({ fetchImpl: (async () => new Response('')) as typeof fetch });
     topupRepo.seedSku({ code: 'sk_a', tokens: 5000, priceCents: 900 });
     topupRepo.seedSku({ code: 'sk_b', tokens: 20000, priceCents: 2900, sortOrder: 1 });
     topupRepo.seedSku({ code: 'sk_off', tokens: 1, priceCents: 1, status: 'disabled' });

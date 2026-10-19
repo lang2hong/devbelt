@@ -15,7 +15,7 @@ const tx = {} as Queryable;
 function pricing(over: Partial<AiModelPricing> = {}): AiModelPricing {
   return {
     model: 'm1', providerCode: null, inputCentsPerM: 80, outputCentsPerM: 200,
-    weightOverride: null, status: 'active', ...over,
+    weightOverride: null, multiplierOverride: null, status: 'active', ...over,
   };
 }
 

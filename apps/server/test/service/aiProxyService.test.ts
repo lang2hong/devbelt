@@ -114,6 +114,7 @@ const RESERVATION: AiReservation = {
   estimatedPromptTokens: 100,
   reservedPromptTokens: 100,
   reservedCompletionTokens: 4096,
+  grantAllocations: [],
   limit: 100_000,
   resetAt: '2026-11-01T00:00:00.000Z',
 };

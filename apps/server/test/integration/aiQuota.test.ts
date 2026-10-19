@@ -133,7 +133,6 @@ describe.skipIf(!URL)('AI 月额度账本（real MySQL）', () => {
  */
 describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
   const USER_T = 990_010;
-  const MONTH_T = '2026-10';
 
   let pool: ReturnType<typeof createTestPool>;
   let db: MysqlDb;

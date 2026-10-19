@@ -15,7 +15,7 @@ import type { AiQuotaService, AiReservation } from './aiQuotaService.js';
 import type { AiUpstreamConfig } from '../aiConfig.js';
 
 /** 服务端 completion 上限（与 §6.5 schema 3-4K 预算对齐；客户端请求超过则收敛到此值）。 */
-export const MAX_COMPLETION_TOKENS = 512;
+export const MAX_COMPLETION_TOKENS = 4096;
 const MAX_MESSAGES = 64;
 const MAX_MESSAGE_CHARS = 60_000;
 const MAX_TOTAL_CHARS = 120_000;

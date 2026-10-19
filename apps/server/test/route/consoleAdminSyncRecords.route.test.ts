@@ -117,20 +117,20 @@ describe('console admin sync-records routes（后台同步明细受限读）', (
     b.syncStateRepo.store.set(u.id, seedState(u.id) as never);
     await b.recordRepo.create({} as Queryable, {
       userId: u.id, keyEpoch: '1', recordId: Buffer.from([1, 2, 3, 4]),
-      cipherSuite: 'aes-256-gcm', formatVersion: 1,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
       nonce: Buffer.alloc(12), ciphertext: Buffer.alloc(100), tag: Buffer.alloc(16),
       version: '1', changeSequence: '10', entityKind: 'SavedConnection',
     });
     await b.recordRepo.create({} as Queryable, {
       userId: u.id, keyEpoch: '1', recordId: Buffer.from([5, 6, 7, 8]),
-      cipherSuite: 'aes-256-gcm', formatVersion: 1,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
       nonce: Buffer.alloc(12), ciphertext: Buffer.alloc(60), tag: Buffer.alloc(16),
       version: '2', changeSequence: '11', entityKind: 'Snippet',
     });
     // tombstone：不进明细。
     const deleted = await b.recordRepo.create({} as Queryable, {
       userId: u.id, keyEpoch: '1', recordId: Buffer.from([9, 10, 11, 12]),
-      cipherSuite: 'aes-256-gcm', formatVersion: 1,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
       nonce: Buffer.alloc(12), ciphertext: Buffer.alloc(40), tag: Buffer.alloc(16),
       version: '1', changeSequence: '12', entityKind: 'SavedConnection',
     });
@@ -165,7 +165,7 @@ describe('console admin sync-records routes（后台同步明细受限读）', (
     for (let i = 0; i < 3; i++) {
       await b.recordRepo.create({} as Queryable, {
         userId: u.id, keyEpoch: '1', recordId: Buffer.from([i]),
-        cipherSuite: 'aes-256-gcm', formatVersion: 1,
+        cipherSuite: 'AES-256-GCM', formatVersion: 1,
         nonce: Buffer.alloc(12), ciphertext: Buffer.alloc(10), tag: Buffer.alloc(16),
         version: '1', changeSequence: String(10 + i), entityKind: i === 1 ? 'Snippet' : 'SavedConnection',
       });
@@ -209,7 +209,7 @@ describe('console admin sync-records routes（后台同步明细受限读）', (
     b.syncStateRepo.store.set(u.id, seedState(u.id) as never);
     await b.recordRepo.create({} as Queryable, {
       userId: u.id, keyEpoch: '1', recordId: Buffer.from([1]),
-      cipherSuite: 'aes-256-gcm', formatVersion: 1,
+      cipherSuite: 'AES-256-GCM', formatVersion: 1,
       nonce: Buffer.alloc(12), ciphertext: Buffer.alloc(10), tag: Buffer.alloc(16),
       version: '1', changeSequence: '10', entityKind: 'SavedConnection',
     });

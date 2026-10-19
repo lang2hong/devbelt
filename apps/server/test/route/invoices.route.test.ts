@@ -21,7 +21,8 @@ const UUID = '123e4567-e89b-42d3-8456-426614174000';
 
 function fulfilledOrder(orderNo: string, userId: number): Order {
   return {
-    id: 7, orderNo, userId, planCode: 'pro', planVersion: 1, amountCents: 9900, channel: 'wechat', status: 'fulfilled',
+    id: 7, orderNo, userId, purpose: 'plan', planCode: 'pro', planVersion: 1, skuCode: null,
+    amountCents: 9900, channel: 'wechat', status: 'fulfilled',
     channelTradeNo: 'wx-1', paidTime: new Date(), expiresTime: new Date(Date.now() + 60000),
     createTime: new Date(), updateTime: new Date(),
   };

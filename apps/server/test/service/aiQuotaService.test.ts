@@ -189,7 +189,7 @@ describe('AiQuotaService 双段（月额度 + 加油包 grants FIFO，P9.1）', 
   });
 
   it('FIFO：先到期的 grant 先扣（多条时按 expires_time 升序吃满）', async () => {
-    const { quota, plans, repo, grants } = build();
+    const { quota, plans, grants } = build();
     setLimit(plans, 'free', 0);
     const g1 = grants.seedGrant({ userId: 1, tokens: 300, expiresTime: BEFORE });
     const g2 = grants.seedGrant({ userId: 1, tokens: 1000, expiresTime: AFTER });

@@ -42,6 +42,8 @@ export class MemoryAiUsageRepo implements IAiUsageRepo {
       this.rows.set(this.key(userId, usageMonth), {
         promptTokens: 0,
         completionTokens: 0,
+        rawPromptTokens: 0,
+        rawCompletionTokens: 0,
         reservedPromptTokens: 0,
         reservedCompletionTokens: 0,
         requestCount: 0,
@@ -94,6 +96,8 @@ export class MemoryAiUsageRepo implements IAiUsageRepo {
     this.rows.set(this.key(userId, usageMonth), {
       promptTokens: input.promptTokens ?? 0,
       completionTokens: input.completionTokens ?? 0,
+      rawPromptTokens: input.rawPromptTokens ?? 0,
+      rawCompletionTokens: input.rawCompletionTokens ?? 0,
       reservedPromptTokens: input.reservedPromptTokens ?? 0,
       reservedCompletionTokens: input.reservedCompletionTokens ?? 0,
       requestCount: input.requestCount ?? 0,

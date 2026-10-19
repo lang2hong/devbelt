@@ -164,7 +164,14 @@ describe('console AI billing routes（计费引擎）', () => {
   it('GET finance：月度聚合回显；非法月份 422 + 审计', async () => {
     const b = await build();
     const admin = await b.makeAdmin();
-    b.repo.usageByMonth.set('2026-10', { usageMonth: '2026-10', promptTokens: 1_000_000, completionTokens: 200_000, requestCount: 5 });
+    b.repo.usageByMonth.set('2026-10', {
+      usageMonth: '2026-10',
+      promptTokens: 1_000_000,
+      completionTokens: 200_000,
+      billingPromptTokens: 1_000_000,
+      billingCompletionTokens: 200_000,
+      requestCount: 5,
+    });
     b.repo.revenueByMonth.set('2026-10', { topupCents: 900, planCents: 0 });
     const h = await b.writeHeaders(admin.id);
     const res = await b.app.inject({ method: 'GET', url: '/api/admin/ai/finance?month=2026-10', headers: { authorization: h.authorization, accept: 'application/json' } });

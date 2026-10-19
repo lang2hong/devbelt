@@ -50,7 +50,7 @@ class FakeOrderRepo implements IOrderRepo {
   readonly store = new Map<string, Order>();
   private seq = 0;
   async create(input: { orderNo: string; userId: number; planCode: string; planVersion: number; amountCents: number; channel: Order['channel']; expiresTime: Date }): Promise<Order> {
-    const o: Order = { id: ++this.seq, orderNo: input.orderNo, userId: input.userId, planCode: input.planCode, planVersion: input.planVersion, amountCents: input.amountCents, channel: input.channel, status: 'pending', channelTradeNo: null, paidTime: null, expiresTime: input.expiresTime, createTime: new Date(), updateTime: new Date() };
+    const o: Order = { id: ++this.seq, orderNo: input.orderNo, userId: input.userId, purpose: 'plan', planCode: input.planCode, planVersion: input.planVersion, skuCode: null, amountCents: input.amountCents, channel: input.channel, status: 'pending', channelTradeNo: null, paidTime: null, expiresTime: input.expiresTime, createTime: new Date(), updateTime: new Date() };
     this.store.set(input.orderNo, o);
     return o;
   }
@@ -565,7 +565,7 @@ describe('OrderService.handleCallback', () => {
 });
 describe('wechat nonce 与订单操作同事务（P2 回归保护）', () => {
   const order: Order = {
-    id: 1, orderNo: 'o1', userId: 1, planCode: 'pro', planVersion: 1, amountCents: 9900, channel: 'wechat',
+    id: 1, orderNo: 'o1', userId: 1, purpose: 'plan', planCode: 'pro', planVersion: 1, skuCode: null, amountCents: 9900, channel: 'wechat',
     status: 'pending', channelTradeNo: null, paidTime: null,
     expiresTime: new Date(Date.now() + 3_600_000), createTime: new Date(), updateTime: new Date(),
   };
