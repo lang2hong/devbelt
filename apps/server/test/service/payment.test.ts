@@ -121,11 +121,12 @@ class FakeSubsRepo implements IPersonalSubscriptionRepo {
     this.subs.set(s.id, s);
     return s;
   }
-  async update(_e: Queryable, input: { id: number; planId: number; status: PersonalSubscription['status']; periodEndTime: Date | null; expectedVersion: number }): Promise<boolean> {
+  async update(_e: Queryable, input: { id: number; planId: number; status: PersonalSubscription['status']; periodStartTime?: Date; periodEndTime: Date | null; expectedVersion: number }): Promise<boolean> {
     const s = this.subs.get(input.id);
     if (!s || s.version !== input.expectedVersion) return false;
     s.planId = input.planId;
     s.status = input.status;
+    if (input.periodStartTime) s.periodStartTime = input.periodStartTime;
     s.periodEndTime = input.periodEndTime;
     s.version += 1;
     return true;
@@ -313,8 +314,8 @@ describe('OrderService.handleCallback', () => {
     const expected = existingEnd.getTime() + 30 * 24 * 3600 * 1000;
     expect(sub!.periodEndTime!.getTime()).toBeGreaterThanOrEqual(expected - 1000);
     expect(sub!.periodEndTime!.getTime()).toBeLessThanOrEqual(expected + 1000);
-    // 叠加：周期起点保持原值，不因续费重置为 now。
-    expect(sub!.periodStartTime.getTime()).toBe(startTime.getTime());
+    // 叠加：新周期接在旧到期日之后，起点推进到 existingEnd（不是 now，也不吞剩余时长）。
+    expect(sub!.periodStartTime.getTime()).toBe(existingEnd.getTime());
   });
 
   it('fulfills an alipay order via its own alipay callback (cross-channel isolation)', async () => {

@@ -313,6 +313,8 @@ export class OrderService {
       id: sub.id,
       planId: plan.id,
       status: 'active',
+      // 新周期从 base 开始（提前续费时接在旧到期日之后，过期后续费从 now 开始）。
+      periodStartTime: base,
       periodEndTime,
       expectedVersion: sub.version,
     });

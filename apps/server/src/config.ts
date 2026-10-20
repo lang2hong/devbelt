@@ -14,11 +14,23 @@ function parseOff(raw: string | undefined): boolean {
 
 /**
  * 解析 `DEVBELT_DB_TRUST_PROXY`。取值语义见 docs/开发指南.md；`true` 被显式拒绝（左段
- * XFF 可由客户端伪造，使按 IP 的限流失效）。默认跳数 1（nginx 反代之后）。
- * 返回字符串形（`'1'` 表示信任 1 跳）：Fastify v5.12 起 trustProxy 不再接受 number。
+ * XFF 可由客户端伪造，使按 IP 的限流失效）。
+ *
+ * 默认 **false**：未配置反代时绝不能信任客户端自带的 X-Forwarded-For。生产环境必须
+ * 显式配置（nginx 后为 `1`，直连为 `false`），避免「直接暴露 + 默认信任一跳」让 IP
+ * 限流/审计可被伪造。返回字符串形（`'1'` 表示信任 1 跳）：Fastify v5.12 起
+ * trustProxy 不再接受 number。
  */
-function parseTrustProxy(raw: string | undefined): boolean | string {
-  if (raw === undefined || raw === '') return '1';
+export function parseTrustProxy(raw: string | undefined, nodeEnv = process.env.NODE_ENV): boolean | string {
+  if (raw === undefined || raw === '') {
+    if (nodeEnv === 'production') {
+      throw new Error(
+        'DEVBELT_DB_TRUST_PROXY must be set explicitly in production: use "1" behind a reverse proxy ' +
+          '(nginx) or "false" when directly exposed.',
+      );
+    }
+    return false;
+  }
   const v = raw.trim();
   if (v === 'false' || v === '0') return false;
   if (v === 'true') {
@@ -97,5 +109,3 @@ export const config = {
    */
   syncExtensionId: process.env.DEVBELT_DB_SYNC_EXTENSION_ID || 'lang2hong.devbelt-db-client',
 };
-
-export { parseTrustProxy };

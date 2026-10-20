@@ -111,11 +111,16 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     return Number(result.affectedRows) === 1;
   }
 
+  /**
+   * 按 change_sequence 升序分页。列是 BIGINT UNSIGNED，直接 ORDER BY 才能命中
+   * `idx_conn_meta_user_epoch_seq (user_id, key_epoch, change_sequence)`；历史实现给列
+   * 加了 `+ 0` 变成表达式排序，会退化成 filesort。
+   */
   async listByFeed(exec: Queryable, userId: number, keyEpoch: string, after: string, snapshotSequence: string, limit: number): Promise<PersonalConnectionMeta[]> {
     const [rows] = await exec.query<any[]>(
       `SELECT ${SELECT_COLS} FROM personal_connection_meta
        WHERE user_id = ? AND key_epoch = ? AND change_sequence > ? AND change_sequence <= ?
-       ORDER BY change_sequence + 0 ASC LIMIT ?`,
+       ORDER BY change_sequence ASC LIMIT ?`,
       [userId, keyEpoch, after, snapshotSequence, limit],
     );
     return rows.map(mapMeta);
@@ -152,7 +157,7 @@ export class MysqlSyncRecordRepo implements ISyncRecordRepo {
     const [rows] = await exec.query<any[]>(
       `SELECT ${SELECT_COLS} FROM personal_connection_meta
        WHERE user_id = ? AND key_epoch = ? AND delete_time IS NULL
-       ORDER BY change_sequence + 0 ASC`,
+       ORDER BY change_sequence ASC`,
       [userId, keyEpoch],
     );
     return rows.map(mapMeta);

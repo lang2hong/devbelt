@@ -97,6 +97,8 @@ export interface IPersonalSubscriptionRepo {
     id: number;
     planId: number;
     status: PersonalSubscription['status'];
+    /** 新周期起点；缺省保留原值（后台调整只改到期时间）。 */
+    periodStartTime?: Date;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean>;

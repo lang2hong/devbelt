@@ -391,6 +391,7 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
     id: number;
     planId: number;
     status: PersonalSubscription['status'];
+    periodStartTime?: Date;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean> {
@@ -398,6 +399,7 @@ export class FakePersonalSubscriptionRepo implements IPersonalSubscriptionRepo {
     if (!s || s.version !== input.expectedVersion) return false;
     s.planId = input.planId;
     s.status = input.status;
+    if (input.periodStartTime) s.periodStartTime = input.periodStartTime;
     s.periodEndTime = input.periodEndTime;
     s.version += 1;
     return true;

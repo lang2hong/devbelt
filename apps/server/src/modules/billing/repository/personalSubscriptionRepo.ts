@@ -58,16 +58,20 @@ export class MysqlPersonalSubscriptionRepo implements IPersonalSubscriptionRepo 
     id: number;
     planId: number;
     status: PersonalSubscriptionStatus;
+    /** 当前计费周期起点；续费/升级时随新周期一起推进（缺省保留原值）。 */
+    periodStartTime?: Date;
     periodEndTime: Date | null;
     expectedVersion: number;
   }): Promise<boolean> {
     const [result] = await exec.query<any>(
       `UPDATE personal_subscriptions
-       SET plan_id = ?, status = ?, period_end_time = ?, version = version + 1
+       SET plan_id = ?, status = ?, period_start_time = COALESCE(?, period_start_time),
+           period_end_time = ?, version = version + 1
        WHERE id = ? AND version = ?`,
       [
         input.planId,
         input.status,
+        input.periodStartTime ?? null,
         input.periodEndTime ?? null,
         input.id,
         input.expectedVersion,
