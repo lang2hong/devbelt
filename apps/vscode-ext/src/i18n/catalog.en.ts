@@ -785,6 +785,7 @@ export const en: MessageCatalog = {
   'wv.form.show': 'Show',
   'wv.form.clear': 'Clear',
   'wv.form.secretSaved': 'Saved — leave blank to keep',
+  'wv.form.urlSecretSaved': 'The password inside the connection URL is stored locally and hidden; it is kept unless you edit the URL.',
   'wv.form.willClear': 'Will be cleared on save',
   'wv.form.hide': 'Hide',
   'wv.userManage.title': 'Users on {conn}',

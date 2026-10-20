@@ -1,5 +1,5 @@
 import { createWriteStream, rmSync } from 'fs';
-import { mkdir } from 'fs/promises';
+import { chmod, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import { once } from 'events';
 
@@ -14,7 +14,9 @@ export async function writeChunksToFile(
   producer: (write: (chunk: string | Uint8Array) => Promise<void>) => Promise<void>,
 ): Promise<void> {
   await mkdir(dirname(fsPath), { recursive: true });
-  const stream = createWriteStream(fsPath);
+  // 导出内容可能含业务数据：与连接/验证器/备份导出同口径，默认 0600。
+  // mode 只对新建文件生效，覆盖已存在的宽松权限文件时由下方 chmod 收紧。
+  const stream = createWriteStream(fsPath, { mode: 0o600 });
   const streamError = new Promise<never>((_, reject) => stream.once('error', reject));
   try {
     await Promise.race([
@@ -27,6 +29,7 @@ export async function writeChunksToFile(
       stream.end(() => resolve());
       stream.once('error', reject);
     });
+    await chmod(fsPath, 0o600).catch(() => { /* Windows/文件系统不支持时忽略 */ });
   } catch (err) {
     stream.destroy();
     // 取消/失败不留半截文件：删掉已写出的部分（best-effort，不吞原始错误）。

@@ -32,3 +32,32 @@ describe('writeChunksToFile', () => {
     }
   });
 });
+
+/** 导出内容可能含业务数据：与连接/验证器/备份同口径，文件默认 0600。 */
+describe('writeChunksToFile 文件权限', () => {
+  it('新文件以 0600 写入', async () => {
+    const { dir, file } = tempFile();
+    try {
+      await writeChunksToFile(file, async (write) => { await write('a'); });
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('覆盖已存在的宽松权限文件后收紧为 0600', async () => {
+    const { dir, file } = tempFile();
+    try {
+      fs.writeFileSync(file, 'old', { mode: 0o644 });
+      await writeChunksToFile(file, async (write) => { await write('new'); });
+      expect(fs.readFileSync(file, 'utf8')).toBe('new');
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

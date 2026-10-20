@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { chmod, writeFile } from 'node:fs/promises';
 import { l10n } from '../i18n';
 import { pgSchemaFor } from '../utils/sql';
 import type { ConnectionManager } from '../connection/connectionManager';
@@ -86,7 +87,13 @@ export class ExportHandler {
       });
       const uri = await this.askDestination(format);
       if (!uri) return;
-      await vscode.workspace.fs.writeFile(uri, toFileBytes(content));
+      // 导出内容可能含业务数据：file scheme 用 Node fs 以 0600 写入（含覆盖已有宽松权限文件）。
+      if (uri.scheme === 'file') {
+        await writeFile(uri.fsPath, toFileBytes(content), { mode: 0o600 });
+        await chmod(uri.fsPath, 0o600).catch(() => { /* Windows/文件系统不支持时忽略 */ });
+      } else {
+        await vscode.workspace.fs.writeFile(uri, toFileBytes(content));
+      }
       this.post({
         type: 'exported',
         message: l10n('export.doneRows', { count: projectedRows.length, path: uri.fsPath }),

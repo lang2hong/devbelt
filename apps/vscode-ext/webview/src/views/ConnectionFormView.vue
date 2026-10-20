@@ -8,6 +8,9 @@ const { t } = useI18n();
 
 const editingId = ref('');
 const groups = ref<{ id: string; name: string; depth?: number }[]>([]);
+/** 宿主已剥离 connectionUrl 内嵌密码；用户未修改时省略该字段，由宿主回填原值。 */
+const connectionUrlMasked = ref(false);
+const prefilledConnectionUrl = ref('');
 
 function indentGroup(g: { name: string; depth?: number }): string {
   return '\u00a0\u00a0'.repeat(g.depth || 0) + g.name;
@@ -127,6 +130,10 @@ function collect(): Record<string, unknown> {
   // ES：认证方式切换后，旧方式的密钥显式清除（避免残留无用密钥）。
   if (form.esAuth !== 'basic') result.esPassword = '';
   if (form.esAuth !== 'apiKey') result.esApiKey = '';
+  // connectionUrl 内嵌密码不在 webview 回显：未修改时不发送，宿主用已存值回填。
+  if (connectionUrlMasked.value && result.connectionUrl === prefilledConnectionUrl.value) {
+    delete result.connectionUrl;
+  }
   return result;
 }
 
@@ -136,8 +143,12 @@ function clearSecret(key: SecretKey): void {
   (form as any)[clearFlagKey(key)] = true;
 }
 
-function prefill(c: Record<string, any>): void {
+function prefill(c: Record<string, any>, urlStripped = false): void {
   editingId.value = c.id || '';
+  connectionUrlMasked.value = urlStripped;
+  prefilledConnectionUrl.value = c.connectionUrl === undefined || c.connectionUrl === null
+    ? ''
+    : String(c.connectionUrl);
   for (const key of Object.keys(form)) {
     const val = c[key];
     const defVal = (defaultForm as any)[key];
@@ -172,10 +183,12 @@ onMounted(() => {
     if (msg.type === 'init') {
       groups.value = Array.isArray(msg.groups) ? msg.groups : [];
     } else if (msg.type === 'prefill' && msg.conn) {
-      prefill(msg.conn);
+      prefill(msg.conn, msg.urlStripped === true);
     } else if (msg.type === 'reset') {
       Object.assign(form, defaultForm);
       editingId.value = '';
+      connectionUrlMasked.value = false;
+      prefilledConnectionUrl.value = '';
       syncType();
     } else if (msg.type === 'presetGroup' && msg.groupId) {
       form.groupId = msg.groupId;
@@ -396,7 +409,9 @@ function save(): void {
         </div>
         <div class="field"><label><input v-model="form.readOnly" type="checkbox" style="width:auto"> {{ t('wv.form.readOnly') }}</label></div>
       </div>
-      <div v-if="!isRedis" class="field"><label><input v-model="form.useConnectionString" type="checkbox" style="width:auto"> {{ t('wv.form.useConnUrl') }}</label><input v-model="form.connectionUrl" placeholder="mysql://user:password@host:3306/database"></div>
+      <div v-if="!isRedis" class="field"><label><input v-model="form.useConnectionString" type="checkbox" style="width:auto"> {{ t('wv.form.useConnUrl') }}</label><input v-model="form.connectionUrl" placeholder="mysql://user:password@host:3306/database">
+        <p v-if="editingId && connectionUrlMasked" class="hint">{{ t('wv.form.urlSecretSaved') }}</p>
+      </div>
       <div class="field"><label><input v-model="form.useSSL" type="checkbox" style="width:auto"> {{ t('wv.form.useSsl') }}</label></div>
       <div class="field"><label>{{ t('wv.form.caCert') }}</label><input v-model="form.caPath"></div>
       <div class="row">

@@ -763,6 +763,7 @@ export const zh: MessageCatalog = {
   'wv.form.show': '显示',
   'wv.form.clear': '清除',
   'wv.form.secretSaved': '已保存，留空保留',
+  'wv.form.urlSecretSaved': '连接串中的密码已保存在本机，为安全起见不回显；不修改该地址则保留原值。',
   'wv.form.willClear': '保存时将清除',
   'wv.form.hide': '隐藏',
   'wv.userManage.title': '{conn} 的用户',

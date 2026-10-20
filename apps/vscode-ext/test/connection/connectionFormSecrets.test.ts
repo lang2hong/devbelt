@@ -6,7 +6,7 @@ vi.mock('vscode', () => ({
 }));
 
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
-import { decodeConnection, mergeSecretsFromStored } from '../../src/connection/connectionForm';
+import { connectionPrefill, decodeConnection, mergeSecretsFromStored } from '../../src/connection/connectionForm';
 
 function conn(overrides: Partial<SavedConnection>): SavedConnection {
   return { id: 'c1', name: 'C', dbType: 'MYSQL' as SavedConnection['dbType'], host: 'h', port: 3306, user: 'u', database: 'd', ...overrides };
@@ -47,6 +47,18 @@ describe('mergeSecretsFromStored', () => {
     expect(merged.sentinelPassword).toBe('sentinel-secret');
   });
 
+  it('连接串内嵌密码：未提交时回退到已存 URL', () => {
+    const stored = conn({ useConnectionString: true, connectionUrl: 'mysql://user:secret@host:3306/db' });
+    const merged = mergeSecretsFromStored(conn({ name: 'Renamed' }), stored);
+    expect(merged.connectionUrl).toBe('mysql://user:secret@host:3306/db');
+  });
+
+  it('连接串显式清空（空串）不被已保存值覆盖', () => {
+    const stored = conn({ useConnectionString: true, connectionUrl: 'mysql://user:secret@host:3306/db' });
+    const merged = mergeSecretsFromStored(conn({ connectionUrl: '' }), stored);
+    expect(merged.connectionUrl).toBe('');
+  });
+
   it('P8：ES esPassword / esApiKey 也在敏感字段回退之列', () => {
     const stored = conn({ dbType: 'ELASTICSEARCH' as SavedConnection['dbType'], esPassword: 'es-secret', esApiKey: 'api-key' });
     const merged = mergeSecretsFromStored(conn({ name: 'Renamed' }), stored);
@@ -67,6 +79,31 @@ describe('mergeSecretsFromStored', () => {
  * 删除分支收不到，清除静默无效。此前 sshPassword/sshPassphrase/sentinelPassword 用了
  * `|| undefined` 把 '' 折叠掉（password 未折叠，故只有 password 的清除生效）。
  */
+describe('connectionPrefill 连接串去密', () => {
+  it('永不把敏感字段或 URL 内嵌密码下发 webview', () => {
+    const { conn: out, urlStripped } = connectionPrefill(conn({
+      password: 'db-secret',
+      sshPassword: 'ssh-secret',
+      useConnectionString: true,
+      connectionUrl: 'mysql://user:secret@host:3306/db?ssl=true',
+    }));
+    expect(urlStripped).toBe(true);
+    expect(out.password).toBeUndefined();
+    expect(out.sshPassword).toBeUndefined();
+    expect(out.connectionUrl).toBe('mysql://user@host:3306/db?ssl=true');
+    expect(out.connectionUrl).not.toContain('secret');
+  });
+
+  it('无内嵌凭据的 URL 原样下发且不标记 urlStripped', () => {
+    const { conn: out, urlStripped } = connectionPrefill(conn({
+      useConnectionString: true,
+      connectionUrl: 'mysql://host:3306/db',
+    }));
+    expect(urlStripped).toBe(false);
+    expect(out.connectionUrl).toBe('mysql://host:3306/db');
+  });
+});
+
 describe('decodeConnection 敏感字段三态', () => {
   const payload = (over: Record<string, unknown>) => ({ dbType: 'REDIS', host: 'h', port: 6379, ...over });
 
@@ -89,6 +126,12 @@ describe('decodeConnection 敏感字段三态', () => {
   it('有值为原样', () => {
     const c = decodeConnection(payload({ password: 'p', sshPassword: 's', sshPassphrase: 'k', sentinelPassword: 'sp' }));
     expect([c.password, c.sshPassword, c.sshPassphrase, c.sentinelPassword]).toEqual(['p', 's', 'k', 'sp']);
+  });
+
+  it('connectionUrl 三态：缺省 undefined / 显式清空空串 / 有值原样', () => {
+    expect(decodeConnection(payload({})).connectionUrl).toBeUndefined();
+    expect(decodeConnection(payload({ connectionUrl: '' })).connectionUrl).toBe('');
+    expect(decodeConnection(payload({ connectionUrl: 'mysql://h/db' })).connectionUrl).toBe('mysql://h/db');
   });
 });
 

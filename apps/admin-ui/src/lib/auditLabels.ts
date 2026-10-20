@@ -30,6 +30,8 @@ const EVENT_LABELS: Record<string, string> = {
   'admin.ai.topup.refunded': '积分充值退款',
   'admin.role.granted': '授予管理员',
   'admin.role.revoked': '撤销管理员',
+  'auth.refresh.reuse': '刷新令牌复用（安全事件）',
+  'console.auth.refresh.reuse': '控制台刷新令牌复用（安全事件）',
 };
 
 const TARGET_LABELS: Record<string, string> = {

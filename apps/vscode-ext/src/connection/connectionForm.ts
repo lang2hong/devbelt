@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@devbelt/db-core';
 import { ConnectionFactory, EsClient, RedisClient, buildRedisTlsOptions, parseEsError } from '@devbelt/db-core';
 import type { IConnection, RedisClientOptions } from '@devbelt/db-core';
-import { ConnectionStore, stripSecrets, type SavedConnection, type ConnectionGroup } from '@devbelt/db-host/connection/connectionStore';
+import { ConnectionStore, type SavedConnection, type ConnectionGroup } from '@devbelt/db-host/connection/connectionStore';
+import { sanitizeConnectionForExport } from '../utils/connectionExport';
 import { SshTunnel } from './sshTunnel';
 import { parseRedisNodes } from './buildRedisSession';
 import { discoverSentinelMasterOverSsh, setupClusterOverSsh, type RedisAuth } from './redisTunnel';
@@ -142,7 +143,11 @@ export class ConnectionForm extends BaseWebView {
           break;
         }
         case 'save': {
-          const conn = decodeConnection(msg.payload);
+          // URL 被宿主打码时表单不会回传该字段（未修改），这里用已存值补齐；
+          // 敏感字段同样回填，store.sanitize 会按三态重新落 SecretStorage。
+          const conn = mergeSecretsFromStored(decodeConnection(msg.payload), this.editing);
+          // '' 表示用户显式清空连接串；落库时归一为缺省（删除该字段）。
+          if (conn.connectionUrl === '') conn.connectionUrl = undefined;
           const id = conn.id || uniqueId('c');
           await this.store.save({ ...conn, id });
           vscode.window.showInformationMessage(
@@ -173,7 +178,10 @@ export class ConnectionForm extends BaseWebView {
       groups: flattenGroups(this.groups).map(({ group, depth }) => ({ id: group.id, name: group.name, depth })),
     });
     if (this.editing) {
-      this.post({ type: 'prefill', conn: stripSecrets(this.editing) });
+      // 敏感字段 + connectionUrl 内嵌凭据都不下发 webview；urlStripped 让表单在
+      // 用户未修改 URL 时省略该字段，保存/测试时由宿主回填已存值。
+      const { conn, urlStripped } = connectionPrefill(this.editing);
+      this.post({ type: 'prefill', conn, urlStripped });
     } else {
       this.post({ type: 'reset' });
     }
@@ -315,7 +323,23 @@ export function mergeSecretsFromStored(decoded: SavedConnection, stored?: SavedC
   for (const field of ConnectionStore.SENSITIVE_FIELDS) {
     if (out[field] === undefined && stored[field] !== undefined) out[field] = stored[field];
   }
+  // connectionUrl 内嵌凭据同样不下发 webview：未修改时表单省略该字段，回填已存值。
+  if (out.connectionUrl === undefined && stored.connectionUrl !== undefined) {
+    out.connectionUrl = stored.connectionUrl;
+  }
   return out as unknown as SavedConnection;
+}
+
+/**
+ * 编辑表单的 prefill 载荷：删除 SecretStorage 字段，并剥离 connectionUrl 内嵌凭据。
+ *
+ * connectionUrl 不是 SENSITIVE_FIELDS 的成员（它随 E2EE 密文同步是产品已确认的边界），
+ * 但把含密码的完整 URL 下发 webview 会让密码进入 DOM/内存。这里只下发去密版本，
+ * `urlStripped` 供表单在用户未修改时省略该字段、由宿主回填原值。
+ */
+export function connectionPrefill(conn: SavedConnection): { conn: SavedConnection; urlStripped: boolean } {
+  const { out, urlStripped } = sanitizeConnectionForExport(conn);
+  return { conn: out as unknown as SavedConnection, urlStripped };
 }
 
 /** 将 webview 表单负载解码为 SavedConnection（导出供单测覆盖敏感字段三态） */
@@ -337,7 +361,10 @@ export function decodeConnection(payload: any): SavedConnection {
     environment: payload.environment || 'development',
     readOnly: Boolean(payload.readOnly),
     useConnectionString: Boolean(payload.useConnectionString),
-    connectionUrl: payload.connectionUrl || undefined,
+    // 三态：undefined=未提交（保留已存值）；''=显式清空；其余按输入值。
+    connectionUrl: payload.connectionUrl === undefined || payload.connectionUrl === null
+      ? undefined
+      : String(payload.connectionUrl),
     useSSL: Boolean(payload.useSSL),
     caPath: payload.caPath || undefined,
     clientCertPath: payload.clientCertPath || undefined,

@@ -26,7 +26,7 @@ const EVENT_TYPE_SUGGESTIONS = [
   'invoice.requested', 'auth.login.success', 'auth.login.failed', 'auth.logout', 'auth.password.changed',
   'account.displayName.changed',
   'sync.reset.handoff.created', 'sync.reset.handoff.consumed', 'sync.reset.handoff.failed',
-  'system.receipts.cleanup', 'console.auth.refresh.reuse',
+  'system.receipts.cleanup', 'auth.refresh.reuse', 'console.auth.refresh.reuse',
 ];
 
 const TARGET_TYPE_SUGGESTIONS = ['user', 'order', 'subscription', 'device', 'idempotency_receipts'];
