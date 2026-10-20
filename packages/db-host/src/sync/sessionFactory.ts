@@ -66,6 +66,9 @@ export class SyncSessionFactory {
     const userId = await this.deps.getUserId();
     if (!userId) return undefined;
     if (this.session && this.session.uid === userId) return this.session;
+    // 换号：先停掉旧会话的 coordinator/订阅并丢弃内存 DEK，再建新会话，
+    // 避免旧账户的后台同步继续跑（客户端读的是当前 token，会形成 uid/DEK 混用）。
+    this.session?.dispose();
     this.session = new PersonalSyncSession(
       userId,
       this.deps.memento,

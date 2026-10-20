@@ -83,10 +83,13 @@ describe('SyncSessionFactory', () => {
     });
     const s1 = await factory.ensureSession();
     expect(s1!.uid).toBe('1');
+    const dispose = vi.spyOn(s1!, 'dispose');
     uid = '2';
     const s2 = await factory.ensureSession();
     expect(s2!.uid).toBe('2');
     expect(s2).not.toBe(s1);
+    // 旧会话必须停掉（coordinator/订阅/内存 DEK），不能只做引用替换。
+    expect(dispose).toHaveBeenCalledTimes(1);
     expect(createClient).toHaveBeenCalledTimes(2);
   });
 

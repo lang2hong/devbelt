@@ -97,8 +97,10 @@ async function getSession(deps: PersonalSyncCommandDeps): Promise<SyncSessionPor
 /**
  * 解锁/智能入口专用：先用持久化 userId 建会话（零网络），失败才回落到刷新权益的完整路径。
  *
- * 本地 DEK 可用时，即使断网也应该能自动解锁；旧实现先 await refreshEntitlement()
- * 再 ensureSession()，任何网络抖动都会在解锁前被报成「会话不可用，请重新登录」。
+ * 这里只省掉 refreshEntitlement() 这一次网络往返与它导致的误报；真正的自动解锁仍由
+ * tryRestoreUnlock() 调 getRemoteState() 校验远端 epoch，因此**断网时仍无法自动解锁**
+ * （local-first 解锁列为后续项）。旧实现先 await refreshEntitlement() 再 ensureSession()，
+ * 任何网络抖动都会在解锁前被报成「会话不可用，请重新登录」。
  */
 async function getSessionForUnlock(deps: PersonalSyncCommandDeps): Promise<SyncSessionPort | undefined> {
   if (!deps.auth.isLoggedIn()) {
@@ -368,7 +370,8 @@ export async function syncEntry(deps: PersonalSyncCommandDeps): Promise<void> {
     deps.ui.info(l10n('sync.alreadyUnlocked'));
     return;
   }
-  // 本地 DEK 还在时不需要网络：先自动解锁，避免离线/弱网把「未解锁」误路由到远端探测。
+  // 本地 DEK 在时先尝试自动解锁；tryRestoreUnlock 仍需 getRemoteState 校验 epoch，
+// 断网会返回 false 并回落到下面远端 state 探测（离线自动解锁为后续项）。
   if (await session.tryRestoreUnlock()) {
     deps.ui.info(l10n('sync.autoUnlocked'));
     await notifyFindings(deps, session);

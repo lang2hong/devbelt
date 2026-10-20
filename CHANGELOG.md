@@ -2,6 +2,31 @@
 
 ## 未发布（0.1.0）
 
+### 安全与会话加固（2026-10-20）
+
+- 认证边界：`/api/auth/refresh` 的扩展策略拒绝 `devicePlatform='web'` 的设备，防止持有
+  console refresh token + web deviceKey 的调用方在扩展端点换到 `aud=extension` 令牌；
+  补跨 audience 单测。
+- 刷新令牌落盘：轮换结果改为 **refresh 先写、access 后写**；refresh 写失败时删除已被服务端
+  消费的旧值并让本次刷新失败，避免下一次刷新命中复用检测导致整族吊销。`saveSession` 同序。
+- `handleAuthExpired`：`failedRefreshToken` 缺省（本窗口读到无 token）时不再误删另一窗口刚
+  写入的新会话；采用新 token 时同时失效派生身份缓存；补有状态 secrets 用例。
+- 同步错误分类：先按 `code` 再按 HTTP 状态分类；`SYNC_SIGNATURE_INVALID`、`PERSONAL_FEATURE_REQUIRED`
+  不再被误报为“authentication expired”，后者按 terminal 处理（不空转重试）。
+- 连接表单：编辑含内嵌密码的 `connectionUrl` 时只下发去密 URL；用户未修改则不回传，保存/
+  测试连接时由宿主回填已存值；新增表单提示与三态单测。
+- 数据导出：结果集/整表导出文件默认 `0600`（含覆盖已存在宽松权限文件时的 chmod）。
+- 同步 feed：去掉 `ORDER BY change_sequence + 0`，恢复 `(user_id,key_epoch,change_sequence)`
+  索引排序，避免大 feed filesort；加机械断言防回归。
+- 部署：`DEVBELT_DB_TRUST_PROXY` 默认改为 `false`；production 必须显式配置，防止直连部署
+  信任客户端 X-Forwarded-For 绕过 IP 限流（nginx 示例同步更新）。
+- 计费：支付履约推进 `period_start_time`（续费接在旧到期日，过期从 now 起算）；后台调整
+  仍保留原周期起点。
+- 同步会话：`SyncSessionFactory.ensureSession` 换号前 dispose 旧会话，避免旧 coordinator/
+  DEK/订阅残留。
+- 文档：修正“离线自动解锁”表述（`tryRestoreUnlock` 仍需 `getRemoteState`，断网不可用；
+  local-first 列为后续项），同步 `docs/架构.md`、P2 v2 规格与台账。
+
 ### P9 — AI 能力（NL2SQL / Chat / 解释 / 诊断 / 补全）
 
 - 新包 `packages/ai-core`（`@devbelt/ai-core`）：零依赖 `AiProvider` 接口 + `OpenAICompatibleProvider`
