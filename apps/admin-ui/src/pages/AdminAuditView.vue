@@ -17,6 +17,8 @@ const toTime = ref('');
 const eventType = ref('');
 const actorUserId = ref('');
 const targetType = ref('');
+const targetId = ref('');
+const resultFilter = ref<'' | 'success' | 'failed'>('');
 const nextCursor = ref<string | null>(null);
 const detailEvent = ref<AdminAuditEvent | null>(null);
 
@@ -60,6 +62,8 @@ async function load(reset = true): Promise<void> {
       eventType: eventType.value || undefined,
       actorUserId: actorUserId.value || undefined,
       targetType: targetType.value || undefined,
+      targetId: targetId.value.trim() || undefined,
+      result: resultFilter.value || undefined,
       cursor: reset ? undefined : (nextCursor.value ?? undefined),
     });
     if (seq !== loadSeq) return;
@@ -85,7 +89,7 @@ function search(): void {
 
 async function doExport(format: 'csv' | 'json'): Promise<void> {
   // tag 纳入有效过滤条件：变更筛选即新业务意图，避免「同 key 异 body」触发 KEY_REUSED。
-  const tag = `export:${format}:${fromTime.value}|${toTime.value}|${eventType.value}|${actorUserId.value}|${targetType.value}`;
+  const tag = `export:${format}:${fromTime.value}|${toTime.value}|${eventType.value}|${actorUserId.value}|${targetType.value}|${targetId.value}|${resultFilter.value}`;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
@@ -95,6 +99,8 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
       eventType: eventType.value || undefined,
       actorUserId: actorUserId.value || undefined,
       targetType: targetType.value || undefined,
+      targetId: targetId.value.trim() || undefined,
+      result: resultFilter.value || undefined,
     }, exportWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       exportWrite.reset(tag);
@@ -139,6 +145,12 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
       <datalist id="target-type-suggestions">
         <option v-for="tt in TARGET_TYPE_SUGGESTIONS" :key="tt" :value="tt">{{ auditTargetLabel(tt) }}</option>
       </datalist>
+      <input v-model="targetId" type="text" placeholder="对象 ID" @keyup.enter="search" />
+      <select v-model="resultFilter">
+        <option value="">全部结果</option>
+        <option value="success">成功</option>
+        <option value="failed">失败</option>
+      </select>
       <button class="btn" @click="search">查询</button>
       <button class="btn secondary" @click="doExport('json')">导出 JSON</button>
       <button class="btn secondary" @click="doExport('csv')">导出 CSV</button>

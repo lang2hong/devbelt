@@ -259,6 +259,8 @@ export interface AuditFilters {
   actorUserId?: string;
   eventType?: string;
   targetType?: string;
+  targetId?: string;
+  result?: 'success' | 'failed';
   cursor?: string;
 }
 
@@ -279,7 +281,7 @@ export async function queryAudit(
 
 export async function exportAudit(
   format: 'csv' | 'json',
-  filters: { fromTime?: string; toTime?: string; actorUserId?: string; eventType?: string; targetType?: string },
+  filters: { fromTime?: string; toTime?: string; actorUserId?: string; eventType?: string; targetType?: string; targetId?: string; result?: 'success' | 'failed' },
   idempotencyKey: string,
   csrfToken: string,
   token: string | null = getAccessToken(),
@@ -292,6 +294,8 @@ export async function exportAudit(
   if (filters.actorUserId) f.actorUserId = Number(filters.actorUserId);
   if (filters.eventType) f.eventType = filters.eventType;
   if (filters.targetType) f.targetType = filters.targetType;
+  if (filters.targetId) f.targetId = filters.targetId;
+  if (filters.result) f.result = filters.result;
   try {
     const res = await authedFetch(
       '/api/admin/audit/exports',

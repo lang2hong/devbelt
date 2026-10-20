@@ -27,12 +27,18 @@ export function registerAuditAdminRoutes(child: FastifyInstance, ctx: AdminCtx):
     if (q.cursor !== undefined && q.cursor !== '' && cursor === null) {
       return rejectConsole(reply, 422, 'INVALID_CURSOR', 'invalid cursor');
     }
+    const result = q.result !== undefined && q.result !== '' ? String(q.result) : undefined;
+    if (result !== undefined && result !== 'success' && result !== 'failed') {
+      return rejectConsole(reply, 422, 'VALIDATION_FAILED', 'invalid result');
+    }
     const filter: AuditFilter = {
       fromTime: parseDate(q.fromTime),
       toTime: parseDate(q.toTime),
       actorUserId: q.actorUserId ? Number(q.actorUserId) : undefined,
       eventType: q.eventType ? String(q.eventType) : undefined,
       targetType: q.targetType ? String(q.targetType) : undefined,
+      targetId: q.targetId !== undefined && q.targetId !== '' ? String(q.targetId) : undefined,
+      result,
       cursor: cursor ?? undefined,
       limit: parseLimit(q.limit),
     };

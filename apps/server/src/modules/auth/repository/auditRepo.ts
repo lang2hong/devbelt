@@ -87,6 +87,14 @@ function buildFilter(input: Omit<AuditFilter, 'cursor' | 'limit'> & { cursor?: n
     where.push('target_type = ?');
     params.push(input.targetType);
   }
+  if (input.targetId !== undefined) {
+    where.push('target_id = ?');
+    params.push(input.targetId);
+  }
+  if (input.result) {
+    where.push('result = ?');
+    params.push(input.result);
+  }
   if (input.cursor !== undefined) {
     where.push('id < ?');
     params.push(input.cursor);

@@ -351,6 +351,37 @@ describe('console admin routes', () => {
     await b.app.close();
   });
 
+  it('audit query filters by targetId and result', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    const base = {
+      eventTime: new Date(), actorUserId: admin.id, actorRole: 'platform_admin',
+      targetType: 'user', sourceIp: null, requestId: null,
+    } as const;
+    await b.auditRepo.insert({ ...base, eventType: 'auth.login.failed', targetId: '7', result: 'failed', failureCode: 'AUTH_FAILED', reason: 'bad password' });
+    await b.auditRepo.insert({ ...base, eventType: 'auth.login.success', targetId: '7', result: 'success', failureCode: null, reason: null });
+    await b.auditRepo.insert({ ...base, eventType: 'auth.login.failed', targetId: '8', result: 'failed', failureCode: 'AUTH_FAILED', reason: null });
+
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/admin/audit?targetType=user&targetId=7&result=failed',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(200);
+    const items = res.json().items as Array<{ targetId: string; result: string; failureCode: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ targetId: '7', result: 'failed', failureCode: 'AUTH_FAILED' });
+
+    const invalid = await b.app.inject({
+      method: 'GET',
+      url: '/api/admin/audit?result=maybe',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(invalid.statusCode).toBe(422);
+    expect(invalid.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
   it('audit export without an Idempotency-Key is rejected', async () => {
     const b = await build();
     const admin = await b.makeAdmin();

@@ -50,6 +50,10 @@ export interface AuditFilter {
   actorUserId?: number;
   eventType?: string;
   targetType?: string;
+  /** 目标对象 ID（精确匹配）。 */
+  targetId?: string;
+  /** 结果：success / failed。 */
+  result?: string;
   cursor?: number;
   limit: number;
 }
