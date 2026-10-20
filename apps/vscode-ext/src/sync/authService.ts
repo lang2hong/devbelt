@@ -210,10 +210,7 @@ export class AuthService {
         this.accessToken = access;
         this.refreshToken = refresh;
         this.authExpiredHandled = false;
-        // 必须 await：轮换结果要在下一次刷新读取之前落盘，否则另一个窗口
-        // 仍可能读到旧值。原实现用 void，存在写入未完成的窗口。
-        await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, access);
-        await this.secrets.store(AuthService.REFRESH_TOKEN_KEY, refresh);
+        await this.persistTokens(access, refresh);
       },
       buildDeviceInfo(),
       undefined,
@@ -307,9 +304,18 @@ export class AuthService {
     if (this.authExpiredHandled) return;
     // 另一窗口可能已经轮换或重新登录：存储里已不是失败的那个 token 时，
     // 只同步内存，不删除刚签发的新会话。
-    const stored = await this.secrets.get(AuthService.REFRESH_TOKEN_KEY);
-    if (failedRefreshToken && stored && stored !== failedRefreshToken) {
+    // failedRefreshToken 缺省代表「本窗口读到无 token」：此时存储里若有值，必然是
+    // 另一窗口刚写入的新会话，也不能删（旧条件会在这个窗口误删它）。
+    const [storedAccess, stored] = await Promise.all([
+      this.secrets.get(AuthService.ACCESS_TOKEN_KEY),
+      this.secrets.get(AuthService.REFRESH_TOKEN_KEY),
+    ]);
+    if (stored && stored !== failedRefreshToken) {
       this.refreshToken = stored;
+      if (storedAccess) this.accessToken = storedAccess;
+      // token 变化可能代表换号（本窗口可能错过了 onDidChange）：丢弃派生身份缓存，
+      // 避免把上一个账户的 userId/权益用于新 token。
+      this.invalidateCachedIdentity();
       return;
     }
     this.authExpiredHandled = true;
@@ -390,6 +396,28 @@ export class AuthService {
     return this.secrets.get(AuthService.USER_EMAIL_KEY);
   }
 
+  /**
+   * 落盘一次轮换/登录结果：**refresh 先写**。
+   *
+   * refresh token 是一次性凭据：服务端已消费旧 token 后才返回新 token。若先写
+   * access 而后写 refresh 失败，存储里仍是被消费的旧 refresh，下一次刷新会命中
+   * 复用检测（60s 宽限后吊销整族）；refresh-first 让半写态变成「新 refresh + 旧
+   * access」，下一次刷新仍可自愈。
+   *
+   * refresh 写失败时删除旧值：宁可让后续刷新走「无 token → 清本地登录态」，
+   * 也不要拿已被消费的旧 token 去触发服务端的安全事件。
+   */
+  private async persistTokens(access: string, refresh: string): Promise<void> {
+    try {
+      await this.secrets.store(AuthService.REFRESH_TOKEN_KEY, refresh);
+    } catch (err) {
+      try { await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY); } catch { /* 尽力而为 */ }
+      throw err;
+    }
+    // access 是短期凭据：写失败不阻断本次会话，下一次 401 会用新 refresh 重建。
+    try { await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, access); } catch { /* access 可重建 */ }
+  }
+
   private async saveSession(result: AuthResult, email: string): Promise<void> {
     this.authGeneration += 1;
     this.authExpiredHandled = false;
@@ -403,8 +431,14 @@ export class AuthService {
     }
     this.accessToken = result.accessToken;
     this.refreshToken = result.refreshToken;
-    await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, result.accessToken);
-    await this.secrets.store(AuthService.REFRESH_TOKEN_KEY, result.refreshToken);
+    try {
+      await this.persistTokens(result.accessToken, result.refreshToken);
+    } catch (err) {
+      // 登录 token 未落盘：不留下「内存已登录、重启即失效」的半态。
+      this.accessToken = undefined;
+      this.refreshToken = undefined;
+      throw err;
+    }
     await this.secrets.store(AuthService.USER_EMAIL_KEY, email);
     void this.refreshEntitlement();
     void eventBus.publish(new AuthEvent('login'));

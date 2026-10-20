@@ -30,7 +30,8 @@ import type { SyncEntityType } from './syncEntity.js';
  *
  * 失败语义：
  * - epoch 不匹配 → 停止 stage='epoch-mismatch'，不重试不覆盖。
- * - outbox 4xx（CONFLICT 等 terminal 码集合）→ terminal；其余（5xx/网络/401/429）保留 outbox 重演。
+ * - outbox 4xx（CONFLICT 等 terminal 码集合）→ terminal；401/403 鉴权失败 → terminal-auth；
+ *   其余（5xx/网络/429）保留 outbox 重演。
  * - 应用遇 RecordConflictError → 停在该 record，cursor 停在最后确认页，交任务 4 UI。
  * - 页内部分应用后重放：返回 changeSequence=最后确认页游标，下轮重拉重应用，依赖
  *   applyRecord 的 confirmed + version≤ 幂等收敛。
@@ -163,19 +164,20 @@ class FeedProtocolError extends Error {
 
 type ErrorClass = 'terminal' | 'terminal-state' | 'terminal-epoch' | 'terminal-auth' | 'conflict' | 'retryable';
 
-/** 鉴权失败（refresh 已由 SyncClient 尝试过；仍 401/403 即会话不可恢复）。 */
+/** 鉴权失败（refresh 已由 SyncClient 尝试过；仍返回鉴权错误即会话不可恢复）。 */
 function isAuthError(err: unknown): err is SyncApiError {
-  return err instanceof SyncApiError && (err.status === 401 || err.status === 403);
+  return err instanceof SyncApiError && classifyError(err) === 'terminal-auth';
 }
 
 /** §7.4 重放与错误处置分类表。 */
 function classifyError(e: SyncApiError): ErrorClass {
-  // 鉴权失败不是临时故障：当成 retryable 会把「登录已过期」拖成连续 5 轮失败后 stalled，
-  // 用户只看到笼统的「同步已暂停」。直接终止本轮，等会话层登出/重登后重建。
-  if (e.status === 401 || e.status === 403) return 'terminal-auth';
+  // 先按 code 分类：403 不只代表登录过期——SYNC_SIGNATURE_INVALID（密钥/签名问题）和
+  // PERSONAL_FEATURE_REQUIRED（套餐不允许数据同步）都是 403。按状态一刀切会把它们
+  // 误报成「authentication expired」，引导用户做无效的重登。
   switch (e.code) {
     case 'SYNC_PROTOCOL_UNSUPPORTED':
     case 'SYNC_SIGNATURE_INVALID':
+    case 'PERSONAL_FEATURE_REQUIRED':
     case 'VALIDATION_FAILED':
     case 'SYNC_NONCE_REUSED':
     case 'SYNC_QUOTA_EXCEEDED':
@@ -188,8 +190,12 @@ function classifyError(e: SyncApiError): ErrorClass {
     case 'SYNC_VERSION_CONFLICT':
       return 'conflict';
     default:
-      return 'retryable';
+      break;
   }
+  // 无 code 或未列出的 401/403 才按鉴权失败处理。鉴权失败不是临时故障：当成 retryable
+  // 会把「登录已过期」拖成连续 5 轮失败后 stalled；直接终止，等会话层登出/重登后重建。
+  if (e.status === 401 || e.status === 403) return 'terminal-auth';
+  return 'retryable';
 }
 
 export interface SyncEngineDeps {

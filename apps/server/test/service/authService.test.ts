@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { generateKeyPairSync } from 'crypto';
+import { createHash, generateKeyPairSync } from 'crypto';
 import {
   FakeUserRepo,
   FakeEmailVerificationTokenRepo,
@@ -228,6 +228,34 @@ describe('AuthService', () => {
     // 原 deviceKey 仍可成功 refresh（证明 token 未被消费，也未迁移到 B）
     const rotated = await f.auth.refresh(refreshToken, device('device-key-00000001'));
     expect(rotated.refreshToken).toBeTruthy();
+  });
+
+  it('refresh rejects a web-console refresh token at the extension endpoint (audience boundary)', async () => {
+    const userId = await registerAndVerify(f, 'aud@example.com');
+    // consoleAuthService 登录创建的 web 槽位：devicePlatform='web'，但仍带 deviceKey。
+    const web = await f.repos.deviceRepo.upsert({} as Queryable, {
+      userId,
+      deviceKey: 'browser-key-1',
+      devicePlatform: 'web',
+      deviceName: 'Web Console',
+      clientVersion: '1.0.0',
+      status: 'active',
+      lastUsedTime: new Date(),
+    });
+    const raw = 'console-refresh-token';
+    const tokenHash = createHash('sha256').update(raw).digest('hex');
+    await f.repos.refreshTokenRepo.create({} as Queryable, {
+      userId,
+      deviceId: web.id,
+      tokenHash,
+      familyId: 'web-family',
+      expiresTime: new Date(Date.now() + 3600_000),
+    });
+
+    // 即使知道 web deviceKey，也不能在扩展端点换到 aud=extension 的令牌。
+    await expect(f.auth.refresh(raw, device('browser-key-1'))).rejects.toBeInstanceOf(UnauthorizedError);
+    // 拒绝发生在消费之前：控制台自己的 refresh 仍持有这份 token。
+    expect((await f.repos.refreshTokenRepo.findByHash(tokenHash))?.revokedTime).toBeNull();
   });
 
   it('refresh rejects after the device is revoked', async () => {

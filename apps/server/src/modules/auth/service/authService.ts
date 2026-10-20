@@ -96,7 +96,11 @@ const CHANGE_PASSWORD_MAX = 10;
 const EXTENSION_SESSION_POLICY: SessionPolicy = {
   audience: 'extension',
   scope: EXTENSION_SCOPES,
-  allowDevice: (bound, deviceKey) => !!deviceKey && bound.deviceKey === deviceKey,
+  // web 设备槽位只属于控制台（consoleAuthService 创建，devicePlatform='web'）：
+  // 即便请求方知道该 deviceKey，也不能在扩展端点把 console refresh token 换成
+  // aud=extension 的 access token（跨 audience 提权）。与登录侧拒绝 web 平台同口径。
+  allowDevice: (bound, deviceKey) =>
+    !!deviceKey && bound.deviceKey === deviceKey && bound.devicePlatform !== 'web',
   reuseAuditEvent: 'auth.refresh.reuse',
   logoutScope: 'token',
 };

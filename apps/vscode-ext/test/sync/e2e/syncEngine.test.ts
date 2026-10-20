@@ -479,6 +479,32 @@ describe('SyncEngine', () => {
     expect(client.getRecords).not.toHaveBeenCalled();
   });
 
+  it('403 SYNC_SIGNATURE_INVALID → terminal，不误报为登录过期', async () => {
+    const m = putMutation();
+    const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(403, 'SYNC_SIGNATURE_INVALID'); }) });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(m);
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.terminal?.code).toBe('SYNC_SIGNATURE_INVALID');
+    expect(r.reason).toBeUndefined();
+    expect(outbox.list()[0].consecutiveFailureCount).toBe(0);
+  });
+
+  it('403 PERSONAL_FEATURE_REQUIRED → terminal（套餐不允许同步，不空转重试）', async () => {
+    const m = putMutation();
+    const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(403, 'PERSONAL_FEATURE_REQUIRED'); }) });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(m);
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.terminal?.code).toBe('PERSONAL_FEATURE_REQUIRED');
+    expect(r.reason).toBeUndefined();
+    expect(outbox.list()[0].consecutiveFailureCount).toBe(0);
+  });
+
   it('getState 401 → terminal（不再当临时故障重试）', async () => {
     const client = clientWith({ getState: vi.fn(async () => { throw new SyncApiError(401); }) });
     const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });

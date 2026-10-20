@@ -336,6 +336,73 @@ describe('AuthService.refreshEntitlement', () => {
     expect(auth.isLoggedIn()).toBe(true);
   });
 
+  it('轮换结果先落盘 refresh、再落盘 access（半写态可自愈）', async () => {
+    const values = new Map<string, string>([[ACCESS_KEY, 'A1'], [REFRESH_KEY, 'R1']]);
+    const storeOrder: string[] = [];
+    const secrets = {
+      values,
+      async get(key: string) { return values.get(key); },
+      async store(key: string, value: string) { storeOrder.push(key); values.set(key, value); },
+      async delete(key: string) { values.delete(key); },
+      onDidChange() { return { dispose: () => {} }; },
+    };
+    installFetch(() => ({ status: 200, body: { accessToken: 'A2', refreshToken: 'R2' } }));
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', makeMemento() as any);
+    await auth.init();
+    storeOrder.length = 0;
+
+    await expect(auth.refreshAccessToken()).resolves.toBe('A2');
+    expect(storeOrder).toEqual([REFRESH_KEY, ACCESS_KEY]);
+  });
+
+  it('refresh 落盘失败时删除已被消费的旧 token，避免后续复用检测', async () => {
+    const values = new Map<string, string>([[ACCESS_KEY, 'A1'], [REFRESH_KEY, 'R1']]);
+    const secrets = {
+      values,
+      async get(key: string) { return values.get(key); },
+      async store(key: string, value: string) {
+        if (key === REFRESH_KEY && value === 'R2') throw new Error('keychain locked');
+        values.set(key, value);
+      },
+      async delete(key: string) { values.delete(key); },
+      onDidChange() { return { dispose: () => {} }; },
+    };
+    installFetch(() => ({ status: 200, body: { accessToken: 'A2', refreshToken: 'R2' } }));
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', makeMemento() as any);
+    await auth.init();
+
+    await expect(auth.refreshAccessToken()).resolves.toBeUndefined();
+    // 旧 R1 已被服务端消费；不能留在存储里让下一次刷新命中 reuse 探测。
+    expect(values.has(REFRESH_KEY)).toBe(false);
+    // refresh-first：refresh 写失败时没有覆盖 access。
+    expect(values.get(ACCESS_KEY)).toBe('A1');
+  });
+
+  it('无 refresh token 的 401 回调不删除另一窗口刚登录的新会话', async () => {
+    const values = new Map<string, string>([[ACCESS_KEY, 'A2'], [REFRESH_KEY, 'R2']]);
+    let refreshReads = 0;
+    const secrets = {
+      values,
+      async get(key: string) {
+        if (key === REFRESH_KEY) {
+          refreshReads += 1;
+          return refreshReads === 1 ? undefined : values.get(key);
+        }
+        return values.get(key);
+      },
+      async store(key: string, value: string) { values.set(key, value); },
+      async delete(key: string) { values.delete(key); },
+      onDidChange() { return { dispose: () => {} }; },
+    };
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', makeMemento() as any);
+
+    await expect(auth.refreshAccessToken()).resolves.toBeUndefined();
+    // 回调（failedRefreshToken=undefined）读到 R2：这是另一窗口刚写入的新会话，必须保留。
+    expect(values.get(REFRESH_KEY)).toBe('R2');
+    expect(values.get(ACCESS_KEY)).toBe('A2');
+    expect(auth.isLoggedIn()).toBe(true);
+  });
+
   it('login 持久化 userId（供重启后离线解锁）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
