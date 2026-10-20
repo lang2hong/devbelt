@@ -337,14 +337,20 @@ export class MysqlAiTopupRepo implements IAiTopupRepo {
     exec: Queryable,
     input: { userId: number; orderId: number; skuCode: string; tokens: number; expiresTime: Date },
   ): Promise<boolean> {
-    const [result] = await exec.query<any>(
-      `INSERT INTO ai_quota_grants (user_id, order_id, sku_code, tokens_total, expires_time)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE id = id`,
-      [input.userId, input.orderId, input.skuCode, input.tokens, input.expiresTime],
-    );
-    // MySQL：insert 新行 affectedRows=1；命中唯一键走 UPDATE id=id 时 affectedRows=0。
-    return Number(result?.affectedRows ?? 0) > 0;
+    // 不用 `ON DUPLICATE KEY UPDATE id=id` + affectedRows：该表 update_time 带
+// ON UPDATE CURRENT_TIMESTAMP，重复命中时 MySQL 会把时间戳更新算成一次写入，
+// affectedRows 仍 > 0，无法区分“首次入账”和“重放”。直接捕获唯一键冲突。
+    try {
+      await exec.query(
+        `INSERT INTO ai_quota_grants (user_id, order_id, sku_code, tokens_total, expires_time)
+         VALUES (?, ?, ?, ?, ?)`,
+        [input.userId, input.orderId, input.skuCode, input.tokens, input.expiresTime],
+      );
+      return true;
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ER_DUP_ENTRY') return false;
+      throw err;
+    }
   }
 
   async refundGrantByOrderInTx(exec: Queryable, orderId: number): Promise<void> {
