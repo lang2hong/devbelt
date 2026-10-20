@@ -135,9 +135,9 @@ function statusClass(status: string) {
 .btn { padding: 4px 12px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
 .btn.primary { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.status-added { color: #73c991; }
-.status-removed { color: #f48771; }
-.status-changed { color: #e2b74b; }
+.status-added { color: var(--vscode-gitDecoration-addedResourceForeground, #73c991); }
+.status-removed { color: var(--vscode-gitDecoration-deletedResourceForeground, #f48771); }
+.status-changed { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2b74b); }
 .error { color: var(--vscode-errorForeground, #f48771); margin-bottom: 8px; }
 .diff-tables { display: flex; flex-direction: column; gap: 4px; }
 .diff-table { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 3px; }

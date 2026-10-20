@@ -132,7 +132,7 @@ onUnmounted(() => { __offMsg?.(); });
   background: transparent; color: var(--vscode-errorForeground);
   border-radius: 6px; cursor: pointer; font-size: 12px;
 }
-.revoke-btn:hover { background: var(--vscode-errorForeground); color: #fff; }
+.revoke-btn:hover { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
 
 .empty { color: var(--vscode-descriptionForeground); text-align: center; padding: 32px 0; font-size: 13px; }
 .err { color: var(--vscode-errorForeground); font-size: 12px; margin-top: 10px; }

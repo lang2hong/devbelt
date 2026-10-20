@@ -173,8 +173,8 @@ onUnmounted(() => { __offMsg?.(); });
 .card { border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18)); border-radius: 8px; padding: 14px; }
 .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--vscode-descriptionForeground, #8c8c8c); flex-shrink: 0; }
-.dot.ok { background: #2ea043; }
-.dot.locked { background: #d29922; }
+.dot.ok { background: var(--vscode-testing-iconPassed, #2ea043); }
+.dot.locked { background: var(--vscode-editorWarning-foreground, #d29922); }
 .dot.off { background: var(--vscode-descriptionForeground, #8c8c8c); }
 .title { font-size: 14px; font-weight: 600; }
 .sub { font-size: 12px; color: var(--vscode-descriptionForeground); margin-top: 2px; }
@@ -188,5 +188,5 @@ onUnmounted(() => { __offMsg?.(); });
 .btn:hover { background: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.3)); }
 .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 600; }
 .btn.danger { background: transparent; color: var(--vscode-errorForeground); border: 1px solid var(--vscode-errorForeground); }
-.btn.danger:hover { background: var(--vscode-errorForeground); color: #fff; }
+.btn.danger:hover { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
 </style>
