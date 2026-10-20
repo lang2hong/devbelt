@@ -16,3 +16,7 @@ devbelt-db-connections.json
 # 本地验证用二维码截图（可能含真实 MFA 密钥），禁止入库
 /mfa_*.png
 .vscode-test/
+
+# 本地产物：调试截图与 session 导出，禁止入库
+/ScreenShot_*.png
+/session-ses_*.md

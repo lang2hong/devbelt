@@ -8,7 +8,8 @@ import {
   toInputValue, toSqlValue,
   type TemporalKind,
 } from '../utils/temporal';
-import { buildInsertPayload, buildInsertStatement } from '../utils/gridOps';
+import { buildInsertPayload, buildInsertStatement, isNumericText } from '../utils/gridOps';
+import ConfirmDialog from './ConfirmDialog.vue';
 
 interface Field { name: string; simpleType?: string; type?: string }
 interface Row { [key: string]: any }
@@ -323,7 +324,13 @@ const FILTER_OPS = computed(() => [
 const NO_VALUE_OPS = [FILTER_OP.isNull, FILTER_OP.notNull, FILTER_OP.isEmpty, FILTER_OP.notEmpty];
 const DUAL_VALUE_OPS = [FILTER_OP.between, FILTER_OP.notBetween];
 const MULTI_VALUE_OPS = [FILTER_OP.in, FILTER_OP.notIn];
+/** 需要数值校验的比较算子；LIKE 家族与空值算子不在此列。 */
+const NUMERIC_VALUE_OPS = [
+  FILTER_OP.eq, FILTER_OP.ne, FILTER_OP.gt, FILTER_OP.gte, FILTER_OP.lt, FILTER_OP.lte,
+  FILTER_OP.between, FILTER_OP.notBetween, FILTER_OP.in, FILTER_OP.notIn,
+];
 const NUMBER_TYPES = new Set(['int', 'integer', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'numeric', 'float', 'double', 'real']);
+const INTEGER_TYPES = new Set(['int', 'integer', 'bigint', 'smallint', 'mediumint', 'tinyint', 'serial', 'bigserial', 'smallserial', 'year']);
 
 function fieldOf(name: string): Field | undefined {
   return props.fields.find((f) => f.name === name);
@@ -356,6 +363,30 @@ function temporalKindOf(name: string): TemporalKind | null {
 
 function isNumberColumn(name: string): boolean {
   return NUMBER_TYPES.has(typeStrOf(name));
+}
+function isIntegerColumn(name: string): boolean {
+  return INTEGER_TYPES.has(typeStrOf(name));
+}
+/** 数值输入的键盘形态（桌面端无影响；整数列不该弹小数键盘）。 */
+function inputModeFor(name: string): 'numeric' | 'decimal' {
+  return isIntegerColumn(name) ? 'numeric' : 'decimal';
+}
+
+/**
+ * 数值列筛选值是否非法。
+ *
+ * 输入框已改为文本（数值型输入会被 Vue 转成 Number，丢掉 BIGINT 精度），
+ * 浏览器不再拦截非法字符，因此这里自己校验：IN 按逗号列表、BETWEEN 取两段、其余
+ * 单值；空值跳过（允许用户只填一半）。返回第一个非法值，合法返回 null。
+ */
+function invalidNumericFilterValue(cond: Cond): string | null {
+  if (!cond.column || !isNumberColumn(cond.column) || !NUMERIC_VALUE_OPS.includes(cond.op)) return null;
+  const raw = MULTI_VALUE_OPS.includes(cond.op)
+    ? (cond.value ?? '').split(',')
+    : DUAL_VALUE_OPS.includes(cond.op)
+      ? [cond.value ?? '', cond.value2 ?? '']
+      : [cond.value ?? ''];
+  return raw.map((v) => v.trim()).find((v) => v !== '' && !isNumericText(v)) ?? null;
 }
 
 /**
@@ -447,7 +478,15 @@ function removeCondition(index: number) {
 }
 
 function applyFilter() {
-  emit('filter', conditions.value.filter((c) => c.column));
+  const active = conditions.value.filter((c) => c.column);
+  for (const cond of active) {
+    const bad = invalidNumericFilterValue(cond);
+    if (bad !== null) {
+      showToast(t('wv.grid.invalidNumber', { column: cond.column, value: bad }));
+      return;
+    }
+  }
+  emit('filter', active);
   showFilter.value = false;
 }
 
@@ -500,7 +539,17 @@ function cancelInsert() {
 }
 
 function saveInsert() {
-  const { columns, values } = buildInsertPayload(visibleFields.value.map((f) => f.name), newRow.value);
+  const fields = visibleFields.value.map((f) => f.name);
+  for (const name of fields) {
+    const raw = newRow.value[name];
+    // 留空走默认值；NULL 字面量是显式空值（与 buildInsertPayload 的约定一致）。
+    if (!raw || !isNumberColumn(name) || /^null$/i.test(raw)) continue;
+    if (!isNumericText(raw)) {
+      showToast(t('wv.grid.invalidNumber', { column: name, value: raw }));
+      return;
+    }
+  }
+  const { columns, values } = buildInsertPayload(fields, newRow.value);
   if (columns.length === 0) {
     showToast(t('wv.grid.insertNoValues'));
     return;
@@ -597,11 +646,11 @@ watch(() => props.filterConditions, (conds) => {
                 :value="temporalInputValue(cond.column, cond.value)"
                 @change="onTemporalFilterInput(cond, 'value', $event)" />
               <input v-else-if="isNumberColumn(cond.column) && !MULTI_VALUE_OPS.includes(cond.op)"
-                v-model="cond.value" class="input" type="text" inputmode="decimal"
+                v-model="cond.value" class="input" type="text" :inputmode="inputModeFor(cond.column)"
                 :placeholder="filterPlaceholderFor(cond)" />
               <input v-else v-model="cond.value" class="input"
                 :placeholder="filterPlaceholderFor(cond)" /></template>
-            <button class="btn" @click="removeCondition(index)">✕</button>
+            <button class="btn" :aria-label="t('wv.common.delete')" @click="removeCondition(index)">✕</button>
           </div>
           <div class="filter-actions">
             <button class="btn" @click="addCondition">{{ t('wv.grid.addCondition') }}</button>
@@ -660,7 +709,7 @@ watch(() => props.filterConditions, (conds) => {
               :value="insertInputValue(f.name)"
               @change="onTemporalInsertInput(f.name, $event)" />
             <input v-else-if="isNumberColumn(f.name)" v-model="newRow[f.name]" class="cell-edit"
-              type="text" inputmode="decimal" :placeholder="t('wv.common.null')" />
+              type="text" :inputmode="inputModeFor(f.name)" :placeholder="t('wv.common.null')" />
             <input v-else v-model="newRow[f.name]" class="cell-edit"
               :placeholder="insertPlaceholderFor(f.name)" />
           </td>
@@ -668,6 +717,11 @@ watch(() => props.filterConditions, (conds) => {
             <button class="btn primary" @click="saveInsert">{{ t('wv.common.save') }}</button>
             <button class="btn" @click="cancelInsert">{{ t('wv.common.cancel') }}</button>
             <small class="insert-hint">{{ t('wv.grid.insertHint') }}</small>
+          </td>
+        </tr>
+        <tr v-if="!inserting && rows.length === 0">
+          <td :colspan="visibleFields.length + (canSelectRows ? 1 : 0)" class="empty-row">
+            {{ t('wv.grid.noRows') }}
           </td>
         </tr>
         <tr v-for="(row, idx) in rows" :key="idx" :class="{ 'row-selected': isRowSelected(row) }">
@@ -711,17 +765,17 @@ watch(() => props.filterConditions, (conds) => {
       </tbody>
     </table>
   </div>
-  <div v-if="pendingDelete.length" class="modal-mask" @click.self="cancelDelete">
-    <div class="modal">
-      <div class="modal-title">{{ t('wv.grid.deleteRows') }}</div>
-      <div class="modal-body">{{ t('wv.grid.confirmDeleteRows', { count: pendingDelete.length }) }}</div>
-      <div class="modal-actions">
-        <button class="btn" @click="cancelDelete">{{ t('wv.common.cancel') }}</button>
-        <button class="btn danger" @click="confirmDelete">{{ t('wv.common.delete') }}</button>
-      </div>
-    </div>
-  </div>
-  <div v-if="toast" class="toast">{{ toast }}</div>
+  <ConfirmDialog
+    v-if="pendingDelete.length"
+    :title="t('wv.grid.deleteRows')"
+    :message="t('wv.grid.confirmDeleteRows', { count: pendingDelete.length })"
+    :confirm-label="t('wv.common.delete')"
+    :cancel-label="t('wv.common.cancel')"
+    danger
+    @confirm="confirmDelete"
+    @cancel="cancelDelete"
+  />
+  <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
 </template>
 
 <style scoped>
@@ -768,11 +822,7 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 4px 8px; font-size: 12px; cursor: pointer;
   background: transparent; border: none; color: var(--vscode-foreground, #cccccc); }
 .menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
-.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 4px; padding: 16px; min-width: 320px; }
-.modal-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-.modal-body { font-size: 12px; color: var(--vscode-foreground, #cccccc); margin-bottom: 14px; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.empty-row { text-align: center; color: var(--vscode-descriptionForeground, #808080); padding: 24px 10px; }
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 200; padding: 8px 16px; font-size: 12px;
   background: var(--vscode-notifications-background, var(--vscode-editor-background)); color: var(--vscode-foreground, #cccccc);
   border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }

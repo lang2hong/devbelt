@@ -4,6 +4,7 @@ import {
   buildInsertStatement,
   deleteRowsMessage,
   identifierQuote,
+  isNumericText,
   quoteLiteral,
   updateCellMessage,
 } from '../../webview/src/utils/gridOps';
@@ -19,6 +20,20 @@ describe('gridOps 方言引用', () => {
     expect(quoteLiteral("O'Brien")).toBe("'O''Brien'");
     expect(quoteLiteral(null)).toBe('NULL');
     expect(quoteLiteral(undefined)).toBe('NULL');
+  });
+});
+
+describe('gridOps 数值文本校验', () => {
+  it('接受整数、小数、指数与前后空白', () => {
+    for (const v of ['0', '-1', '+18', '2082672181952057345', '1.5', '-0.00', '1e3', '.5', ' 18 ']) {
+      expect(isNumericText(v), v).toBe(true);
+    }
+  });
+
+  it('拒绝空串、纯空白、十六进制与夹杂字符', () => {
+    for (const v of ['', '   ', '0x10', '1,5', '12abc', 'abc', 'NaN', 'Infinity']) {
+      expect(isNumericText(v), v).toBe(false);
+    }
   });
 });
 

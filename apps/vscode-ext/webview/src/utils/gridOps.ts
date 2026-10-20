@@ -17,6 +17,19 @@ export function quoteLiteral(value: unknown): string {
 }
 
 /**
+ * 十进制数值文本（允许符号、小数、指数）。
+ *
+ * 网格的数值列输入不能用 `type="number"`：Vue 会把值转成 Number，BIGINT 与
+ * 带标度的 DECIMAL 一旦超过 2^53 就会被静默截断。改成文本输入后，合法性由
+ * 这里判断；空串不算数字，是否允许留空由调用方决定。
+ */
+const NUMERIC_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+export function isNumericText(raw: string): boolean {
+  return NUMERIC_TEXT.test(raw.trim());
+}
+
+/**
  * 插入行负载：**留空 = 省略该列**（交给数据库默认值/自增/可空默认），
  * 字面 `NULL`（大小写不敏感）= 显式 SQL NULL，其余按字面字符串。
  * 旧实现把未填列显式写 NULL，导致 DEFAULT/NOW() 失效、PG serial 报错。

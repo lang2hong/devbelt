@@ -107,7 +107,9 @@ function runInChat(): void {
 .ai-code-body {
   margin: 0;
   padding: 8px;
-  overflow-x: auto;
+  /* 长代码块内部滚动，不把整段对话撑高；横向仍可查看超长行。 */
+  max-height: 420px;
+  overflow: auto;
   max-width: 100%;
   min-width: 0;
   font-family: var(--vscode-editor-font-family, monospace);

@@ -256,7 +256,7 @@ describe('BIGINT 精度（> 2^53）', () => {
   it('非字符串入参先转字符串，不进入数值拼接口径', () => {
     expect(buildCondition(
       DatabaseType.MYSQL,
-      { column: 'age', op: 'eq', value: 18 as unknown as string },
+      { column: 'age', op: 'eq', value: 18 },
       { age: 'int' },
     )).toBe('`age` = 18');
   });

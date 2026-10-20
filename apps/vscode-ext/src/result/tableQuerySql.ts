@@ -9,8 +9,9 @@ import { escapeSqlString, wrapIdent } from '../utils/sql';
 export interface FilterCondition {
   column: string;
   op: FilterOp;
-  value?: string;
-  value2?: string;
+  /** 运行期可能来自旧状态/消息而实际是 number，见 buildCondition 的归一化。 */
+  value?: string | number;
+  value2?: string | number;
 }
 
 /**
@@ -125,8 +126,8 @@ export function buildCondition(
     return '';
   }
   const w = wrapIdent(dbType, condition.column);
-  // 运行期值可能来自 webview/旧状态而实际是 number（类型标注拦不住）；
-  // 统一转字符串，避免 number 进入引号判定与模板插值两条不同路径。
+  // 值可能来自 webview/旧状态（见 FilterCondition.value 的说明）：统一转字符串，
+  // 避免 number 进入引号判定与模板插值两条不同路径。
   const v = condition.value == null ? '' : String(condition.value);
   const v2 = condition.value2 == null ? '' : String(condition.value2);
   const columnType = columnTypes[condition.column];
