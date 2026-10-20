@@ -116,7 +116,7 @@ describe('AdminUserDetailView', () => {
     await mountDetail();
     await switchTab('AI 积分');
     expect(getAdminAiQuota).toHaveBeenCalledWith(7);
-    expect(listAdminUserAiRequests).toHaveBeenCalledWith('7', {});
+    expect(listAdminUserAiRequests).toHaveBeenCalledWith('7', { cursor: undefined, limit: 20 });
     const text = document.body.textContent ?? '';
     expect(text).toContain('1.2'); // 本月已用 1,200 计费 token = 1.2 积分
     expect(text).toContain('3 笔');
@@ -211,7 +211,7 @@ describe('AdminUserDetailView', () => {
     });
     await mountDetail();
     await switchTab('订单');
-    expect(listAdminOrders).toHaveBeenCalledWith({ userId: '7', cursor: undefined });
+    expect(listAdminOrders).toHaveBeenCalledWith({ userId: '7', cursor: undefined, limit: 20 });
     const text = document.body.textContent ?? '';
     expect(text).toContain('ord-1');
     expect(text).toContain('积分充值');
@@ -241,7 +241,8 @@ describe('AdminUserDetailView', () => {
     const text = document.body.textContent ?? '';
     expect(text).toContain('12 条');
     expect(text).toContain('aes-256-gcm');
-    expect(text).toContain('05060708deadbeef'.slice(0, 16) + '…');
+    expect(text).toContain('05060708deadbeef');
+    expect(text).toContain('数据库连接');
     expect(text).toContain('端到端加密');
   });
 
@@ -278,7 +279,7 @@ describe('AdminUserDetailView', () => {
     });
     await mountDetail();
     await switchTab('操作记录');
-    expect(queryAudit).toHaveBeenCalledWith({ actorUserId: '7', cursor: undefined });
+    expect(queryAudit).toHaveBeenCalledWith({ actorUserId: '7', cursor: undefined, limit: 20 });
     const text = document.body.textContent ?? '';
     expect(text).toContain('成功');
   });

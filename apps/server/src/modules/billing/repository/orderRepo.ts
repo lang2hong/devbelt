@@ -121,6 +121,21 @@ export class MysqlOrderRepo implements IOrderRepo {
     }));
   }
 
+  async countAll(input: Omit<AdminOrderFilter, 'cursor' | 'limit'>): Promise<number> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (input.userId !== undefined) { where.push('o.user_id = ?'); params.push(input.userId); }
+    if (input.status !== undefined) { where.push('o.status = ?'); params.push(input.status); }
+    if (input.channel !== undefined) { where.push('o.channel = ?'); params.push(input.channel); }
+    if (input.planCode !== undefined) { where.push('o.plan_code = ?'); params.push(input.planCode); }
+    if (input.purpose !== undefined) { where.push('o.purpose = ?'); params.push(input.purpose); }
+    if (input.createdFrom) { where.push('o.create_time >= ?'); params.push(input.createdFrom); }
+    if (input.createdTo) { where.push('o.create_time <= ?'); params.push(input.createdTo); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const [rows] = await this.db().query<any[]>(`SELECT COUNT(*) AS cnt FROM orders o ${whereSql}`, params);
+    return Number(rows[0]?.cnt ?? 0);
+  }
+
   async findPendingByUserAndPlan(userId: number, planCode: string, channel: PaymentChannel): Promise<Order | undefined> {
     const [rows] = await this.db().query<any[]>(
       `SELECT * FROM orders

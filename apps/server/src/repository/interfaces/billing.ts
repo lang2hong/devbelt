@@ -60,6 +60,8 @@ export interface IOrderRepo {
   listByUser(userId: number, cursor: number | undefined, limit: number): Promise<Order[]>;
   /** 平台订单列表（跨用户，多维过滤，keyset cursor DESC by id）；附支付人邮箱/昵称供运营排查。 */
   listAll(input: AdminOrderFilter): Promise<Array<Order & { userEmail?: string | null; userDisplayName?: string | null }>>;
+  /** 同过滤条件总数（管理端首屏分页）。 */
+  countAll?(input: Omit<AdminOrderFilter, 'cursor' | 'limit'>): Promise<number>;
   /** 同 (user, plan, channel) 未过期 pending 订单（下单去重：复用原订单，防重复付款，§P4）。 */
   findPendingByUserAndPlan(userId: number, planCode: string, channel: Order['channel']): Promise<Order | undefined>;
   /** 过期 pending 订单 sweep：把超时未支付的 pending 订单批量置为 expired，返回受影响行数。 */
@@ -115,4 +117,6 @@ export interface IInvoiceRepo {
   hasIssuedForOrder(exec: Queryable, orderId: number): Promise<boolean>;
   /** 平台发票列表（跨用户，多维过滤，keyset cursor DESC by id）。 */
   listAll(input: AdminInvoiceFilter): Promise<Invoice[]>;
+  /** 同过滤条件总数（管理端首屏分页）。 */
+  countAll?(input: Omit<AdminInvoiceFilter, 'cursor' | 'limit'>): Promise<number>;
 }

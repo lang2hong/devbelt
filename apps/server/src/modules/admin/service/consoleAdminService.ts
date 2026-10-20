@@ -87,6 +87,8 @@ export interface Page<T> {
   items: T[];
   /** 下一页的 keyset 游标（id 数值）；null 表示无下一页。 */
   nextId: number | null;
+  /** 首屏总条数（仅无 cursor 的首屏查询返回，后续页省略以省 count）。 */
+  total?: number;
 }
 
 /**
@@ -155,8 +157,11 @@ export class ConsoleAdminService {
     const rows = await this.userRepo.listUsers({ ...input, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
+    const { cursor: _cursor, limit: _limit, ...countInput } = input;
+    void _cursor; void _limit;
+    const total = input.cursor === undefined ? await this.userRepo.countUsers(countInput) : undefined;
     await this.auditRestrictedRead(actorUserId, 'admin.users.read');
-    return { items, nextId: hasMore ? items[items.length - 1].userId : null };
+    return { items, nextId: hasMore ? items[items.length - 1].userId : null, total };
   }
 
   /**
@@ -411,8 +416,13 @@ export class ConsoleAdminService {
     const rows = await this.orderRepo.listAll({ ...input, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
+    const { cursor: _cursor, limit: _limit, ...countInput } = input;
+    void _cursor; void _limit;
+    const total = input.cursor === undefined && this.orderRepo.countAll
+      ? await this.orderRepo.countAll(countInput)
+      : undefined;
     await this.auditRestrictedRead(actorUserId, 'admin.orders.read');
-    return { items, nextId: hasMore ? items[items.length - 1].id : null };
+    return { items, nextId: hasMore ? items[items.length - 1].id : null, total };
   }
 
   /**
@@ -475,8 +485,13 @@ export class ConsoleAdminService {
     const rows = await this.invoiceRepo.listAll({ ...input, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
+    const { cursor: _cursor, limit: _limit, ...countInput } = input;
+    void _cursor; void _limit;
+    const total = input.cursor === undefined && this.invoiceRepo.countAll
+      ? await this.invoiceRepo.countAll(countInput)
+      : undefined;
     await this.auditRestrictedRead(actorUserId, 'admin.invoices.read');
-    return { items, nextId: hasMore ? items[items.length - 1].id : null };
+    return { items, nextId: hasMore ? items[items.length - 1].id : null, total };
   }
 
   /**
@@ -549,8 +564,11 @@ export class ConsoleAdminService {
     const rows = await this.auditRepo.search({ ...filter, limit: input.limit + 1 });
     const hasMore = rows.length > input.limit;
     const items = hasMore ? rows.slice(0, input.limit) : rows;
+    const { cursor: _cursor, limit: _limit, ...countInput } = filter;
+    void _cursor; void _limit;
+    const total = input.cursor === undefined ? await this.auditRepo.count(countInput) : undefined;
     await this.auditRestrictedRead(actorUserId, 'admin.audit.read');
-    return { items, nextId: hasMore ? items[items.length - 1].id : null };
+    return { items, nextId: hasMore ? items[items.length - 1].id : null, total };
   }
 
   async exportAuditInTx(

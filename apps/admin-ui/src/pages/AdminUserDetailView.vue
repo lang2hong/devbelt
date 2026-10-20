@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { withBase, router, navigate } from '../lib/router';
 import {
   listUsers, setUserRole, setUserStatus, adjustUserSubscription,
@@ -16,6 +16,9 @@ import { auditEventLabel } from '../lib/auditLabels';
 import Modal from '../components/Modal.vue';
 import Tabs from '../components/Tabs.vue';
 import FormField from '../components/FormField.vue';
+import Pager from '../components/Pager.vue';
+import { useCursorPages } from '../lib/useCursorPages';
+import { syncKindLabel } from '../lib/syncLabels';
 
 const props = defineProps<{ userId: string }>();
 
@@ -29,6 +32,10 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'audit', label: '操作记录' },
 ];
 const tab = ref<TabKey>('overview');
+const aiPager = reactive(useCursorPages());
+const orderPager = reactive(useCursorPages());
+const invoicePager = reactive(useCursorPages());
+const auditPager = reactive(useCursorPages());
 
 const user = ref<AdminUser | null>(null);
 const userState = ref<'loading' | 'ready' | 'error'>('loading');
@@ -264,19 +271,18 @@ const loaded = ref(new Set<TabKey>(['overview']));
 watch(tab, (t) => {
   if (!loaded.value.has(t)) {
     loaded.value.add(t);
-    if (t === 'ai') { void loadAi(); void loadAiRequests(true); }
-    if (t === 'orders') void loadOrders(true);
-    if (t === 'invoices') void loadInvoices(true);
+    if (t === 'ai') { aiPager.reset(); void loadAi(); void loadAiRequests(); }
+    if (t === 'orders') { orderPager.reset(); void loadOrders(); }
+    if (t === 'invoices') { invoicePager.reset(); void loadInvoices(); }
     if (t === 'sync') void loadSync();
-    if (t === 'audit') void loadAudit(true);
+    if (t === 'audit') { auditPager.reset(); void loadAudit(); }
   }
 });
 
-// ── AI 用量（积分口径：额度/余额经 fmtCredits；近月用量为原始 token 对账口径）──
+// ── AI 用量（积分口径：额度/余额经 fmtCredits；近月用量为计费 token）──
 const aiQuota = ref<AdminAiQuota | null>(null);
 const aiError = ref('');
 const aiRequests = ref<AdminAiRequestLog[]>([]);
-const aiRequestsCursor = ref<string | null>(null);
 const aiRequestsLoaded = ref(false);
 
 async function loadAi(): Promise<void> {
@@ -287,29 +293,32 @@ async function loadAi(): Promise<void> {
   else aiError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
 }
 
-async function loadAiRequests(reset: boolean): Promise<void> {
-  const r = await listAdminUserAiRequests(props.userId, { cursor: reset ? undefined : aiRequestsCursor.value ?? undefined });
+async function loadAiRequests(): Promise<void> {
+  const r = await listAdminUserAiRequests(props.userId, { cursor: aiPager.cursor, limit: aiPager.pageSize });
   if (r.kind === 'ok') {
-    aiRequests.value = reset ? r.value.items : [...aiRequests.value, ...r.value.items];
-    aiRequestsCursor.value = r.value.nextCursor;
+    aiRequests.value = r.value.items;
+    aiPager.apply({ nextCursor: r.value.nextCursor });
     aiRequestsLoaded.value = true;
   } else if (r.kind === 'unauthorized') relogin();
   else aiError.value = r.kind === 'failure' ? serverMsg(r) : '请求记录加载失败。';
 }
 
+function aiPrev(): void { if (aiPager.prev()) void loadAiRequests(); }
+function aiNext(): void { if (aiPager.next()) void loadAiRequests(); }
+function aiChangeSize(size: number): void { aiPager.setPageSize(size); void loadAiRequests(); }
+
 // ── 订单 ──
 const orders = ref<AdminOrder[]>([]);
 const ordersState = ref<'loading' | 'ready' | 'error'>('loading');
 const ordersError = ref('');
-const ordersCursor = ref<string | null>(null);
 
-async function loadOrders(reset: boolean): Promise<void> {
+async function loadOrders(): Promise<void> {
   ordersState.value = 'loading';
   ordersError.value = '';
-  const r = await listAdminOrders({ userId: props.userId, cursor: reset ? undefined : ordersCursor.value ?? undefined });
+  const r = await listAdminOrders({ userId: props.userId, cursor: orderPager.cursor, limit: orderPager.pageSize });
   if (r.kind === 'ok') {
-    orders.value = reset ? r.value.items : [...orders.value, ...r.value.items];
-    ordersCursor.value = r.value.nextCursor;
+    orders.value = r.value.items;
+    orderPager.apply({ nextCursor: r.value.nextCursor, total: r.value.total });
     ordersState.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     relogin();
@@ -319,19 +328,22 @@ async function loadOrders(reset: boolean): Promise<void> {
   }
 }
 
+function orderPrev(): void { if (orderPager.prev()) void loadOrders(); }
+function orderNext(): void { if (orderPager.next()) void loadOrders(); }
+function orderChangeSize(size: number): void { orderPager.setPageSize(size); void loadOrders(); }
+
 // ── 发票 ──
 const invoices = ref<AdminInvoice[]>([]);
 const invoicesState = ref<'loading' | 'ready' | 'error'>('loading');
 const invoicesError = ref('');
-const invoicesCursor = ref<string | null>(null);
 
-async function loadInvoices(reset: boolean): Promise<void> {
+async function loadInvoices(): Promise<void> {
   invoicesState.value = 'loading';
   invoicesError.value = '';
-  const r = await listAdminInvoices({ userId: props.userId, cursor: reset ? undefined : invoicesCursor.value ?? undefined });
+  const r = await listAdminInvoices({ userId: props.userId, cursor: invoicePager.cursor, limit: invoicePager.pageSize });
   if (r.kind === 'ok') {
-    invoices.value = reset ? r.value.items : [...invoices.value, ...r.value.items];
-    invoicesCursor.value = r.value.nextCursor;
+    invoices.value = r.value.items;
+    invoicePager.apply({ nextCursor: r.value.nextCursor, total: r.value.total });
     invoicesState.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     relogin();
@@ -341,6 +353,10 @@ async function loadInvoices(reset: boolean): Promise<void> {
   }
 }
 
+function invoicePrev(): void { if (invoicePager.prev()) void loadInvoices(); }
+function invoiceNext(): void { if (invoicePager.next()) void loadInvoices(); }
+function invoiceChangeSize(size: number): void { invoicePager.setPageSize(size); void loadInvoices(); }
+
 // ── 同步数据 ──
 const syncKinds = ref<AdminSyncKindOverview[]>([]);
 const syncState = ref<AdminSyncRecordsPageState | null>(null);
@@ -349,11 +365,49 @@ const syncRecordsCursor = ref<string | null>(null);
 const syncKindFilter = ref('');
 const syncStateError = ref('');
 const syncLoading = ref(false);
+const syncMoreLoading = ref(false);
+const syncDetail = ref<AdminSyncRecord | null>(null);
+const copiedId = ref('');
 type AdminSyncRecordsPageState = { keyEpoch: string; stateVersion: string; changeSequence: string; protocolVersion: number; cipherSuite: string; formatVersion: number };
+
+const syncLastActivity = computed(() => {
+  const times = syncKinds.value
+    .map((k) => k.lastActivityTime)
+    .filter((t): t is string => !!t)
+    .sort();
+  return times.length > 0 ? times[times.length - 1]! : null;
+});
+
+const syncTotal = computed(() => {
+  if (syncKindFilter.value) {
+    return syncKinds.value.find((k) => k.entityKind === syncKindFilter.value)?.count ?? 0;
+  }
+  return syncKinds.value.reduce((sum, k) => sum + k.count, 0);
+});
+
+const kindOptions = computed(() =>
+  syncKinds.value
+    .filter((k): k is AdminSyncKindOverview & { entityKind: string } => !!k.entityKind)
+    .map((k) => ({ kind: k.entityKind, label: syncKindLabel(k.entityKind), count: k.count })),
+);
+
+async function copyRecordId(id: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(id);
+    copiedId.value = id;
+    window.setTimeout(() => {
+      if (copiedId.value === id) copiedId.value = '';
+    }, 1500);
+  } catch {
+    // 剪贴板不可用时保留可选中文本，不阻塞页面。
+  }
+}
 
 async function loadSync(): Promise<void> {
   syncLoading.value = true;
   syncStateError.value = '';
+  syncRecords.value = [];
+  syncRecordsCursor.value = null;
   try {
     const [ov, rec] = await Promise.all([
       getSyncOverview(props.userId),
@@ -377,39 +431,52 @@ async function loadSync(): Promise<void> {
 }
 
 async function loadMoreSyncRecords(): Promise<void> {
-  const r = await listSyncRecords(props.userId, { kind: syncKindFilter.value || undefined, cursor: syncRecordsCursor.value ?? undefined });
-  if (r.kind === 'ok') {
-    syncRecords.value = [...syncRecords.value, ...r.value.items];
-    syncRecordsCursor.value = r.value.nextCursor;
-  } else if (r.kind === 'unauthorized') relogin();
-  else syncStateError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
+  if (!syncRecordsCursor.value || syncMoreLoading.value) return;
+  syncMoreLoading.value = true;
+  try {
+    const r = await listSyncRecords(props.userId, {
+      kind: syncKindFilter.value || undefined,
+      cursor: syncRecordsCursor.value,
+    });
+    if (r.kind === 'ok') {
+      syncRecords.value = [...syncRecords.value, ...r.value.items];
+      syncRecordsCursor.value = r.value.nextCursor;
+    } else if (r.kind === 'unauthorized') relogin();
+    else syncStateError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
+  } finally {
+    syncMoreLoading.value = false;
+  }
 }
 
 async function onSyncKindChange(): Promise<void> {
   syncRecordsCursor.value = null;
-  const r = await listSyncRecords(props.userId, { kind: syncKindFilter.value || undefined });
-  if (r.kind === 'ok') {
-    syncRecords.value = r.value.items;
-    syncRecordsCursor.value = r.value.nextCursor;
-  } else if (r.kind === 'unauthorized') relogin();
-  else syncStateError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
+  syncRecords.value = [];
+  syncStateError.value = '';
+  syncLoading.value = true;
+  try {
+    const r = await listSyncRecords(props.userId, { kind: syncKindFilter.value || undefined });
+    if (r.kind === 'ok') {
+      syncRecords.value = r.value.items;
+      syncRecordsCursor.value = r.value.nextCursor;
+    } else if (r.kind === 'unauthorized') relogin();
+    else syncStateError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
+  } finally {
+    syncLoading.value = false;
+  }
 }
-
-const kindOptions = computed(() => syncKinds.value.map((k) => k.entityKind).filter((k): k is string => !!k));
 
 // ── 操作记录（该用户作为操作者）──
 const auditEvents = ref<AdminAuditEvent[]>([]);
 const auditState = ref<'loading' | 'ready' | 'error'>('loading');
 const auditError = ref('');
-const auditCursor = ref<string | null>(null);
 
-async function loadAudit(reset: boolean): Promise<void> {
+async function loadAudit(): Promise<void> {
   auditState.value = 'loading';
   auditError.value = '';
-  const r = await queryAudit({ actorUserId: props.userId, cursor: reset ? undefined : auditCursor.value ?? undefined });
+  const r = await queryAudit({ actorUserId: props.userId, cursor: auditPager.cursor, limit: auditPager.pageSize });
   if (r.kind === 'ok') {
-    auditEvents.value = reset ? r.value.items : [...auditEvents.value, ...r.value.items];
-    auditCursor.value = r.value.nextCursor;
+    auditEvents.value = r.value.items;
+    auditPager.apply({ nextCursor: r.value.nextCursor, total: r.value.total });
     auditState.value = 'ready';
   } else if (r.kind === 'unauthorized') {
     relogin();
@@ -418,6 +485,10 @@ async function loadAudit(reset: boolean): Promise<void> {
     auditError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
   }
 }
+
+function auditPrev(): void { if (auditPager.prev()) void loadAudit(); }
+function auditNext(): void { if (auditPager.next()) void loadAudit(); }
+function auditChangeSize(size: number): void { auditPager.setPageSize(size); void loadAudit(); }
 
 /** 切换到另一个用户时清空所有按用户缓存的数据，避免复用组件显示旧用户内容。 */
 function resetUserData(): void {
@@ -437,18 +508,19 @@ function resetUserData(): void {
   aiQuota.value = null;
   aiError.value = '';
   aiRequests.value = [];
-  aiRequestsCursor.value = null;
   aiRequestsLoaded.value = false;
+  aiPager.reset();
+  orderPager.reset();
+  invoicePager.reset();
+  auditPager.reset();
 
   orders.value = [];
   ordersState.value = 'loading';
   ordersError.value = '';
-  ordersCursor.value = null;
 
   invoices.value = [];
   invoicesState.value = 'loading';
   invoicesError.value = '';
-  invoicesCursor.value = null;
 
   syncKinds.value = [];
   syncState.value = null;
@@ -457,11 +529,13 @@ function resetUserData(): void {
   syncKindFilter.value = '';
   syncStateError.value = '';
   syncLoading.value = false;
+  syncMoreLoading.value = false;
+  syncDetail.value = null;
+  copiedId.value = '';
 
   auditEvents.value = [];
   auditState.value = 'loading';
   auditError.value = '';
-  auditCursor.value = null;
 }
 
 function goBack(): void {
@@ -585,7 +659,16 @@ function goBack(): void {
               <tr v-if="aiRequests.length === 0"><td colspan="8" class="muted">暂无请求记录（流水自上线起累计，保留 180 天）。</td></tr>
             </tbody>
           </table>
-          <p v-if="aiRequestsCursor" class="load-more"><button class="btn secondary" @click="loadAiRequests(false)">加载更多</button></p>
+          <Pager
+            :page="aiPager.page"
+            :page-size="aiPager.pageSize"
+            :total="aiPager.total"
+            :count="aiRequests.length"
+            :has-next="aiPager.hasNext"
+            @prev="aiPrev"
+            @next="aiNext"
+            @update:page-size="aiChangeSize"
+          />
         </template>
       </div>
 
@@ -607,7 +690,17 @@ function goBack(): void {
             <tr v-if="orders.length === 0"><td colspan="6" class="muted">该用户暂无订单。</td></tr>
           </tbody>
         </table>
-        <p v-if="ordersCursor" class="load-more"><button class="btn secondary" @click="loadOrders(false)">加载更多</button></p>
+        <Pager
+          v-if="ordersState === 'ready'"
+          :page="orderPager.page"
+          :page-size="orderPager.pageSize"
+          :total="orderPager.total"
+          :count="orders.length"
+          :has-next="orderPager.hasNext"
+          @prev="orderPrev"
+          @next="orderNext"
+          @update:page-size="orderChangeSize"
+        />
       </div>
 
       <!-- 发票 -->
@@ -627,7 +720,17 @@ function goBack(): void {
             <tr v-if="invoices.length === 0"><td colspan="5" class="muted">该用户暂无发票申请。</td></tr>
           </tbody>
         </table>
-        <p v-if="invoicesCursor" class="load-more"><button class="btn secondary" @click="loadInvoices(false)">加载更多</button></p>
+        <Pager
+          v-if="invoicesState === 'ready'"
+          :page="invoicePager.page"
+          :page-size="invoicePager.pageSize"
+          :total="invoicePager.total"
+          :count="invoices.length"
+          :has-next="invoicePager.hasNext"
+          @prev="invoicePrev"
+          @next="invoiceNext"
+          @update:page-size="invoiceChangeSize"
+        />
       </div>
 
       <!-- 同步数据 -->
@@ -635,11 +738,15 @@ function goBack(): void {
         <p class="muted" v-if="syncLoading">加载中…</p>
         <p class="error" v-if="syncStateError">{{ syncStateError }}</p>
         <p class="muted" v-if="!syncLoading && syncState === null && !syncStateError">该用户未启用数据同步。</p>
-        <template v-if="syncState">
+        <template v-if="syncState && !syncStateError">
           <div class="stat-grid">
-            <div class="stat"><span class="stat-label">已同步数据</span><span class="stat-value">{{ syncKinds.reduce((s, k) => s + k.count, 0) }} 条</span></div>
+            <div class="stat"><span class="stat-label">已同步数据</span><span class="stat-value">{{ syncTotal }} 条</span></div>
             <div class="stat"><span class="stat-label">占用空间</span><span class="stat-value">{{ fmtBytes(syncKinds.reduce((s, k) => s + k.bytes, 0)) }}</span></div>
+            <div class="stat"><span class="stat-label">最近同步</span><span class="stat-value small-value">{{ formatDateTime(syncLastActivity) }}</span></div>
             <div class="stat"><span class="stat-label">同步版本</span><span class="stat-value">{{ syncState.stateVersion }}</span></div>
+            <div class="stat"><span class="stat-label">变更序列</span><span class="stat-value">{{ syncState.changeSequence }}</span></div>
+            <div class="stat"><span class="stat-label">密钥轮次</span><span class="stat-value">{{ syncState.keyEpoch }}</span></div>
+            <div class="stat"><span class="stat-label">协议 / 格式</span><span class="stat-value">v{{ syncState.protocolVersion }} / v{{ syncState.formatVersion }}</span></div>
             <div class="stat"><span class="stat-label">加密方式</span><span class="stat-value">{{ syncState.cipherSuite }}</span></div>
           </div>
           <p class="privacy-note">同步数据端到端加密，平台只能看到数据类型、大小和时间，看不到内容。</p>
@@ -649,7 +756,7 @@ function goBack(): void {
             <thead><tr><th>数据类型</th><th>条数</th><th>占用</th><th>最近变更</th></tr></thead>
             <tbody>
               <tr v-for="k in syncKinds" :key="k.entityKind ?? 'unknown'">
-                <td>{{ k.entityKind ?? '（未标注）' }}</td>
+                <td>{{ syncKindLabel(k.entityKind) }}</td>
                 <td>{{ k.count }}</td>
                 <td>{{ fmtBytes(k.bytes) }}</td>
                 <td>{{ formatDateTime(k.lastActivityTime) }}</td>
@@ -661,25 +768,50 @@ function goBack(): void {
           <div class="bar">
             <select v-model="syncKindFilter" @change="onSyncKindChange">
               <option value="">全部类型</option>
-              <option v-for="k in kindOptions" :key="k" :value="k">{{ k }}</option>
+              <option v-for="k in kindOptions" :key="k.kind" :value="k.kind">{{ k.label }}（{{ k.count }}）</option>
             </select>
           </div>
           <table class="table">
-            <thead><tr><th>数据类型</th><th>记录 ID</th><th>版本</th><th>密文大小</th><th>最近变更</th></tr></thead>
+            <thead><tr><th>数据类型</th><th>记录 ID</th><th>版本</th><th>序列</th><th>密文大小</th><th>创建时间</th><th>最近变更</th><th></th></tr></thead>
             <tbody>
               <tr v-for="r in syncRecords" :key="r.recordId">
-                <td>{{ r.entityKind ?? '（未标注）' }}</td>
-                <td class="mono rec-id" :title="r.recordId">{{ r.recordId.slice(0, 16) }}…</td>
+                <td>{{ syncKindLabel(r.entityKind) }}</td>
+                <td class="mono rec-id" :title="r.recordId">
+                  {{ r.recordId }}
+                  <button class="btn small secondary copy-btn" @click="copyRecordId(r.recordId)">{{ copiedId === r.recordId ? '已复制' : '复制' }}</button>
+                </td>
                 <td>{{ r.version }}</td>
+                <td>{{ r.changeSequence }}</td>
                 <td>{{ fmtBytes(r.bytes) }}</td>
+                <td>{{ formatDateTime(r.createTime) }}</td>
                 <td>{{ formatDateTime(r.updateTime) }}</td>
+                <td class="actions"><button class="btn small secondary" @click="syncDetail = r">详情</button></td>
               </tr>
-              <tr v-if="syncRecords.length === 0"><td colspan="5" class="muted">暂无记录。</td></tr>
+              <tr v-if="syncRecords.length === 0"><td colspan="8" class="muted">暂无记录。</td></tr>
             </tbody>
           </table>
-          <p v-if="syncRecordsCursor" class="load-more"><button class="btn secondary" @click="loadMoreSyncRecords">加载更多</button></p>
+          <p v-if="syncRecordsCursor" class="load-more"><button class="btn secondary" :disabled="syncMoreLoading" @click="loadMoreSyncRecords">{{ syncMoreLoading ? '加载中…' : '加载更多' }}</button></p>
         </template>
       </div>
+
+      <!-- 同步记录元数据详情（端到端加密，不含内容） -->
+      <Modal v-if="syncDetail" title="同步记录元数据" @close="syncDetail = null">
+        <table class="kv">
+          <tbody>
+            <tr><th>数据类型</th><td>{{ syncKindLabel(syncDetail.entityKind) }}<span v-if="syncDetail.entityKind" class="muted mono"> · {{ syncDetail.entityKind }}</span></td></tr>
+            <tr><th>记录 ID</th><td class="mono detail-id">{{ syncDetail.recordId }}</td></tr>
+            <tr><th>版本</th><td>{{ syncDetail.version }}</td></tr>
+            <tr><th>变更序列</th><td>{{ syncDetail.changeSequence }}</td></tr>
+            <tr><th>密文大小</th><td>{{ fmtBytes(syncDetail.bytes) }}</td></tr>
+            <tr><th>创建时间</th><td>{{ formatDateTime(syncDetail.createTime) }}</td></tr>
+            <tr><th>最近变更</th><td>{{ formatDateTime(syncDetail.updateTime) }}</td></tr>
+          </tbody>
+        </table>
+        <p class="privacy-note">同步数据端到端加密，这里只展示记录元数据，平台无法解密内容。</p>
+        <div class="modal-actions">
+          <button class="btn secondary" @click="syncDetail = null">关闭</button>
+        </div>
+      </Modal>
 
       <!-- 操作记录 -->
       <div v-if="tab === 'audit'">
@@ -697,7 +829,17 @@ function goBack(): void {
             <tr v-if="auditEvents.length === 0"><td colspan="3" class="muted">暂无操作记录。</td></tr>
           </tbody>
         </table>
-        <p v-if="auditCursor" class="load-more"><button class="btn secondary" @click="loadAudit(false)">加载更多</button></p>
+        <Pager
+          v-if="auditState === 'ready'"
+          :page="auditPager.page"
+          :page-size="auditPager.pageSize"
+          :total="auditPager.total"
+          :count="auditEvents.length"
+          :has-next="auditPager.hasNext"
+          @prev="auditPrev"
+          @next="auditNext"
+          @update:page-size="auditChangeSize"
+        />
       </div>
 
       <!-- 状态弹窗 -->
@@ -767,4 +909,8 @@ function goBack(): void {
 .rec-id { font-size: 12px; }
 h4 { margin: 20px 0 8px; }
 .bar { margin-bottom: 12px; }
+.stat-value.small-value { font-size: 13px; font-weight: 600; }
+.rec-id { font-size: 11.5px; line-height: 1.5; }
+.copy-btn { margin-left: 6px; vertical-align: middle; }
+.detail-id { word-break: break-all; }
 </style>

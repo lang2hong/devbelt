@@ -8,6 +8,8 @@ import { formatDateTime } from '../lib/formatTime';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import { auditEventLabel, auditTargetLabel } from '../lib/auditLabels';
 import Modal from '../components/Modal.vue';
+import Pager from '../components/Pager.vue';
+import { useCursorPages } from '../lib/useCursorPages';
 
 const events = ref<AdminAuditEvent[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -19,7 +21,6 @@ const actorUserId = ref('');
 const targetType = ref('');
 const targetId = ref('');
 const resultFilter = ref<'' | 'success' | 'failed'>('');
-const nextCursor = ref<string | null>(null);
 const detailEvent = ref<AdminAuditEvent | null>(null);
 
 const EVENT_TYPE_SUGGESTIONS = [
@@ -38,7 +39,7 @@ const TARGET_TYPE_SUGGESTIONS = ['user', 'order', 'subscription', 'device', 'ide
 const exportWrite = useIdempotencyKey();
 
 let loadSeq = 0;
-let paging = false;
+const { page, pageSize, total, hasNext, cursor, reset: resetPager, apply: applyPage, next: nextPage, prev: prevPage, setPageSize } = useCursorPages();
 
 function goUser(uid: string | null): void {
   if (uid) navigate(`/users/${uid}`);
@@ -49,33 +50,27 @@ function relogin(): void {
   window.location.assign('/login');
 }
 
-async function load(reset = true): Promise<void> {
-  if (!reset && paging) return;
+async function load(): Promise<void> {
   const seq = ++loadSeq;
-  if (reset) paging = false;
-  else paging = true;
-  try {
-    state.value = 'loading';
-    const r = await queryAudit({
-      fromTime: toFromIso(fromTime.value),
-      toTime: toInclusiveEndIso(toTime.value),
-      eventType: eventType.value || undefined,
-      actorUserId: actorUserId.value || undefined,
-      targetType: targetType.value || undefined,
-      targetId: targetId.value.trim() || undefined,
-      result: resultFilter.value || undefined,
-      cursor: reset ? undefined : (nextCursor.value ?? undefined),
-    });
-    if (seq !== loadSeq) return;
-    if (r.kind === 'ok') {
-      events.value = reset ? r.value.items : [...events.value, ...r.value.items];
-      nextCursor.value = r.value.nextCursor;
-      state.value = 'ready';
-    } else if (r.kind === 'unauthorized') relogin();
-    else state.value = 'error';
-  } finally {
-    if (!reset) paging = false;
-  }
+  state.value = 'loading';
+  const r = await queryAudit({
+    fromTime: toFromIso(fromTime.value),
+    toTime: toInclusiveEndIso(toTime.value),
+    eventType: eventType.value || undefined,
+    actorUserId: actorUserId.value || undefined,
+    targetType: targetType.value || undefined,
+    targetId: targetId.value.trim() || undefined,
+    result: resultFilter.value || undefined,
+    cursor: cursor.value,
+    limit: pageSize.value,
+  });
+  if (seq !== loadSeq) return;
+  if (r.kind === 'ok') {
+    events.value = r.value.items;
+    applyPage({ nextCursor: r.value.nextCursor, total: r.value.total });
+    state.value = 'ready';
+  } else if (r.kind === 'unauthorized') relogin();
+  else state.value = 'error';
 }
 
 onMounted(() => load());
@@ -83,8 +78,21 @@ onMounted(() => load());
 function search(): void {
   detailEvent.value = null;
   events.value = [];
-  nextCursor.value = null;
-  void load(true);
+  resetPager();
+  void load();
+}
+
+function goPrev(): void {
+  if (prevPage()) void load();
+}
+
+function goNext(): void {
+  if (nextPage()) void load();
+}
+
+function changePageSize(size: number): void {
+  setPageSize(size);
+  void load();
 }
 
 async function doExport(format: 'csv' | 'json'): Promise<void> {
@@ -180,7 +188,18 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
       </tbody>
     </table>
 
-    <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+    <Pager
+      v-if="state === 'ready'"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :count="events.length"
+      :has-next="hasNext"
+      :loading="state === 'loading'"
+      @prev="goPrev"
+      @next="goNext"
+      @update:page-size="changePageSize"
+    />
 
     <Modal v-if="detailEvent" title="审计事件详情" @close="detailEvent = null">
       <table class="kv">

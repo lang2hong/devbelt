@@ -7,6 +7,8 @@ import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import Modal from '../components/Modal.vue';
 import FormField from '../components/FormField.vue';
+import Pager from '../components/Pager.vue';
+import { useCursorPages } from '../lib/useCursorPages';
 
 const users = ref<AdminUser[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -18,7 +20,6 @@ const statusFilter = ref('');
 const planCodeFilter = ref('');
 const createdFrom = ref('');
 const createdTo = ref('');
-const nextCursor = ref<string | null>(null);
 type PlanOption = { code: string; name: string };
 const planOptions = ref<PlanOption[]>([
   { code: 'free', name: 'Free' },
@@ -31,7 +32,7 @@ const reason = ref('');
 const busy = ref(false);
 
 let loadSeq = 0;
-let paging = false;
+const { page, pageSize, total, hasNext, cursor, reset: resetPager, apply: applyPage, next: nextPage, prev: prevPage, setPageSize } = useCursorPages();
 
 function relogin(): void {
   setAccessToken(null);
@@ -42,44 +43,38 @@ function serverMsg(r: { message?: string; code?: string }): string {
   return r.message || r.code || '操作失败，请重试。';
 }
 
-async function load(reset = true): Promise<void> {
-  if (!reset && paging) return;
+async function load(): Promise<void> {
   const seq = ++loadSeq;
-  if (reset) paging = false;
-  else paging = true;
-  try {
-    state.value = 'loading';
-    loadError.value = '';
-    const rawUserId = userIdFilter.value.trim();
-    if (rawUserId) {
-      const uidNum = Number(rawUserId);
-      if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
-        state.value = 'error';
-        loadError.value = '用户 ID 必须为正整数。';
-        return;
-      }
-    }
-    const r = await listUsers({
-      emailExact: emailExact.value || undefined,
-      userId: rawUserId || undefined,
-      status: (statusFilter.value || undefined) as 'active' | 'disabled' | undefined,
-      planCode: planCodeFilter.value || undefined,
-      createdFrom: toFromIso(createdFrom.value),
-      createdTo: toInclusiveEndIso(createdTo.value),
-      cursor: reset ? undefined : (nextCursor.value ?? undefined),
-    });
-    if (seq !== loadSeq) return;
-    if (r.kind === 'ok') {
-      users.value = reset ? r.value.items : [...users.value, ...r.value.items];
-      nextCursor.value = r.value.nextCursor;
-      state.value = 'ready';
-    } else if (r.kind === 'unauthorized') relogin();
-    else {
+  state.value = 'loading';
+  loadError.value = '';
+  const rawUserId = userIdFilter.value.trim();
+  if (rawUserId) {
+    const uidNum = Number(rawUserId);
+    if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
       state.value = 'error';
-      loadError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
+      loadError.value = '用户 ID 必须为正整数。';
+      return;
     }
-  } finally {
-    if (!reset) paging = false;
+  }
+  const r = await listUsers({
+    emailExact: emailExact.value || undefined,
+    userId: rawUserId || undefined,
+    status: (statusFilter.value || undefined) as 'active' | 'disabled' | undefined,
+    planCode: planCodeFilter.value || undefined,
+    createdFrom: toFromIso(createdFrom.value),
+    createdTo: toInclusiveEndIso(createdTo.value),
+    cursor: cursor.value,
+    limit: pageSize.value,
+  });
+  if (seq !== loadSeq) return;
+  if (r.kind === 'ok') {
+    users.value = r.value.items;
+    applyPage({ nextCursor: r.value.nextCursor, total: r.value.total });
+    state.value = 'ready';
+  } else if (r.kind === 'unauthorized') relogin();
+  else {
+    state.value = 'error';
+    loadError.value = r.kind === 'failure' ? serverMsg(r) : '加载失败。';
   }
 }
 
@@ -97,8 +92,21 @@ async function loadPlanOptions(): Promise<void> {
 
 function search(): void {
   users.value = [];
-  nextCursor.value = null;
-  void load(true);
+  resetPager();
+  void load();
+}
+
+function goPrev(): void {
+  if (prevPage()) void load();
+}
+
+function goNext(): void {
+  if (nextPage()) void load();
+}
+
+function changePageSize(size: number): void {
+  setPageSize(size);
+  void load();
 }
 
 function openStatus(u: AdminUser, status: 'active' | 'disabled'): void {
@@ -124,7 +132,7 @@ async function confirmStatus(): Promise<void> {
     if (r.kind === 'ok') {
       statusWrite.reset(tag);
       statusForm.value = null;
-      await load(true);
+      await load();
     } else if (r.kind === 'unauthorized') {
       statusWrite.reset(tag);
       relogin();
@@ -196,7 +204,18 @@ function openDetail(u: AdminUser): void {
       </tbody>
     </table>
 
-    <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+    <Pager
+      v-if="state === 'ready'"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :count="users.length"
+      :has-next="hasNext"
+      :loading="state === 'loading'"
+      @prev="goPrev"
+      @next="goNext"
+      @update:page-size="changePageSize"
+    />
 
     <Modal v-if="statusForm" :title="statusForm.status === 'disabled' ? '禁用账号' : '启用账号'" :closable="!busy" @close="statusForm = null">
       <FormField label="操作原因" required hint="必填，会记录到审计日志。">

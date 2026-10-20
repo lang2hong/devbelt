@@ -88,6 +88,16 @@ export class MysqlInvoiceRepo implements IInvoiceRepo {
     );
     return rows.map(mapInvoice);
   }
+
+  async countAll(input: Omit<AdminInvoiceFilter, 'cursor' | 'limit'>): Promise<number> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (input.userId !== undefined) { where.push('user_id = ?'); params.push(input.userId); }
+    if (input.status !== undefined) { where.push('status = ?'); params.push(input.status); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const [rows] = await this.db().query<any[]>(`SELECT COUNT(*) AS cnt FROM invoices ${whereSql}`, params);
+    return Number(rows[0]?.cnt ?? 0);
+  }
 }
 
 function mapInvoice(r: any): Invoice {

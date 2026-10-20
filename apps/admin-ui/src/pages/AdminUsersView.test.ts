@@ -50,6 +50,32 @@ describe('AdminUsersView 筛选', () => {
     wrapper.unmount();
   });
 
+  it('下一页携带 cursor 并刷新页码', async () => {
+    const u1: AdminUser = {
+      userId: '1', email: 'a@b.com', emailVerified: true, displayName: null, status: 'active', role: 'user',
+      lastLoginTime: null, planCode: null, deviceCount: 0, subscriptionVersion: null, periodEndTime: null,
+      createTime: '2026-01-01T00:00:00.000Z',
+    };
+    const u2: AdminUser = { ...u1, userId: '2', email: 'b@b.com' };
+    vi.mocked(listUsers)
+      .mockResolvedValueOnce({ kind: 'ok', value: { items: [u1], nextCursor: 'c2', total: 2 } })
+      .mockResolvedValueOnce({ kind: 'ok', value: { items: [u2], nextCursor: null, total: 2 } });
+
+    const wrapper = mount(AdminUsersView);
+    await flushPromises();
+    expect(wrapper.text()).toContain('第 1 页');
+    expect(wrapper.text()).toContain('共 2 条');
+
+    await wrapper.findAll('button').find((b) => b.text().trim() === '下一页')!.trigger('click');
+    await flushPromises();
+
+    const calls = vi.mocked(listUsers).mock.calls;
+    expect(calls[calls.length - 1][0]).toMatchObject({ cursor: 'c2', limit: 20 });
+    expect(wrapper.text()).toContain('b@b.com');
+    expect(wrapper.text()).toContain('第 2 页');
+    wrapper.unmount();
+  });
+
   it('createdTo 分钟精度值归一为所选分钟末尾后上送', async () => {
     const wrapper = mount(AdminUsersView);
     await flushPromises();

@@ -15,6 +15,8 @@ import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
+import Pager from '../components/Pager.vue';
+import { useCursorPages } from '../lib/useCursorPages';
 import Tabs from '../components/Tabs.vue';
 import { fmtCredits } from '../lib/credits';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
@@ -295,38 +297,48 @@ const orderStatus = ref('');
 const orderUserId = ref('');
 const orderCreatedFrom = ref('');
 const orderCreatedTo = ref('');
-const orderNextCursor = ref<string | null>(null);
 const orderDetail = ref<AdminOrder | null>(null);
 let orderSeq = 0;
-let orderPaging = false;
+const {
+  page: orderPage, pageSize: orderPageSize, total: orderTotal, hasNext: orderHasNext,
+  cursor: orderCursor, reset: resetOrderPager, apply: applyOrderPage,
+  next: orderNextPage, prev: orderPrevPage, setPageSize: setOrderPageSize,
+} = useCursorPages();
 
-async function loadOrders(reset = true): Promise<void> {
-  if (!reset && orderPaging) return;
+async function loadOrders(): Promise<void> {
   const seq = ++orderSeq;
-  if (reset) orderPaging = false;
-  else orderPaging = true;
-  try {
-    orderState.value = 'loading';
-    const r = await listAdminOrders({
-      purpose: 'topup',
-      userId: orderUserId.value.trim() || undefined,
-      status: orderStatus.value || undefined,
-      createdFrom: toFromIso(orderCreatedFrom.value),
-      createdTo: toInclusiveEndIso(orderCreatedTo.value),
-      cursor: reset ? undefined : (orderNextCursor.value ?? undefined),
-    });
-    if (seq !== orderSeq) return;
-    if (r.kind === 'ok') {
-      orders.value = reset ? r.value.items : [...orders.value, ...r.value.items];
-      orderNextCursor.value = r.value.nextCursor;
-      orderState.value = 'ready';
-    } else if (r.kind === 'unauthorized') relogin();
-    else {
-      orderState.value = 'error';
-    }
-  } finally {
-    if (!reset) orderPaging = false;
+  orderState.value = 'loading';
+  const r = await listAdminOrders({
+    purpose: 'topup',
+    userId: orderUserId.value.trim() || undefined,
+    status: orderStatus.value || undefined,
+    createdFrom: toFromIso(orderCreatedFrom.value),
+    createdTo: toInclusiveEndIso(orderCreatedTo.value),
+    cursor: orderCursor.value,
+    limit: orderPageSize.value,
+  });
+  if (seq !== orderSeq) return;
+  if (r.kind === 'ok') {
+    orders.value = r.value.items;
+    applyOrderPage({ nextCursor: r.value.nextCursor, total: r.value.total });
+    orderState.value = 'ready';
+  } else if (r.kind === 'unauthorized') relogin();
+  else {
+    orderState.value = 'error';
   }
+}
+
+function orderGoPrev(): void {
+  if (orderPrevPage()) void loadOrders();
+}
+
+function orderGoNext(): void {
+  if (orderNextPage()) void loadOrders();
+}
+
+function orderChangePageSize(size: number): void {
+  setOrderPageSize(size);
+  void loadOrders();
 }
 
 function resetOrderFilters(): void {
@@ -334,7 +346,8 @@ function resetOrderFilters(): void {
   orderUserId.value = '';
   orderCreatedFrom.value = '';
   orderCreatedTo.value = '';
-  void loadOrders(true);
+  resetOrderPager();
+  void loadOrders();
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -450,8 +463,8 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
     <!-- ── 充值订单 ── -->
     <template v-else>
     <div class="bar">
-      <input v-model="orderUserId" type="text" placeholder="用户ID" @keyup.enter="loadOrders(true)" />
-      <select v-model="orderStatus" @change="loadOrders(true)">
+      <input v-model="orderUserId" type="text" placeholder="用户ID" @keyup.enter="loadOrders()" />
+      <select v-model="orderStatus" @change="resetOrderPager(); loadOrders()">
         <option value="">全部状态</option>
         <option v-for="(label, st) in STATUS_LABEL" :key="st" :value="st">{{ label }}</option>
       </select>
@@ -460,6 +473,7 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
         至
         <input v-model="orderCreatedTo" type="datetime-local" />
       </label>
+      <button class="btn" @click="resetOrderPager(); loadOrders()">查询</button>
       <button class="btn secondary" @click="resetOrderFilters">重置</button>
     </div>
     <p class="muted" v-if="orderState === 'loading'">加载中…</p>
@@ -487,7 +501,18 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
         <tr v-if="orders.length === 0"><td colspan="9" class="muted">无充值订单。</td></tr>
       </tbody>
     </table>
-    <p v-if="orderNextCursor" class="load-more"><button class="btn secondary" @click="loadOrders(false)">加载更多</button></p>
+    <Pager
+      v-if="orderState === 'ready'"
+      :page="orderPage"
+      :page-size="orderPageSize"
+      :total="orderTotal"
+      :count="orders.length"
+      :has-next="orderHasNext"
+      :loading="orderState === 'loading'"
+      @prev="orderGoPrev"
+      @next="orderGoNext"
+      @update:page-size="orderChangePageSize"
+    />
 
     </template>
 

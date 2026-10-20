@@ -59,6 +59,7 @@ export function registerBillingAdminRoutes(child: FastifyInstance, ctx: AdminCtx
     reply.send({
       items: page.items.map(adminOrderDto),
       nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+      total: page.total,
     });
   });
 
@@ -114,6 +115,7 @@ export function registerBillingAdminRoutes(child: FastifyInstance, ctx: AdminCtx
     reply.send({
       items: page.items.map(adminInvoiceDto),
       nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+      total: page.total,
     });
   });
 

@@ -39,6 +39,7 @@ export function registerUserAdminRoutes(child: FastifyInstance, ctx: AdminCtx): 
     reply.send({
       items: page.items.map(userDto),
       nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+      total: page.total,
     });
   });
 

@@ -70,6 +70,15 @@ async function build(rateLimit = false) {
       if (input.cursor !== undefined) items = items.filter((o) => o.id < input.cursor!);
       return items.slice(0, input.limit);
     },
+    countAll: async (input) => {
+      let items = [...orders.values()];
+      if (input.userId !== undefined) items = items.filter((o) => o.userId === input.userId);
+      if (input.status !== undefined) items = items.filter((o) => o.status === input.status);
+      if (input.channel !== undefined) items = items.filter((o) => o.channel === input.channel);
+      if (input.purpose !== undefined) items = items.filter((o) => o.purpose === input.purpose);
+      if (input.planCode !== undefined) items = items.filter((o) => o.planCode === input.planCode);
+      return items.length;
+    },
     findPendingByUserAndPlan: async () => undefined,
     expirePending: async () => 0,
   };
@@ -93,6 +102,12 @@ async function build(rateLimit = false) {
       if (input.status !== undefined) items = items.filter((i) => i.status === input.status);
       if (input.cursor !== undefined) items = items.filter((i) => i.id < input.cursor!);
       return items.slice(0, input.limit);
+    },
+    countAll: async (input) => {
+      let items = invoices;
+      if (input.userId !== undefined) items = items.filter((i) => i.userId === input.userId);
+      if (input.status !== undefined) items = items.filter((i) => i.status === input.status);
+      return items.length;
     },
   };
 
@@ -348,6 +363,24 @@ describe('console admin routes', () => {
     });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe('VALIDATION_FAILED');
+    await b.app.close();
+  });
+
+  it('admin order list returns total on the first page', async () => {
+    const b = await build();
+    const admin = await b.makeAdmin();
+    b.orders.set('o1', makeOrder({ id: 1, orderNo: 'o1' }));
+    b.orders.set('o2', makeOrder({ id: 2, orderNo: 'o2' }));
+    const res = await b.app.inject({
+      method: 'GET',
+      url: '/api/admin/orders?limit=1',
+      headers: { authorization: `Bearer ${await b.consoleToken(admin.id)}`, accept: 'application/json' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { items: unknown[]; nextCursor: string | null; total?: number };
+    expect(body.items).toHaveLength(1);
+    expect(body.nextCursor).toBeTruthy();
+    expect(body.total).toBe(2);
     await b.app.close();
   });
 

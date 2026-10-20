@@ -46,6 +46,7 @@ export function registerAuditAdminRoutes(child: FastifyInstance, ctx: AdminCtx):
     reply.send({
       items: page.items.map(auditDto),
       nextCursor: page.nextId != null ? opts.cursorService.encode(String(page.nextId)) : null,
+      total: page.total,
     });
   });
 

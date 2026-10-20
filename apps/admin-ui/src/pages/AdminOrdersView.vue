@@ -8,6 +8,8 @@ import { formatDateTime } from '../lib/formatTime';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import Modal from '../components/Modal.vue';
 import FormField from '../components/FormField.vue';
+import Pager from '../components/Pager.vue';
+import { useCursorPages } from '../lib/useCursorPages';
 
 const orders = ref<AdminOrder[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -18,7 +20,6 @@ const purpose = ref('');
 const planCode = ref('');
 const createdFrom = ref('');
 const createdTo = ref('');
-const nextCursor = ref<string | null>(null);
 
 const error = ref('');
 const loadError = ref('');
@@ -49,7 +50,7 @@ function fmtCents(cents: number): string {
 }
 
 let loadSeq = 0;
-let paging = false;
+const { page, pageSize, total, hasNext, cursor, reset: resetPager, apply: applyPage, next: nextPage, prev: prevPage, setPageSize } = useCursorPages();
 
 function channelLabel(ch: string): string {
   return ch === 'wechat' ? '微信' : ch === 'alipay' ? '支付宝' : '手工';
@@ -63,45 +64,39 @@ function goUser(uid: string): void {
   navigate(`/users/${uid}`);
 }
 
-async function load(reset = true): Promise<void> {
-  if (!reset && paging) return;
+async function load(): Promise<void> {
   const seq = ++loadSeq;
-  if (reset) paging = false;
-  else paging = true;
-  try {
-    state.value = 'loading';
-    loadError.value = '';
-    const rawUserId = userId.value.trim();
-    if (rawUserId) {
-      const uidNum = Number(rawUserId);
-      if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
-        state.value = 'error';
-        loadError.value = '用户 ID 必须为正整数。';
-        return;
-      }
-    }
-    const r = await listAdminOrders({
-      userId: rawUserId || undefined,
-      status: status.value || undefined,
-      channel: channel.value || undefined,
-      purpose: purpose.value || undefined,
-      planCode: planCode.value || undefined,
-      createdFrom: toFromIso(createdFrom.value),
-      createdTo: toInclusiveEndIso(createdTo.value),
-      cursor: reset ? undefined : (nextCursor.value ?? undefined),
-    });
-    if (seq !== loadSeq) return;
-    if (r.kind === 'ok') {
-      orders.value = reset ? r.value.items : [...orders.value, ...r.value.items];
-      nextCursor.value = r.value.nextCursor;
-      state.value = 'ready';
-    } else if (r.kind === 'unauthorized') relogin();
-    else {
+  state.value = 'loading';
+  loadError.value = '';
+  const rawUserId = userId.value.trim();
+  if (rawUserId) {
+    const uidNum = Number(rawUserId);
+    if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
       state.value = 'error';
-      loadError.value = '加载失败。';
+      loadError.value = '用户 ID 必须为正整数。';
+      return;
     }
-  } finally {
-    if (!reset) paging = false;
+  }
+  const r = await listAdminOrders({
+    userId: rawUserId || undefined,
+    status: status.value || undefined,
+    channel: channel.value || undefined,
+    purpose: purpose.value || undefined,
+    planCode: planCode.value || undefined,
+    createdFrom: toFromIso(createdFrom.value),
+    createdTo: toInclusiveEndIso(createdTo.value),
+    cursor: cursor.value,
+    limit: pageSize.value,
+  });
+  if (seq !== loadSeq) return;
+  if (r.kind === 'ok') {
+    orders.value = r.value.items;
+    applyPage({ nextCursor: r.value.nextCursor, total: r.value.total });
+    state.value = 'ready';
+  } else if (r.kind === 'unauthorized') relogin();
+  else {
+    state.value = 'error';
+    loadError.value = '加载失败。';
   }
 }
 
@@ -109,8 +104,21 @@ onMounted(() => load());
 
 function search(): void {
   orders.value = [];
-  nextCursor.value = null;
-  void load(true);
+  resetPager();
+  void load();
+}
+
+function goPrev(): void {
+  if (prevPage()) void load();
+}
+
+function goNext(): void {
+  if (nextPage()) void load();
+}
+
+function changePageSize(size: number): void {
+  setPageSize(size);
+  void load();
 }
 
 function resetFilters(): void {
@@ -152,7 +160,7 @@ async function confirmRefund(): Promise<void> {
     if (r.kind === 'ok') {
       refundWrite.reset(tag);
       refundForm.value = null;
-      await load(true);
+      await load();
     } else if (r.kind === 'unauthorized') {
       refundWrite.reset(tag);
       relogin();
@@ -227,7 +235,18 @@ async function confirmRefund(): Promise<void> {
       </tbody>
     </table>
 
-    <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+    <Pager
+      v-if="state === 'ready'"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :count="orders.length"
+      :has-next="hasNext"
+      :loading="state === 'loading'"
+      @prev="goPrev"
+      @next="goNext"
+      @update:page-size="changePageSize"
+    />
 
     <Modal v-if="detailForm" :title="`订单详情 · ${detailForm.orderNo}`" :closable="!busy" @close="detailForm = null">
       <table class="kv">

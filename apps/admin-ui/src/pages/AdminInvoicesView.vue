@@ -7,6 +7,8 @@ import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
 import FormField from '../components/FormField.vue';
+import Pager from '../components/Pager.vue';
+import { useCursorPages } from '../lib/useCursorPages';
 
 const invoices = ref<AdminInvoice[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -14,7 +16,6 @@ const error = ref('');
 const loadError = ref('');
 const statusFilter = ref('');
 const userId = ref('');
-const nextCursor = ref<string | null>(null);
 const busy = ref(false);
 
 const processWrite = useIdempotencyKey();
@@ -36,42 +37,36 @@ function fmtCents(cents: number): string {
 }
 
 let loadSeq = 0;
-let paging = false;
+const { page, pageSize, total, hasNext, cursor, reset: resetPager, apply: applyPage, next: nextPage, prev: prevPage, setPageSize } = useCursorPages();
 
-async function load(reset = true): Promise<void> {
-  if (!reset && paging) return;
+async function load(): Promise<void> {
   const seq = ++loadSeq;
-  if (reset) paging = false;
-  else paging = true;
-  try {
-    state.value = 'loading';
-    loadError.value = '';
-    const rawUserId = userId.value.trim();
-    if (rawUserId) {
-      const uidNum = Number(rawUserId);
-      if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
-        state.value = 'error';
-        loadError.value = '用户 ID 必须为正整数。';
-        return;
-      }
-    }
-    const r = await listAdminInvoices({
-      userId: rawUserId || undefined,
-      status: statusFilter.value || undefined,
-      cursor: reset ? undefined : (nextCursor.value ?? undefined),
-    });
-    if (seq !== loadSeq) return;
-    if (r.kind === 'ok') {
-      invoices.value = reset ? r.value.items : [...invoices.value, ...r.value.items];
-      nextCursor.value = r.value.nextCursor;
-      state.value = 'ready';
-    } else if (r.kind === 'unauthorized') relogin();
-    else {
+  state.value = 'loading';
+  loadError.value = '';
+  const rawUserId = userId.value.trim();
+  if (rawUserId) {
+    const uidNum = Number(rawUserId);
+    if (!/^[0-9]+$/.test(rawUserId) || !Number.isSafeInteger(uidNum) || uidNum <= 0) {
       state.value = 'error';
-      loadError.value = '加载失败。';
+      loadError.value = '用户 ID 必须为正整数。';
+      return;
     }
-  } finally {
-    if (!reset) paging = false;
+  }
+  const r = await listAdminInvoices({
+    userId: rawUserId || undefined,
+    status: statusFilter.value || undefined,
+    cursor: cursor.value,
+    limit: pageSize.value,
+  });
+  if (seq !== loadSeq) return;
+  if (r.kind === 'ok') {
+    invoices.value = r.value.items;
+    applyPage({ nextCursor: r.value.nextCursor, total: r.value.total });
+    state.value = 'ready';
+  } else if (r.kind === 'unauthorized') relogin();
+  else {
+    state.value = 'error';
+    loadError.value = '加载失败。';
   }
 }
 
@@ -79,8 +74,21 @@ onMounted(() => load());
 
 function search(): void {
   invoices.value = [];
-  nextCursor.value = null;
-  void load(true);
+  resetPager();
+  void load();
+}
+
+function goPrev(): void {
+  if (prevPage()) void load();
+}
+
+function goNext(): void {
+  if (nextPage()) void load();
+}
+
+function changePageSize(size: number): void {
+  setPageSize(size);
+  void load();
 }
 
 function goUser(uid: string): void {
@@ -116,7 +124,7 @@ async function confirm(): Promise<void> {
     if (r.kind === 'ok') {
       processWrite.reset(tag);
       processForm.value = null;
-      await load(true);
+      await load();
     } else if (r.kind === 'unauthorized') {
       processWrite.reset(tag);
       relogin();
@@ -175,7 +183,18 @@ async function confirm(): Promise<void> {
       </tbody>
     </table>
 
-    <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+    <Pager
+      v-if="state === 'ready'"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :count="invoices.length"
+      :has-next="hasNext"
+      :loading="state === 'loading'"
+      @prev="goPrev"
+      @next="goNext"
+      @update:page-size="changePageSize"
+    />
 
     <Modal v-if="processForm" title="处理发票" :closable="!busy" @close="closeProcess">
       <table class="kv">

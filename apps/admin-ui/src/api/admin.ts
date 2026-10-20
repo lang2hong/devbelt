@@ -40,6 +40,8 @@ export interface AdminAuditEvent {
 export interface Page<T> {
   items: T[];
   nextCursor: string | null;
+  /** 首屏总条数（服务端可选；后续页可能不返回）。 */
+  total?: number;
 }
 
 export type Result<T> =
@@ -77,9 +79,9 @@ function qs(params: object): string {
   return s ? `?${s}` : '';
 }
 
-async function toPage<T>(res: Response): Promise<{ items: T[]; nextCursor: string | null }> {
+async function toPage<T>(res: Response): Promise<Page<T>> {
   const body = (await res.json()) as Page<T>;
-  return { items: body.items, nextCursor: body.nextCursor };
+  return { items: body.items, nextCursor: body.nextCursor, total: body.total };
 }
 
 async function failure(res: Response): Promise<{ kind: Failure; code?: string; message?: string }> {
@@ -128,6 +130,7 @@ export interface UserFilters {
   planCode?: string;
   createdFrom?: string;
   createdTo?: string;
+  limit?: number;
   cursor?: string;
 }
 
@@ -261,6 +264,7 @@ export interface AuditFilters {
   targetType?: string;
   targetId?: string;
   result?: 'success' | 'failed';
+  limit?: number;
   cursor?: string;
 }
 
@@ -337,6 +341,7 @@ export interface OrderFilters {
   planCode?: string;
   createdFrom?: string;
   createdTo?: string;
+  limit?: number;
   cursor?: string;
 }
 
@@ -395,6 +400,7 @@ export interface AdminInvoice {
 export interface InvoiceFilters {
   userId?: string;
   status?: string;
+  limit?: number;
   cursor?: string;
 }
 
