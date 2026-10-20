@@ -6,6 +6,7 @@ import { ConnectionManager } from '../connection/connectionManager';
 import { ConnectionPathOverrideStore } from '../connection/connectionPathOverrideStore';
 import { ConnectionContext } from '../connection/connectionContext';
 import { DbTreeDataProvider } from '../tree/dbTreeDataProvider';
+import type { DbTreeNode } from '../tree/dbTreeNode';
 import { QueryExecutor } from '../result/queryExecutor';
 import { HistoryStore } from '../history/historyStore';
 import { AuthService } from '../sync/authService';
@@ -30,6 +31,13 @@ export interface Deps {
   syncFactory: SyncSessionFactory;
   /** P5：2FA/TOTP 验证器存储（S2 起注入）。 */
   authStore: AuthenticatorStore;
+  /**
+   * 当前树选中节点。
+   * 树节点命令不携带 arguments：VS Code 会为「命令 + 参数」建缓存槽，
+   * 整树刷新后旧槽被释放，落在刷新窗口里的点击会报
+   * `Actual command not found, wanted to execute <cmd> /N`。
+   */
+  getSelectedNode?: () => DbTreeNode | undefined;
 }
 
 export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;

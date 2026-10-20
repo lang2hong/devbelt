@@ -56,7 +56,7 @@ async function queryServerVersion(session: any, dbType: string): Promise<string>
 }
 
 export function registerConnectionCommands(deps: Deps, sub: Sub): void {
-  const { store, manager, treeProvider, connCtx, auth } = deps;
+  const { store, manager, treeProvider, connCtx, auth, getSelectedNode } = deps;
 
   // 连接资产门禁（§6.2）：本机保存连接数按个人档上限。
   const activeConnectionCount = () => store.list().length;
@@ -137,7 +137,11 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     treeProvider.refresh();
   });
 
-  sub('devbelt.openConnection', async (conn: SavedConnection) => {
+  // 两种入参：
+  // - 右键菜单传 DbTreeNode；
+  // - 树节点单击命令不带 arguments（见 dbTreeDataProvider），此时取当前选中节点。
+  sub('devbelt.openConnection', async (arg?: SavedConnection | DbTreeNode) => {
+    const conn = arg instanceof DbTreeNode ? arg.conn : arg ?? getSelectedNode?.()?.conn;
     if (!conn?.id) return;
     // 并发连接数门禁：已打开则不算新增；0 = 不限。
     const maxConcurrent = maxConcurrentConnections(auth.getCachedEntitlement());

@@ -757,10 +757,12 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const hasPathIssues = !!pathCheck && !pathCheck.valid;
     if (!isOpen) {
       node.id = `closed_${conn.id}`;
+      // 不传 arguments：带参的 TreeItem.command 会被 VS Code 缓存成 `<cmd> /N`，
+      // 整树刷新释放旧槽后，落在刷新窗口里的点击会报 command not found。
+      // 命令侧从当前树选中节点解析连接。
       node.command = {
         command: 'devbelt.openConnection',
         title: 'Open',
-        arguments: [conn],
       };
       // 路径异常优先于类型图标（连接不可用是更重要的信号）；tooltip 说明原因。
       if (hasPathIssues) {

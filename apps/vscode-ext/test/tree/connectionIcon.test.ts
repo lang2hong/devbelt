@@ -65,6 +65,10 @@ describe('连接节点图标状态', () => {
     const root = await provider.getChildren();
     expect(root.find((n) => n.kind === NodeKind.Group)?.id).toBe('group:g1');
     expect(root.find((n) => n.kind === NodeKind.Connection)?.id).toBe('closed_c1');
+    const connNode = root.find((n) => n.kind === NodeKind.Connection)!;
+    // 回归：命令不能带 arguments，否则 VS Code 的 `<cmd> /N` 缓存会在整树刷新后失效。
+    expect(connNode.command).toMatchObject({ command: 'devbelt.openConnection' });
+    expect((connNode.command as { arguments?: unknown }).arguments).toBeUndefined();
   });
 
   it('未打开=dim，打开=彩色，当前选中且已打开=active(绿点)', async () => {

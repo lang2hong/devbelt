@@ -5,6 +5,7 @@ import { ConnectionManager } from './connection/connectionManager';
 import { ConnectionPathOverrideStore } from './connection/connectionPathOverrideStore';
 import { ConnectionContext } from './connection/connectionContext';
 import { DbTreeDataProvider } from './tree/dbTreeDataProvider';
+import type { DbTreeNode } from './tree/dbTreeNode';
 import { ConnectionDecorationProvider } from './tree/connectionDecorationProvider';
 import { QueryExecutor } from './result/queryExecutor';
 import { BaseWebView } from './result/baseWebView';
@@ -431,14 +432,20 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // 表结构变更时清除补全缓存（事件订阅，替代对 treeProvider.refresh 的猴补丁）。
   context.subscriptions.push(treeProvider.onDidRefresh(() => completionProvider.invalidate()));
 
-  registerCommands({ context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory, authStore });
-
   // 树视图在**所有命令注册之后**才创建：树节点上的 command（如 devbelt.openConnection）
   // 必须在视图可见前就已注册，否则点击节点会报 "command ... not found"。
+  // treeViewRef 要在注册命令前声明：命令不带 arguments，处理器从当前选中节点解析。
+  let treeViewRef: vscode.TreeView<DbTreeNode> | undefined;
+  registerCommands({
+    context, store, manager, treeProvider, overrideStore, executor, history, auth, connCtx, syncFactory, authStore,
+    getSelectedNode: () => treeViewRef?.selection[0],
+  });
+
   const treeView = vscode.window.createTreeView('devbelt.explorer', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
+  treeViewRef = treeView;
   context.subscriptions.push(treeView, treeProvider);
   // 当前选中的连接（选中其子节点时归属该连接）显示绿点。
   // 空选择（刷新/失焦引发的瞬时清空）不更新——否则绿点会一闪而过。
