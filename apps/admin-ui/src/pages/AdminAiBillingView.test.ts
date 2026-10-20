@@ -103,7 +103,9 @@ describe('AdminAiBillingView', () => {
     const text = w.text();
     expect(text).toContain('请求次数');
     expect(text).toContain('3,300'); // 消耗积分（(2.2M+1.1M)/1000）
-    expect(text).toContain('¥158.00'); // 实收（9900+5900 分）
+    expect(text).toContain('¥158.00'); // 实收合计（9900+5900 分）
+    expect(text).toContain('充值收入');
+    expect(text).toContain('套餐收入');
     expect(text).toContain('¥149.60'); // 毛利
     expect(text).toContain('毛利率');
     expect(text).toContain('逐月明细');

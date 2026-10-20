@@ -422,7 +422,9 @@ async function togglePricing(p: AdminAiModelPricing): Promise<void> {
           <div class="stat"><span class="stat-label">请求次数</span><span class="stat-value">{{ summary.total.requestCount.toLocaleString() }}</span></div>
           <div class="stat"><span class="stat-label">消耗积分</span><span class="stat-value">{{ fmtCredits(summary.total.billingPromptTokens + summary.total.billingCompletionTokens) }}</span></div>
           <div class="stat"><span class="stat-label">上游成本</span><span class="stat-value">{{ fmtCents(summary.total.costCents) }}</span></div>
-          <div class="stat"><span class="stat-label">实收</span><span class="stat-value">{{ fmtCents(summary.total.topupCents + summary.total.planCents) }}</span></div>
+          <div class="stat"><span class="stat-label">充值收入</span><span class="stat-value">{{ fmtCents(summary.total.topupCents) }}</span></div>
+          <div class="stat"><span class="stat-label">套餐收入</span><span class="stat-value">{{ fmtCents(summary.total.planCents) }}</span></div>
+          <div class="stat"><span class="stat-label">实收合计</span><span class="stat-value">{{ fmtCents(summary.total.topupCents + summary.total.planCents) }}</span></div>
           <div class="stat"><span class="stat-label">毛利</span><span class="stat-value" :class="{ neg: (summary.total.marginCents ?? 0) < 0 }">{{ fmtCents(summary.total.marginCents) }}</span></div>
           <div class="stat"><span class="stat-label">毛利率</span><span class="stat-value">{{ marginRate === null ? '—' : `${(marginRate * 100).toFixed(1)}%` }}</span></div>
         </div>
@@ -431,7 +433,7 @@ async function togglePricing(p: AdminAiModelPricing): Promise<void> {
 
         <h4>逐月明细</h4>
         <table class="table">
-          <thead><tr><th>月份</th><th>请求数</th><th>原始输入</th><th>原始输出</th><th>消耗积分</th><th>成本</th><th>实收</th><th>毛利</th></tr></thead>
+          <thead><tr><th>月份</th><th>请求数</th><th>原始输入</th><th>原始输出</th><th>消耗积分</th><th>成本</th><th>实收（充值 / 套餐）</th><th>毛利</th></tr></thead>
           <tbody>
             <tr v-for="m in summary.months" :key="m.usageMonth">
               <td class="mono">{{ m.usageMonth }}</td>
@@ -440,7 +442,7 @@ async function togglePricing(p: AdminAiModelPricing): Promise<void> {
               <td>{{ fmtTokens(m.rawCompletionTokens) }}</td>
               <td>{{ fmtCredits(m.billingPromptTokens + m.billingCompletionTokens) }}</td>
               <td>{{ fmtCents(m.costCents) }}</td>
-              <td>{{ fmtCents(m.topupCents + m.planCents) }}</td>
+              <td>{{ fmtCents(m.topupCents) }} / {{ fmtCents(m.planCents) }}</td>
               <td :class="{ neg: (m.marginCents ?? 0) < 0 }">{{ fmtCents(m.marginCents) }}</td>
             </tr>
             <tr v-if="summary.months.length === 0"><td colspan="8" class="muted">该区间暂无请求流水。</td></tr>

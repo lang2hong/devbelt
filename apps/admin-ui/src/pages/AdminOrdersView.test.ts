@@ -14,6 +14,7 @@ vi.mock('@devbelt/auth-client', async (importOriginal) => ({
 }));
 
 import { listAdminOrders, refundAdminOrder } from '../api/admin';
+import { toInclusiveEndIso } from '../lib/dateRange';
 import AdminOrdersView from './AdminOrdersView.vue';
 
 beforeEach(() => {
@@ -35,7 +36,23 @@ describe('AdminOrdersView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('o1');
+    expect(wrapper.text()).toContain('u9@b.com');
     expect(wrapper.findAll('button').some((b) => b.text().trim() === '退款')).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('createdTo 分钟精度值归一为所选分钟末尾后上送', async () => {
+    const wrapper = mount(AdminOrdersView);
+    await flushPromises();
+
+    const dateInputs = wrapper.findAll('input[type="datetime-local"]');
+    await dateInputs[1].setValue('2026-09-13T10:30');
+    await wrapper.findAll('button').find((b) => b.text().trim() === '查询')!.trigger('click');
+    await flushPromises();
+
+    const calls = vi.mocked(listAdminOrders).mock.calls;
+    const lastFilters = calls[calls.length - 1][0];
+    expect(lastFilters?.createdTo).toBe(toInclusiveEndIso('2026-09-13T10:30'));
     wrapper.unmount();
   });
 

@@ -34,7 +34,7 @@ vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   setAccessToken: vi.fn(),
 }));
 
-import { listAdminAiSkus, listAdminOrders, createAdminAiTopupOrder, getAdminAiQuota, refundAdminAiTopupOrder, listUsers } from '../api/admin';
+import { listAdminAiSkus, listAdminOrders, createAdminAiTopupOrder, getAdminAiQuota, refundAdminAiTopupOrder, listUsers, type AdminOrder } from '../api/admin';
 import AdminAiTopupView from './AdminAiTopupView.vue';
 
 const SKU = {
@@ -69,6 +69,32 @@ describe('AdminAiTopupView', () => {
     expect(wrapper.text()).toContain('充值订单');
     expect(wrapper.text()).toContain('请到 用户列表');
     wrapper.unmount();
+  });
+
+  it('充值订单：展示邮箱/支付时间，详情含渠道单号', async () => {
+    const order: AdminOrder = {
+      orderNo: 'tp-1', userId: '9', userEmail: 'u9@b.com', userDisplayName: null,
+      purpose: 'topup', planCode: null, skuCode: 'topup_500k', amountCents: 900,
+      channel: 'wechat', status: 'paid', channelTradeNo: 'wx-1',
+      paidTime: '2026-10-20T08:00:00Z', expiresTime: '2026-10-20T09:00:00Z',
+      createTime: '2026-10-20T07:50:00Z', updateTime: '2026-10-20T08:00:00Z',
+    };
+    vi.mocked(listAdminOrders).mockResolvedValue({ kind: 'ok', value: { items: [order], nextCursor: null } });
+    const wrapper = await mountView();
+    const tabBtn = Array.from(document.querySelectorAll('[role="tab"]')).find((b) => b.textContent?.trim() === '充值订单');
+    (tabBtn as HTMLElement).click();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('u9@b.com');
+    expect(wrapper.text()).toContain('2026-10-20');
+    await wrapper.findAll('button').find((b) => b.text().trim() === '详情')!.trigger('click');
+    await flushPromises();
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('wx-1');
+    expect(text).toContain('微信');
+    expect(text).toContain('¥9.00');
+    wrapper.unmount();
+    document.body.innerHTML = '';
   });
 
   it('手工建单：金额确认一致 → 提交并成功提示', async () => {

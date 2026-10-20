@@ -17,6 +17,7 @@ import { formatDateTime } from '../lib/formatTime';
 import Modal from '../components/Modal.vue';
 import Tabs from '../components/Tabs.vue';
 import { fmtCredits } from '../lib/credits';
+import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 
 /** AI 积分运营：充值档位管理、手工建单、充值订单入账与退款。用户余额请到用户详情页查看。 */
 
@@ -70,12 +71,18 @@ onMounted(() => {
 const skuForm = ref<AdminAiTopupSku | null>(null);
 const skuPrice = ref('');
 const skuValidDays = ref('');
+const skuLabelZh = ref('');
+const skuLabelEn = ref('');
+const skuSort = ref('');
 const skuReason = ref('');
 
 function openSkuEdit(s: AdminAiTopupSku): void {
   skuForm.value = s;
   skuPrice.value = String(s.priceCents);
   skuValidDays.value = String(s.validDays);
+  skuLabelZh.value = s.label.zh;
+  skuLabelEn.value = s.label.en;
+  skuSort.value = String(s.sortOrder);
   skuReason.value = '';
   error.value = '';
 }
@@ -98,19 +105,32 @@ async function confirmSkuEdit(): Promise<void> {
     error.value = '有效期必须是 1–3650 天。';
     return;
   }
+  const labelZh = skuLabelZh.value.trim();
+  const labelEn = skuLabelEn.value.trim();
+  if (!labelZh || !labelEn) {
+    error.value = '中英文名称均必填。';
+    return;
+  }
+  const sortOrder = Number(skuSort.value);
+  if (!Number.isSafeInteger(sortOrder)) {
+    error.value = '排序必须是整数。';
+    return;
+  }
   const reasonValue = skuReason.value.trim();
   if (!reasonValue) {
     error.value = '请填写变更原因。';
     return;
   }
-  const tag = `sku:${s.code}`;
+  const tag = `sku:${s.code}:${price}:${days}:${labelZh}:${labelEn}:${sortOrder}`;
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
-    const patch: { priceCents?: number; validDays?: number } = {};
+    const patch: { priceCents?: number; validDays?: number; label?: { en: string; zh: string }; sortOrder?: number } = {};
     if (price !== s.priceCents) patch.priceCents = price;
     if (days !== s.validDays) patch.validDays = days;
+    if (labelZh !== s.label.zh || labelEn !== s.label.en) patch.label = { zh: labelZh, en: labelEn };
+    if (sortOrder !== s.sortOrder) patch.sortOrder = sortOrder;
     const r = await updateAdminAiSku(s.code, patch, reasonValue, skuWrite.ensure(tag), csrf);
     if (r.kind === 'ok') {
       skuWrite.reset(tag);
@@ -272,7 +292,11 @@ async function confirmManual(): Promise<void> {
 const orders = ref<AdminOrder[]>([]);
 const orderState = ref<'loading' | 'ready' | 'error'>('loading');
 const orderStatus = ref('');
+const orderUserId = ref('');
+const orderCreatedFrom = ref('');
+const orderCreatedTo = ref('');
 const orderNextCursor = ref<string | null>(null);
+const orderDetail = ref<AdminOrder | null>(null);
 let orderSeq = 0;
 let orderPaging = false;
 
@@ -285,7 +309,10 @@ async function loadOrders(reset = true): Promise<void> {
     orderState.value = 'loading';
     const r = await listAdminOrders({
       purpose: 'topup',
+      userId: orderUserId.value.trim() || undefined,
       status: orderStatus.value || undefined,
+      createdFrom: toFromIso(orderCreatedFrom.value),
+      createdTo: toInclusiveEndIso(orderCreatedTo.value),
       cursor: reset ? undefined : (orderNextCursor.value ?? undefined),
     });
     if (seq !== orderSeq) return;
@@ -300,6 +327,14 @@ async function loadOrders(reset = true): Promise<void> {
   } finally {
     if (!reset) orderPaging = false;
   }
+}
+
+function resetOrderFilters(): void {
+  orderStatus.value = '';
+  orderUserId.value = '';
+  orderCreatedFrom.value = '';
+  orderCreatedTo.value = '';
+  void loadOrders(true);
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -415,32 +450,41 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
     <!-- ── 充值订单 ── -->
     <template v-else>
     <div class="bar">
+      <input v-model="orderUserId" type="text" placeholder="用户ID" @keyup.enter="loadOrders(true)" />
       <select v-model="orderStatus" @change="loadOrders(true)">
         <option value="">全部状态</option>
         <option v-for="(label, st) in STATUS_LABEL" :key="st" :value="st">{{ label }}</option>
       </select>
+      <label class="range">创建时间
+        <input v-model="orderCreatedFrom" type="datetime-local" />
+        至
+        <input v-model="orderCreatedTo" type="datetime-local" />
+      </label>
+      <button class="btn secondary" @click="resetOrderFilters">重置</button>
     </div>
     <p class="muted" v-if="orderState === 'loading'">加载中…</p>
     <p class="error" v-if="orderState === 'error'">加载失败。</p>
     <table v-if="orderState === 'ready'" class="table">
       <thead>
-        <tr><th>订单号</th><th>用户ID</th><th>档位</th><th>金额</th><th>渠道</th><th>状态</th><th>创建时间</th><th></th></tr>
+        <tr><th>订单号</th><th>用户</th><th>档位</th><th>金额</th><th>渠道</th><th>状态</th><th>支付时间</th><th>创建时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="o in orders" :key="o.orderNo">
           <td class="mono">{{ o.orderNo }}</td>
-          <td class="mono">{{ o.userId }}</td>
+          <td :title="`用户 ID ${o.userId}`">{{ o.userEmail ?? o.userId }}</td>
           <td class="mono">{{ o.skuCode }}</td>
           <td>¥{{ fmtCents(o.amountCents) }}</td>
           <td>{{ channelLabel(o.channel) }}</td>
           <td><span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span></td>
+          <td>{{ formatDateTime(o.paidTime) }}</td>
           <td>{{ formatDateTime(o.createTime) }}</td>
           <td class="actions">
+            <button class="btn small secondary" :disabled="busy" @click="orderDetail = o">详情</button>
             <button v-if="o.status === 'paid'" class="btn small" :disabled="busy" @click="openAction(o, 'fulfill')">入账</button>
             <button v-if="o.status === 'fulfilled'" class="btn small danger" :disabled="busy" @click="openAction(o, 'refund')">退款</button>
           </td>
         </tr>
-        <tr v-if="orders.length === 0"><td colspan="8" class="muted">无充值订单。</td></tr>
+        <tr v-if="orders.length === 0"><td colspan="9" class="muted">无充值订单。</td></tr>
       </tbody>
     </table>
     <p v-if="orderNextCursor" class="load-more"><button class="btn secondary" @click="loadOrders(false)">加载更多</button></p>
@@ -449,9 +493,12 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
 
     <!-- SKU 编辑 Modal -->
     <Modal v-if="skuForm" title="编辑档位" :closable="!busy" @close="closeSkuEdit">
-      <p class="muted">{{ skuForm.code }} · {{ skuForm.label.zh }} · 当前 ¥{{ fmtCents(skuForm.priceCents) }} / {{ skuForm.validDays }} 天</p>
+      <p class="muted">{{ skuForm.code }} · 当前 ¥{{ fmtCents(skuForm.priceCents) }} / {{ skuForm.validDays }} 天</p>
+      <input v-model="skuLabelZh" type="text" maxlength="64" placeholder="中文名称" />
+      <input v-model="skuLabelEn" type="text" maxlength="64" placeholder="英文名称" />
       <input v-model="skuPrice" type="text" placeholder="价格（元）" />
       <input v-model="skuValidDays" type="text" placeholder="有效期（天，1–3650）" />
+      <input v-model="skuSort" type="text" placeholder="排序（整数）" />
       <input v-model="skuReason" type="text" maxlength="500" placeholder="变更原因（必填）" />
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">
@@ -484,6 +531,26 @@ const GRANT_STATUS_LABEL: Record<string, string> = {
       </div>
     </Modal>
 
+    <!-- 订单详情 Modal -->
+    <Modal v-if="orderDetail" title="充值订单详情" :closable="!busy" @close="orderDetail = null">
+      <table class="kv">
+        <tbody>
+          <tr><th>订单号</th><td class="mono">{{ orderDetail.orderNo }}</td></tr>
+          <tr><th>用户</th><td>{{ orderDetail.userEmail ?? '—' }}<span class="muted">（ID {{ orderDetail.userId }}，{{ orderDetail.userDisplayName ?? '未设置昵称' }}）</span></td></tr>
+          <tr><th>档位</th><td class="mono">{{ orderDetail.skuCode ?? '—' }}</td></tr>
+          <tr><th>金额</th><td>¥{{ fmtCents(orderDetail.amountCents) }}</td></tr>
+          <tr><th>渠道</th><td>{{ channelLabel(orderDetail.channel) }}<span v-if="orderDetail.channelTradeNo" class="muted"> · {{ orderDetail.channelTradeNo }}</span></td></tr>
+          <tr><th>状态</th><td><span class="badge" :class="orderDetail.status">{{ STATUS_LABEL[orderDetail.status] ?? orderDetail.status }}</span></td></tr>
+          <tr><th>创建时间</th><td>{{ formatDateTime(orderDetail.createTime) }}</td></tr>
+          <tr><th>支付时间</th><td>{{ formatDateTime(orderDetail.paidTime) }}</td></tr>
+          <tr><th>过期时间</th><td>{{ formatDateTime(orderDetail.expiresTime) }}</td></tr>
+        </tbody>
+      </table>
+      <div class="modal-actions">
+        <button class="btn secondary" @click="orderDetail = null">关闭</button>
+      </div>
+    </Modal>
+
     <!-- 订单操作 Modal -->
     <Modal v-if="actionForm" :title="actionForm.action === 'fulfill' ? '入账' : '退款（撤销积分）'" :closable="!busy" @close="closeAction">
       <p class="muted">{{ actionForm.order.orderNo }} · {{ actionForm.order.skuCode }} · ¥{{ fmtCents(actionForm.order.amountCents) }} · {{ actionForm.order.status }}</p>
@@ -510,6 +577,10 @@ input, select, .modal-actions { margin-bottom: 4px; }
 .badge.exhausted { background: var(--c-surface-muted); color: var(--c-text-muted); }
 .notice { color: var(--c-success-text); font-size: 13px; }
 .quota-summary p { margin: 8px 0; font-size: 13px; }
+.range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-muted); }
+.kv { border-collapse: collapse; width: 100%; }
+.kv th { width: 92px; text-align: left; padding: 6px 10px 6px 0; color: var(--c-text-muted); font-weight: 500; font-size: 13px; vertical-align: top; white-space: nowrap; }
+.kv td { padding: 6px 0; font-size: 13.5px; word-break: break-all; }
 .user-row { display: flex; gap: 8px; }
 .user-row input { flex: 1; }
 .resolved { color: var(--c-success-text); font-size: 13px; margin: 6px 0; }

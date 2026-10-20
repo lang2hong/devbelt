@@ -5,6 +5,7 @@ import { listAdminOrders, refundAdminOrder, type AdminOrder } from '../api/admin
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
+import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import Modal from '../components/Modal.vue';
 import FormField from '../components/FormField.vue';
 
@@ -15,6 +16,8 @@ const status = ref('');
 const channel = ref('');
 const purpose = ref('');
 const planCode = ref('');
+const createdFrom = ref('');
+const createdTo = ref('');
 const nextCursor = ref<string | null>(null);
 
 const error = ref('');
@@ -83,6 +86,8 @@ async function load(reset = true): Promise<void> {
       channel: channel.value || undefined,
       purpose: purpose.value || undefined,
       planCode: planCode.value || undefined,
+      createdFrom: toFromIso(createdFrom.value),
+      createdTo: toInclusiveEndIso(createdTo.value),
       cursor: reset ? undefined : (nextCursor.value ?? undefined),
     });
     if (seq !== loadSeq) return;
@@ -106,6 +111,17 @@ function search(): void {
   orders.value = [];
   nextCursor.value = null;
   void load(true);
+}
+
+function resetFilters(): void {
+  userId.value = '';
+  status.value = '';
+  channel.value = '';
+  purpose.value = '';
+  planCode.value = '';
+  createdFrom.value = '';
+  createdTo.value = '';
+  search();
 }
 
 function openRefund(o: AdminOrder): void {
@@ -177,7 +193,13 @@ async function confirmRefund(): Promise<void> {
         <option value="topup">加油包</option>
       </select>
       <input v-model="planCode" type="text" placeholder="套餐" @keyup.enter="search" />
+      <label class="range">创建时间
+        <input v-model="createdFrom" type="datetime-local" />
+        至
+        <input v-model="createdTo" type="datetime-local" />
+      </label>
       <button class="btn" @click="search">查询</button>
+      <button class="btn secondary" @click="resetFilters">重置</button>
     </div>
 
     <p class="muted" v-if="state === 'loading'">加载中…</p>
@@ -191,7 +213,7 @@ async function confirmRefund(): Promise<void> {
       <tbody>
         <tr v-for="o in orders" :key="o.orderNo">
           <td class="mono">{{ o.orderNo }}</td>
-          <td><a class="user-link" :href="withBase(`/users/${o.userId}`)" :title="o.userEmail ?? o.userId" @click.prevent="goUser(o.userId)">{{ o.userId }}</a></td>
+          <td><a class="user-link" :href="withBase(`/users/${o.userId}`)" :title="`用户 ID ${o.userId}`" @click.prevent="goUser(o.userId)">{{ o.userEmail ?? o.userId }}</a></td>
           <td>{{ purposeLabel(o.purpose) }} · {{ o.planCode ?? o.skuCode ?? '—' }}</td>
           <td>¥{{ fmtCents(o.amountCents) }}</td>
           <td><span class="badge" :class="o.status">{{ STATUS_LABEL[o.status] ?? o.status }}</span></td>
@@ -244,6 +266,7 @@ async function confirmRefund(): Promise<void> {
 <style scoped>
 .user-link { color: var(--c-accent); text-decoration: none; }
 .user-link:hover { text-decoration: underline; }
+.range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-muted); }
 .kv { border-collapse: collapse; }
 .kv th { width: 100px; text-align: left; padding: 8px 12px; color: var(--c-text-muted); font-weight: 500; font-size: 13px; vertical-align: top; white-space: nowrap; }
 .kv td { padding: 8px 12px; font-size: 13.5px; }
