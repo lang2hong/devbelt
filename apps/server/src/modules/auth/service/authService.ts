@@ -7,7 +7,6 @@ import type { RateLimitService } from '../../../service/rateLimitService.js';
 import {
   ConflictError,
   UnauthorizedError,
-  UserDisabledError,
   ValidationError,
   PersonalFeatureRequiredError,
   EntityNotFoundError,
@@ -27,6 +26,7 @@ import type {
 } from '../../../repository/interfaces.js';
 import type { Queryable, TxRunner } from '../../../repository/mysql/db.js';
 import type { AuditWriter } from '../../../service/auditWriter.js';
+import { SessionRotationService, type SessionPolicy } from './sessionRotation.js';
 import { deriveEntitlement } from '../../billing/service/entitlement.js';
 
 /** 登录/刷新请求携带的设备字段（实施规格 §5.2 DeviceFields）。 */
@@ -92,11 +92,18 @@ const CHANGE_PASSWORD_MAX = 10;
  * - 设备撤销与 session 撤销同一事务（§5.1）
  * - 登录的设备配额检查在用户行锁下序列化，并发不超额（§5.1）
  */
-/** refresh 重放宽限（见 reuse 处理）：同一客户端并发/重试重放刚轮换掉的旧 token 时，
- * 只拒绝本次、不吊销整族，避免一次竞态把该设备登出。 */
-export const REFRESH_REUSE_GRACE_MS = 60_000;
+/** 扩展会话的轮换策略：aud=extension；刷新必须与登录设备同 key；登出只撤销当前 token。 */
+const EXTENSION_SESSION_POLICY: SessionPolicy = {
+  audience: 'extension',
+  scope: EXTENSION_SCOPES,
+  allowDevice: (bound, deviceKey) => !!deviceKey && bound.deviceKey === deviceKey,
+  reuseAuditEvent: 'auth.refresh.reuse',
+  logoutScope: 'token',
+};
 
 export class AuthService {
+  private readonly rotation: SessionRotationService;
+
   constructor(
     private readonly userRepo: IUserRepo,
     private readonly emailVerificationTokenRepo: IEmailVerificationTokenRepo,
@@ -110,7 +117,16 @@ export class AuthService {
     private readonly rateLimiter: RateLimitService,
     private readonly runner: TxRunner,
     private readonly auditWriter?: AuditWriter,
-  ) {}
+  ) {
+    this.rotation = new SessionRotationService({
+      userRepo,
+      deviceRepo,
+      refreshTokenRepo,
+      tokenService,
+      runner,
+      auditWriter,
+    });
+  }
 
   /** 注册：事务建 user + Free 订阅 + 验证 token，事务提交后发验证邮件。 */
   async register(emailRaw: string, password: string, displayName?: string, ip?: string): Promise<{ ok: true }> {
@@ -299,86 +315,14 @@ export class AuthService {
     return viaEmail || viaIp;
   }
 
-  /** 刷新：事务内原子轮换 + device 绑定校验 + family 复用检测。 */
-/** 刷新：事务内原子轮换 + device 绑定校验 + family 复用检测（重放宽限见具体实现）。 */
+  /** 刷新：共享轮换服务（aud=extension，deviceKey 绑定校验）。 */
   async refresh(refreshTokenStr: string, device: DeviceFields): Promise<RefreshResponse> {
-    const tokenHash = this.tokenService.hashToken(refreshTokenStr);
-    const pre = await this.refreshTokenRepo.findByHash(tokenHash);
-    if (!pre || pre.deviceId === null) throw new UnauthorizedError();
-    // 闭包里 TS 不保留属性 narrow，先固化为本地 number
-    const preUserId = pre.userId;
-    const preDeviceId = pre.deviceId;
-
-    const outcome = await this.runner(
-      async (tx): Promise<{ kind: 'rotated'; accessToken: string; refreshToken: string } | { kind: 'reuse'; familyId: string; revokedTime: Date }> => {
-        // 统一锁顺序 user -> device -> token（与 login / revokeDevice 一致，避免死锁）。
-        const user = await this.userRepo.lockById(tx, preUserId);
-        if (!user) throw new UnauthorizedError();
-        if (user.status !== 'active') throw new UserDisabledError(user.id);
-
-        // 设备绑定校验（§5.1）：锁 device 行，要求其 active、归属、且 deviceKey 与请求一致。
-        const bound = await this.deviceRepo.findByIdForUpdate(tx, preDeviceId);
-        if (!bound || bound.userId !== user.id || bound.status !== 'active' || bound.deviceKey !== device.deviceKey) {
-          throw new UnauthorizedError('device mismatch');
-        }
-        await this.deviceRepo.touch(tx, bound.id, new Date());
-
-        const now = new Date();
-        const rt = await this.refreshTokenRepo.findByHashForUpdate(tx, tokenHash);
-        if (!rt || rt.expiresTime <= now) throw new UnauthorizedError();
-        if (rt.revokedTime) {
-          return { kind: 'reuse', familyId: rt.familyId, revokedTime: rt.revokedTime };
-        }
-
-        await this.refreshTokenRepo.consume(tx, rt.id, now);
-        const { token, hash, expiresAt } = this.tokenService.generateRefreshToken();
-        await this.refreshTokenRepo.create(tx, {
-          userId: user.id,
-          deviceId: rt.deviceId,
-          tokenHash: hash,
-          familyId: rt.familyId,
-          expiresTime: expiresAt,
-        });
-
-        const accessToken = await this.tokenService.signAccessToken({
-          userId: user.id,
-          aud: 'extension',
-          scope: [...EXTENSION_SCOPES],
-          sessionId: rt.familyId,
-          deviceId: rt.deviceId ?? undefined,
-          sessionVersion: user.sessionVersion,
-        });
-        return { kind: 'rotated', accessToken, refreshToken: token };
-      },
-    );
-
-    if (outcome.kind === 'reuse') {
-      // 良性重放大赦：旧 token 是**最近**（≤宽限）才被撤销、且族内仍有活跃 token
-      // （说明新 token 已签发给合法客户端）。此时并发/重试重放只拒绝本次，不吊销整族；
-      // 陈旧客户端下次会从存储读到新 token 自愈。
-      const benign = Date.now() - outcome.revokedTime.getTime() <= REFRESH_REUSE_GRACE_MS
-        && (await this.refreshTokenRepo.hasActiveToken(outcome.familyId));
-      if (benign) throw new UnauthorizedError('refresh token already rotated');
-      // 真·复用检测：在**独立事务**里撤销整族（§5.1）。不能放进上面的轮换事务 ——
-      // 那样 throw 会被 withTransaction 回滚，把撤销一起丢掉。
-      await this.runner((tx) => this.refreshTokenRepo.revokeFamily(tx, outcome.familyId, new Date()));
-      throw new UnauthorizedError('refresh token reuse detected');
-    }
-
-    return { accessToken: outcome.accessToken, refreshToken: outcome.refreshToken };
+    return this.rotation.refresh(refreshTokenStr, EXTENSION_SESSION_POLICY, device.deviceKey);
   }
 
-  /** 登出：撤销当前 refresh token。 */
+  /** 登出：撤销当前 refresh token（扩展语义，不波及同族其它活跃 token）。 */
   async logout(refreshTokenStr?: string): Promise<{ ok: true }> {
-    if (!refreshTokenStr) return { ok: true };
-    const tokenHash = this.tokenService.hashToken(refreshTokenStr);
-    await this.runner(async (tx) => {
-      const rt = await this.refreshTokenRepo.findByHashForUpdate(tx, tokenHash);
-      if (rt && !rt.revokedTime) {
-        await this.refreshTokenRepo.consume(tx, rt.id, new Date());
-      }
-    });
-    return { ok: true };
+    return this.rotation.logout(refreshTokenStr, EXTENSION_SESSION_POLICY);
   }
 
   /** 改密：同一事务内锁用户 → 重新校验当前密码 → 更新 hash → 撤销全部 refresh token（§5.1）。 */

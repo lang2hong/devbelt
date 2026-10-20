@@ -778,4 +778,31 @@ describe('console admin routes', () => {
     expect(res.json().error.code).toBe('VALIDATION_FAILED');
     await b.app.close();
   });
+
+  it('route inventory: 拆分后管理端路径一个不少', async () => {
+    const b = await build();
+    const routes = b.app.printRoutes({ commonPrefix: false });
+    // printRoutes 是树形输出：根路径完整、子路径只显示后缀。
+    for (const path of [
+      '/api/admin/users',
+      '/:userId/sync-overview',
+      '/:userId/sync-records',
+      '/:userId/status',
+      '/:userId/role',
+      '/:userId/subscription',
+      '/api/admin/orders',
+      '/:orderNo/refund',
+      '/api/admin/invoices',
+      '/:invoiceId',
+      '/api/admin/audit',
+      '/exports',
+      '/api/admin/plans',
+      '/:planId',
+      '/api/admin/plan-feature-defs/:key',
+      '/api/console/version',
+    ]) {
+      expect(routes, path).toContain(path);
+    }
+    await b.app.close();
+  });
 });

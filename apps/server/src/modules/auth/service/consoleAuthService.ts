@@ -4,14 +4,23 @@ import type { TokenService } from '../../../service/tokenService.js';
 import type { RateLimitService } from '../../../service/rateLimitService.js';
 import type { User } from '../../../domain/entities.js';
 import { CONSOLE_SCOPES } from '../../../domain/enums.js';
-import { RateLimitedError, UnauthorizedError, UserDisabledError, ValidationError } from '../../../domain/errors.js';
+import { RateLimitedError, UnauthorizedError, ValidationError } from '../../../domain/errors.js';
 import type { IUserRepo, IDeviceRepo, IRefreshTokenRepo } from '../../../repository/interfaces.js';
 import type { TxRunner, Queryable } from '../../../repository/mysql/db.js';
 import type { AuditWriter } from '../../../service/auditWriter.js';
-import { REFRESH_REUSE_GRACE_MS } from './authService.js';
+import { SessionRotationService, type SessionPolicy } from './sessionRotation.js';
 
 /** Web Console 设备槽位（§4.1：每用户最多一个 active web 设备，不计入 maxDevices）。 */
 const WEB_PLATFORM = 'web';
+
+/** 控制台会话的轮换策略：aud=console；只允许 web 设备；登出撤销整个 family。 */
+const CONSOLE_SESSION_POLICY: SessionPolicy = {
+  audience: 'console',
+  scope: CONSOLE_SCOPES,
+  allowDevice: (bound) => bound.devicePlatform === WEB_PLATFORM,
+  reuseAuditEvent: 'console.auth.refresh.reuse',
+  logoutScope: 'family',
+};
 
 // 登录限流阈值（与 authService 完全一致，共享同一批桶 §4.2）。
 const LOGIN_WINDOW_S = 15 * 60;
@@ -30,6 +39,8 @@ export interface ConsoleLoginResult {
  * 签发 aud=console / CONSOLE_SCOPES 的 access token。register 复用 authService.register。
  */
 export class ConsoleAuthService {
+  private readonly rotation: SessionRotationService;
+
   constructor(
     private readonly userRepo: IUserRepo,
     private readonly deviceRepo: IDeviceRepo,
@@ -37,8 +48,17 @@ export class ConsoleAuthService {
     private readonly tokenService: TokenService,
     private readonly rateLimiter: RateLimitService,
     private readonly runner: TxRunner,
-    private readonly auditWriter?: AuditWriter,
-  ) {}
+    auditWriter?: AuditWriter,
+  ) {
+    this.rotation = new SessionRotationService({
+      userRepo,
+      deviceRepo,
+      refreshTokenRepo,
+      tokenService,
+      runner,
+      auditWriter,
+    });
+  }
 
   async login(emailRaw: string, password: string, deviceKey: string, ip?: string): Promise<ConsoleLoginResult> {
     const email = normalizeEmail(emailRaw);
@@ -100,84 +120,14 @@ export class ConsoleAuthService {
     };
   }
 
-  /** 刷新：Refresh cookie 内的 refresh token 轮换（只允许 web 设备上的 family）。 */
+  /** 刷新：共享轮换服务（aud=console，只允许 web 设备上的 family）。 */
   async refresh(refreshTokenStr: string): Promise<{ accessToken: string; refreshToken: string }> {
-    const tokenHash = this.tokenService.hashToken(refreshTokenStr);
-    const pre = await this.refreshTokenRepo.findByHash(tokenHash);
-    if (!pre || pre.deviceId === null) throw new UnauthorizedError();
-    const preUserId = pre.userId;
-    const preDeviceId = pre.deviceId;
-
-    const outcome = await this.runner(async (tx): Promise<
-      { kind: 'rotated'; accessToken: string; refreshToken: string } | { kind: 'reuse'; familyId: string; revokedTime: Date }
-    > => {
-      const user = await this.userRepo.lockById(tx, preUserId);
-      if (!user) throw new UnauthorizedError();
-      if (user.status !== 'active') throw new UserDisabledError(user.id);
-
-      const bound = await this.deviceRepo.findByIdForUpdate(tx, preDeviceId);
-      if (!bound || bound.userId !== user.id || bound.status !== 'active' || bound.devicePlatform !== WEB_PLATFORM) {
-        throw new UnauthorizedError('device mismatch');
-      }
-      await this.deviceRepo.touch(tx, bound.id, new Date());
-
-      const now = new Date();
-      const rt = await this.refreshTokenRepo.findByHashForUpdate(tx, tokenHash);
-      if (!rt || rt.expiresTime <= now) throw new UnauthorizedError();
-      if (rt.revokedTime) return { kind: 'reuse', familyId: rt.familyId, revokedTime: rt.revokedTime };
-
-      await this.refreshTokenRepo.consume(tx, rt.id, now);
-      const { token, hash, expiresAt } = this.tokenService.generateRefreshToken();
-      await this.refreshTokenRepo.create(tx, {
-        userId: user.id,
-        deviceId: rt.deviceId,
-        tokenHash: hash,
-        familyId: rt.familyId,
-        expiresTime: expiresAt,
-      });
-      const accessToken = await this.tokenService.signAccessToken({
-        userId: user.id,
-        aud: 'console',
-        scope: [...CONSOLE_SCOPES],
-        sessionId: rt.familyId,
-        deviceId: rt.deviceId ?? undefined,
-        sessionVersion: user.sessionVersion,
-      });
-      return { kind: 'rotated', accessToken, refreshToken: token };
-    });
-
-    if (outcome.kind === 'reuse') {
-      // 宽限（与扩展侧 authService 同口径）：最近才被撤销且族内仍有活跃 token →
-      // 良性重放，只拒绝本次，不吊销整族（不落审计）。
-      const benign = Date.now() - outcome.revokedTime.getTime() <= REFRESH_REUSE_GRACE_MS
-        && (await this.refreshTokenRepo.hasActiveToken(outcome.familyId));
-      if (benign) throw new UnauthorizedError('refresh token already rotated');
-      await this.runner((tx) => this.refreshTokenRepo.revokeFamily(tx, outcome.familyId, new Date()));
-      // refresh token 复用通常意味着令牌被盗/泄漏：作为安全事件落审计（不阻断撤销）。
-      this.auditWriter?.write({
-        eventType: 'console.auth.refresh.reuse',
-        result: 'failure',
-        actorUserId: preUserId,
-        targetType: 'refresh_family',
-        targetId: outcome.familyId,
-      });
-      throw new UnauthorizedError('refresh token reuse detected');
-    }
-
-    return { accessToken: outcome.accessToken, refreshToken: outcome.refreshToken };
+    return this.rotation.refresh(refreshTokenStr, CONSOLE_SESSION_POLICY);
   }
 
   /** 登出：撤销当前 refresh token 所属整族（§4.2「撤销当前 family」）。 */
   async logout(refreshTokenStr: string | undefined): Promise<{ ok: true }> {
-    if (!refreshTokenStr) return { ok: true };
-    const tokenHash = this.tokenService.hashToken(refreshTokenStr);
-    await this.runner(async (tx) => {
-      const rt = await this.refreshTokenRepo.findByHashForUpdate(tx, tokenHash);
-      if (rt && !rt.revokedTime) {
-        await this.refreshTokenRepo.revokeFamily(tx, rt.familyId, new Date());
-      }
-    });
-    return { ok: true };
+    return this.rotation.logout(refreshTokenStr, CONSOLE_SESSION_POLICY);
   }
 
   /** 由 refresh token 反查 sessionId（familyId），供 CSRF 会话绑定校验。 */

@@ -41,6 +41,8 @@ interface Fixture {
     rateLimitRepo: FakeRateLimitRepo;
   };
   emailSender: MemoryEmailSender;
+  /** 捕获审计写入（用于断言复用检测落审计）。 */
+  auditWrites: Array<Record<string, unknown>>;
 }
 
 function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
@@ -58,6 +60,7 @@ function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
   const tokenService = new TokenService(keys, '15m', 30 * 24 * 3600 * 1000);
   const rateLimiter = new RateLimitService(rateLimitRepo, opts.rateLimit === true);
   const emailSender = new MemoryEmailSender();
+  const auditWrites: Array<Record<string, unknown>> = [];
   const auth = new AuthService(
     userRepo,
     emailVerificationTokenRepo,
@@ -70,9 +73,11 @@ function makeFixture(opts: { rateLimit?: boolean } = {}): Fixture {
     emailSender,
     rateLimiter,
     async (fn) => fn({} as Queryable),
+    { write: (input: Record<string, unknown>) => { auditWrites.push(input); } } as any,
   );
   return {
     auth,
+    auditWrites,
     repos: {
       userRepo,
       emailVerificationTokenRepo,
@@ -149,8 +154,12 @@ describe('AuthService', () => {
     expect(rotated.refreshToken).toBeTruthy();
     expect(rotated.refreshToken).not.toBe(refreshToken);
 
+    const reuseAudits = () => f.auditWrites.filter((w) => w.eventType === 'auth.refresh.reuse');
+
     // 宽限内重放旧 token：401，但族未吊销，刚轮换出的新 token 仍可继续刷新（客户端自愈）
     await expect(f.auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+    // 良性重放不落审计，避免并发 401 刷屏
+    expect(reuseAudits()).toHaveLength(0);
     const again = await f.auth.refresh(rotated.refreshToken, device());
     expect(again.refreshToken).toBeTruthy();
 
@@ -159,8 +168,17 @@ describe('AuthService', () => {
       if (t.revokedTime) t.revokedTime = new Date(Date.now() - 120_000);
     }
     await expect(f.auth.refresh(refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
-    // 族被吊销 → 最新 token 也失效
+    // 真·复用必须落审计（与控制台侧对齐）
+    const audits = reuseAudits();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      eventType: 'auth.refresh.reuse',
+      result: 'failure',
+      targetType: 'refresh_family',
+    });
+    // 族被吊销 → 最新 token 也失效（也会被判定为复用并审计）
     await expect(f.auth.refresh(again.refreshToken, device())).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(reuseAudits()).toHaveLength(2);
   });
 
   it('changePassword revokes all refresh tokens', async () => {
