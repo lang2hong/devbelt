@@ -41,7 +41,7 @@ export type WebviewMode =
   | 'syncDoctor';
 
 /** 账户中心标签。 */
-export type HubTab = 'account' | 'session' | 'plans';
+export type HubTab = 'account' | 'sync' | 'session' | 'plans' | 'security';
 
 /** 所有消息的松散基类：`type` 为判别字段，其余按具体消息扩展。 */
 export interface WebviewMessage {

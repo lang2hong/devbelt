@@ -82,11 +82,17 @@ function allContextValues(): Set<string> {
   return values;
 }
 
-interface MenuEntry { command: string; when?: string; group?: string }
+interface MenuEntry { command?: string; submenu?: string; when?: string; group?: string }
 
 function contextMenus(): MenuEntry[] {
   const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8'));
-  return pkg.contributes.menus['view/item/context'] as MenuEntry[];
+  const menus = pkg.contributes.menus as Record<string, MenuEntry[]>;
+  return [
+    ...(menus['view/item/context'] ?? []),
+    ...Object.entries(menus)
+      .filter(([key]) => key.startsWith('devbelt.'))
+      .flatMap(([, items]) => items),
+  ];
 }
 
 /** 从 when 表达式中取出 viewItem 条件，编译成对 contextValue 的判定函数（支持 `||`）。 */
@@ -115,14 +121,14 @@ describe('树右键菜单 when 表达式', () => {
   it('不再依赖 devbelt.dbType / devbelt.has* 上下文键', () => {
     const offenders = contextMenus()
       .filter((e) => /devbelt\.(dbType|has[A-Z])/.test(e.when || ''))
-      .map((e) => `${e.command}: ${e.when}`);
+      .map((e) => `${e.command ?? e.submenu}: ${e.when}`);
     expect(offenders).toEqual([]);
   });
 
   it('每条 when 都携带 viewItem 条件', () => {
     const missing = contextMenus()
       .filter((e) => !viewItemMatcher(e.when || ''))
-      .map((e) => `${e.command}: ${e.when}`);
+      .map((e) => `${e.command ?? e.submenu}: ${e.when}`);
     expect(missing).toEqual([]);
   });
 
@@ -138,7 +144,7 @@ describe('树右键菜单 when 表达式', () => {
         const match = viewItemMatcher(e.when || '');
         return match ? !values.some(match) : false;
       })
-      .map((e) => `${e.command}: ${e.when}`);
+      .map((e) => `${e.command ?? e.submenu}: ${e.when}`);
     expect(dead).toEqual([]);
   });
 
@@ -169,7 +175,7 @@ describe('树右键菜单 when 表达式', () => {
 
   /** SQLite 无用户体系，用户相关命令不得在 SQLite 连接上出现。 */
   it('SQLite 不匹配用户相关菜单', () => {
-    const userMenus = contextMenus().filter((e) => /user/i.test(e.command));
+    const userMenus = contextMenus().filter((e) => /user/i.test(e.command ?? ""));
     expect(userMenus.length).toBeGreaterThan(0);
     const sqliteValues = [...allContextValues()].filter((v) => v.endsWith('.SQLITE'));
     for (const entry of userMenus) {

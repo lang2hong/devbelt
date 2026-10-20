@@ -3,7 +3,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
-const menus: Array<{ command: string; when?: string }> = pkg?.contributes?.menus?.['view/item/context'] ?? [];
+const allMenus = pkg?.contributes?.menus ?? {};
+const menus: Array<{ command: string; when?: string }> = [
+  ...(allMenus['view/item/context'] ?? []),
+  ...Object.entries(allMenus)
+    .filter(([key]) => key.startsWith('devbelt.'))
+    .flatMap(([, items]) => items as Array<{ command: string; when?: string }>),
+];
 const commands: Array<{ command: string }> = pkg?.contributes?.commands ?? [];
 
 /**

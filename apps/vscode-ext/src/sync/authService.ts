@@ -121,6 +121,11 @@ export class AuthService {
     return me.user.userId;
   }
 
+  /** 当前设备判同 id（OS machine id），用于账户中心标记“当前设备”。 */
+  currentDeviceId(): string {
+    return getOsMachineId();
+  }
+
   /** 读取缓存权益：优先内存，回退 globalState；无 allowedDatabaseTypes 的无效缓存直接忽略。 */
   getCachedEntitlement(): CachedEntitlement | undefined {
     if (this.cachedEntitlement) return this.cachedEntitlement;

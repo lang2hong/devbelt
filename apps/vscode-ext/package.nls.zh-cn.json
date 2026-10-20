@@ -162,5 +162,10 @@
   "cmd.redis.deleteKey": "删除键",
   "cmd.redis.deleteFolder": "删除文件夹键",
   "cmd.redis.deleteByPattern": "按 pattern 删除键…",
-  "cmd.redis.newKey": "新建键…"
+  "cmd.redis.newKey": "新建键…",
+  "submenu.connectionManage": "连接管理…",
+  "submenu.connectionTools": "数据与工具…",
+  "submenu.tableStructure": "结构…",
+  "submenu.tableMore": "更多…",
+  "submenu.databaseData": "数据与运维…"
 }

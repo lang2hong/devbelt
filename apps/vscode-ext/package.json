@@ -1278,35 +1278,9 @@
       ],
       "view/item/context": [
         {
-          "command": "devbelt.ai.domainContext",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
-          "group": "ai@1"
-        },
-        {
-          "command": "devbelt.ai.defaultDirectives",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
-          "group": "ai@2"
-        },
-        {
           "command": "devbelt.previewTable",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "inline"
-        },
-        {
-          "command": "devbelt.refreshNode",
-          "title": "%cmd.refreshNode%",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "0_refresh"
-        },
-        {
-          "command": "devbelt.viewTableStructure",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "1_view"
-        },
-        {
-          "command": "devbelt.viewTableSource",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "1_view"
         },
         {
           "command": "devbelt.designTable",
@@ -1320,11 +1294,6 @@
         },
         {
           "command": "devbelt.exportTable",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.mockData",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "4_data"
         },
@@ -1385,39 +1354,9 @@
           "group": "3_edit"
         },
         {
-          "command": "devbelt.copyTable",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.dupTable",
-          "when": "view == devbelt.explorer && viewItem == table.MYSQL",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.addColumn",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.addColumnSql",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.truncateTable",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\.(MYSQL|PG)$/",
-          "group": "8_danger"
-        },
-        {
           "command": "devbelt.dropTable",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
           "group": "8_danger"
-        },
-        {
-          "command": "devbelt.copyNodeName",
-          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "9_copy"
         },
         {
           "command": "devbelt.addColumn",
@@ -1482,43 +1421,13 @@
         },
         {
           "command": "devbelt.compareSchema",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\.MYSQL$/",
-          "group": "5_tools"
-        },
-        {
-          "command": "devbelt.compareSchema",
           "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/",
-          "group": "5_tools"
-        },
-        {
-          "command": "devbelt.compareData",
-          "when": "view == devbelt.explorer && viewItem == database.MYSQL",
           "group": "5_tools"
         },
         {
           "command": "devbelt.compareData",
           "when": "view == devbelt.explorer && viewItem =~ /^schema\\.PG$/",
           "group": "5_tools"
-        },
-        {
-          "command": "devbelt.importData",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.exportConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.restoreDatabase",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.syncDatabase",
-          "when": "view == devbelt.explorer && viewItem == database.MYSQL",
-          "group": "4_data"
         },
         {
           "command": "devbelt.syncDatabase",
@@ -1526,19 +1435,9 @@
           "group": "4_data"
         },
         {
-          "command": "devbelt.scheduleBackup",
-          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
-          "group": "4_data"
-        },
-        {
           "command": "devbelt.dropDatabase",
           "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "8_danger"
-        },
-        {
-          "command": "devbelt.dashboard",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
-          "group": "5_tools"
         },
         {
           "command": "devbelt.previewView",
@@ -1656,11 +1555,6 @@
           "group": "inline"
         },
         {
-          "command": "devbelt.manageUsers",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG)$/",
-          "group": "5_tools"
-        },
-        {
           "command": "devbelt.openQuery",
           "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
           "group": "inline"
@@ -1736,37 +1630,7 @@
           "group": "1_view"
         },
         {
-          "command": "devbelt.refreshConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
-          "group": "0_refresh"
-        },
-        {
-          "command": "devbelt.moveConnectionUp",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "2_arrange@1"
-        },
-        {
-          "command": "devbelt.moveConnectionDown",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "2_arrange@2"
-        },
-        {
           "command": "devbelt.editConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.fixConnectionPaths",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.removeConnectionPathOverrides",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "3_edit"
-        },
-        {
-          "command": "devbelt.cloneConnection",
           "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "3_edit"
         },
@@ -1774,21 +1638,6 @@
           "command": "devbelt.newQueryFromConn",
           "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "2_new"
-        },
-        {
-          "command": "devbelt.createDatabase",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
-          "group": "2_new"
-        },
-        {
-          "command": "devbelt.openTerminal",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
-          "group": "5_tools"
-        },
-        {
-          "command": "devbelt.serverStatus",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
-          "group": "5_tools"
         },
         {
           "command": "devbelt.redis.serverStatus",
@@ -1951,21 +1800,6 @@
           "group": "9_copy"
         },
         {
-          "command": "devbelt.importData",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.exportConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
-          "group": "4_data"
-        },
-        {
-          "command": "devbelt.moveToGroup",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "3_edit"
-        },
-        {
           "command": "devbelt.deleteConnection",
           "when": "view == devbelt.explorer && viewItem =~ /^connection/",
           "group": "8_danger"
@@ -2034,11 +1868,6 @@
           "command": "devbelt.refreshNode",
           "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "0_refresh"
-        },
-        {
-          "command": "devbelt.copyNodeName",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "9_copy"
         },
         {
           "command": "devbelt.copyNodeName",
@@ -2129,6 +1958,212 @@
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
           "group": "9_copy"
+        },
+        {
+          "submenu": "devbelt.connectionManage",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "3_manage"
+        },
+        {
+          "submenu": "devbelt.connectionTools",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "4_tools"
+        },
+        {
+          "submenu": "devbelt.tableStructure",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "3_structure"
+        },
+        {
+          "submenu": "devbelt.tableMore",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "4_more"
+        },
+        {
+          "submenu": "devbelt.databaseData",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
+          "group": "4_data"
+        }
+      ],
+      "devbelt.connectionManage": [
+        {
+          "command": "devbelt.refreshConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
+          "group": "0_refresh"
+        },
+        {
+          "command": "devbelt.moveConnectionUp",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "2_arrange@1"
+        },
+        {
+          "command": "devbelt.moveConnectionDown",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "2_arrange@2"
+        },
+        {
+          "command": "devbelt.fixConnectionPaths",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.removeConnectionPathOverrides",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.cloneConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.moveToGroup",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
+          "group": "9_copy"
+        }
+      ],
+      "devbelt.connectionTools": [
+        {
+          "command": "devbelt.ai.domainContext",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "ai@1"
+        },
+        {
+          "command": "devbelt.ai.defaultDirectives",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "ai@2"
+        },
+        {
+          "command": "devbelt.dashboard",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.manageUsers",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG)$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.createDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "2_new"
+        },
+        {
+          "command": "devbelt.openTerminal",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.serverStatus",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.importData",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.exportConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
+          "group": "4_data"
+        }
+      ],
+      "devbelt.tableStructure": [
+        {
+          "command": "devbelt.viewTableStructure",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.viewTableSource",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "1_view"
+        },
+        {
+          "command": "devbelt.copyTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.dupTable",
+          "when": "view == devbelt.explorer && viewItem == table.MYSQL",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.addColumn",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "3_edit"
+        },
+        {
+          "command": "devbelt.addColumnSql",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "3_edit"
+        }
+      ],
+      "devbelt.tableMore": [
+        {
+          "command": "devbelt.refreshNode",
+          "title": "%cmd.refreshNode%",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "0_refresh"
+        },
+        {
+          "command": "devbelt.mockData",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.truncateTable",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\.(MYSQL|PG)$/",
+          "group": "8_danger"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
+          "group": "9_copy"
+        }
+      ],
+      "devbelt.databaseData": [
+        {
+          "command": "devbelt.compareData",
+          "when": "view == devbelt.explorer && viewItem == database.MYSQL",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.syncDatabase",
+          "when": "view == devbelt.explorer && viewItem == database.MYSQL",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.compareSchema",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.MYSQL$/",
+          "group": "5_tools"
+        },
+        {
+          "command": "devbelt.importData",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.exportConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.restoreDatabase",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "group": "4_data"
+        },
+        {
+          "command": "devbelt.scheduleBackup",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
+          "group": "4_data"
         }
       ]
     },
@@ -2189,15 +2224,46 @@
         },
         "devbelt.sync.items": {
           "type": "object",
-          "default": { "connections": true, "queries": true, "notes": true, "authenticator": true, "aiModelAccess": true },
+          "default": {
+            "connections": true,
+            "queries": true,
+            "notes": true,
+            "authenticator": true,
+            "aiModelAccess": true
+          },
           "description": "Per-machine choice of which entity types sync. Off = not pushed from this machine; incoming changes are parked (not applied) and replayed when re-enabled; local data is kept.",
           "markdownDescription": "选择性同步（按本机生效，不随同步走）：关闭的类型——本机不推送、云端变更暂存不应用（重新打开后自动补齐，无需重拉）、本地数据保留。关闭「连接与分组」时，「保存的查询」与「表注记」随之停用（它们引用连接）。",
           "properties": {
-            "connections": { "type": "boolean", "default": true, "description": "Sync connections and groups.", "markdownDescription": "同步连接与分组。" },
-            "queries": { "type": "boolean", "default": true, "description": "Sync saved queries and folders (requires connections).", "markdownDescription": "同步保存的查询与文件夹（依赖「连接与分组」）。" },
-            "notes": { "type": "boolean", "default": true, "description": "Sync table/column notes (requires connections).", "markdownDescription": "同步表/列注记（依赖「连接与分组」）。" },
-            "authenticator": { "type": "boolean", "default": true, "description": "Sync authenticator entries, groups and tags.", "markdownDescription": "同步验证器条目/分组/标签。" },
-            "aiModelAccess": { "type": "boolean", "default": true, "description": "Sync AI model access settings (the API key still obeys its own per-item toggle).", "markdownDescription": "同步 AI 模型接入配置（API Key 仍受其自身「同步 API Key」开关控制）。" }
+            "connections": {
+              "type": "boolean",
+              "default": true,
+              "description": "Sync connections and groups.",
+              "markdownDescription": "同步连接与分组。"
+            },
+            "queries": {
+              "type": "boolean",
+              "default": true,
+              "description": "Sync saved queries and folders (requires connections).",
+              "markdownDescription": "同步保存的查询与文件夹（依赖「连接与分组」）。"
+            },
+            "notes": {
+              "type": "boolean",
+              "default": true,
+              "description": "Sync table/column notes (requires connections).",
+              "markdownDescription": "同步表/列注记（依赖「连接与分组」）。"
+            },
+            "authenticator": {
+              "type": "boolean",
+              "default": true,
+              "description": "Sync authenticator entries, groups and tags.",
+              "markdownDescription": "同步验证器条目/分组/标签。"
+            },
+            "aiModelAccess": {
+              "type": "boolean",
+              "default": true,
+              "description": "Sync AI model access settings (the API key still obeys its own per-item toggle).",
+              "markdownDescription": "同步 AI 模型接入配置（API Key 仍受其自身「同步 API Key」开关控制）。"
+            }
           },
           "additionalProperties": false
         },
@@ -2350,6 +2416,28 @@
         "command": "devbelt.searchConnections",
         "key": "ctrl+alt+c",
         "mac": "cmd+alt+c"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "devbelt.connectionManage",
+        "label": "%submenu.connectionManage%"
+      },
+      {
+        "id": "devbelt.connectionTools",
+        "label": "%submenu.connectionTools%"
+      },
+      {
+        "id": "devbelt.tableStructure",
+        "label": "%submenu.tableStructure%"
+      },
+      {
+        "id": "devbelt.tableMore",
+        "label": "%submenu.tableMore%"
+      },
+      {
+        "id": "devbelt.databaseData",
+        "label": "%submenu.databaseData%"
       }
     ]
   },

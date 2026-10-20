@@ -3,11 +3,13 @@ import { ref, watch } from 'vue';
 import { useI18n } from '../composables/useI18n';
 import type { HubTab } from '../../../src/result/protocol';
 import AccountView from './AccountView.vue';
+import AccountSyncView from './AccountSyncView.vue';
 import SessionView from './SessionView.vue';
 import PlansView from './PlansView.vue';
+import SecurityView from './SecurityView.vue';
 
 /**
- * 账户中心容器：单面板 + 标签页（账户 / 设备 / 套餐）。
+ * 账户中心容器：单面板 + 标签页（账户 / 同步 / 设备 / 套餐 / 安全）。
  * 仅渲染激活标签的子视图（v-if），使子视图挂载时发 `ready{view}` 拉取各自数据。
  * 标签由根 App.vue 通过 `tab` prop 驱动（init.tab / selectTab 消息）。
  */
@@ -24,8 +26,10 @@ watch(() => props.tab, (v) => { if (v) active.value = v; });
       <button
         v-for="tb in ([
           { id: 'account', label: t('account.title') },
+          { id: 'sync', label: t('account.card.sync') },
           { id: 'session', label: t('sessions.title') },
           { id: 'plans', label: t('plan.title') },
+          { id: 'security', label: t('account.security.title') },
         ] as { id: HubTab; label: string }[])"
         :key="tb.id"
         class="hub-tab"
@@ -35,8 +39,10 @@ watch(() => props.tab, (v) => { if (v) active.value = v; });
     </nav>
     <div class="hub-body">
       <AccountView v-if="active === 'account'" />
+      <AccountSyncView v-else-if="active === 'sync'" />
       <SessionView v-else-if="active === 'session'" />
       <PlansView v-else-if="active === 'plans'" />
+      <SecurityView v-else-if="active === 'security'" />
     </div>
   </div>
 </template>
@@ -44,7 +50,7 @@ watch(() => props.tab, (v) => { if (v) active.value = v; });
 <style scoped>
 .hub { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
 .hub-tabs {
-  display: flex; gap: 4px; padding: 8px 12px 0;
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px 0;
   border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
   background: var(--vscode-editor-background);
 }

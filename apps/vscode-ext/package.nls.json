@@ -162,5 +162,10 @@
   "cmd.redis.deleteKey": "Delete Key",
   "cmd.redis.deleteFolder": "Delete Folder Keys",
   "cmd.redis.deleteByPattern": "Delete Keys by Pattern…",
-  "cmd.redis.newKey": "New Key…"
+  "cmd.redis.newKey": "New Key…",
+  "submenu.connectionManage": "Connection actions…",
+  "submenu.connectionTools": "Data & tools…",
+  "submenu.tableStructure": "Structure…",
+  "submenu.tableMore": "More…",
+  "submenu.databaseData": "Data & operations…"
 }

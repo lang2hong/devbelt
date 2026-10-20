@@ -35,6 +35,7 @@ function makeAuth(overrides: Record<string, unknown> = {}) {
   return {
     isLoggedIn: () => true,
     getMe: vi.fn(async () => ME),
+    currentDeviceId: () => 'd1',
     refreshEntitlement: vi.fn(async () => {}),
     getCachedEntitlement: () => ({ planCode: 'pro' }),
     client: {
@@ -54,7 +55,7 @@ function makeFactory(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
-function makeView(tab: 'account' | 'session' | 'plans', auth = makeAuth(), factory = makeFactory()): any {
+function makeView(tab: 'account' | 'sync' | 'session' | 'plans' | 'security', auth = makeAuth(), factory = makeFactory()): any {
   return new (AccountHubView as any)(auth, factory, tab);
 }
 
@@ -76,10 +77,24 @@ describe('AccountHubView', () => {
     expect(view.post).toHaveBeenCalledWith(expect.objectContaining({ type: 'syncStatus' }));
 
     await view.handleMessage({ type: 'ready', view: 'session' });
-    expect(view.post).toHaveBeenLastCalledWith({ type: 'devices', devices: DEVICES, canRevoke: true });
+    expect(view.post).toHaveBeenLastCalledWith({ type: 'devices', devices: DEVICES, canRevoke: true, currentDeviceId: 'd1' });
 
     await view.handleMessage({ type: 'ready', view: 'plans' });
-    expect(view.post).toHaveBeenLastCalledWith({ type: 'plans', plans: CATALOG, current: 'pro', loggedIn: true });
+    expect(view.post).toHaveBeenLastCalledWith({ type: 'plans', plans: CATALOG, current: 'pro', periodEndTime: null, loggedIn: true });
+  });
+
+  it('sync/security ready reuse account + sync status without new endpoints', async () => {
+    const auth = makeAuth();
+    const view = makeView('sync', auth);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready', view: 'sync' });
+    expect(view.post).toHaveBeenCalledWith({ type: 'me', me: ME });
+    expect(view.post).toHaveBeenCalledWith(expect.objectContaining({ type: 'syncStatus' }));
+
+    const security = makeView('security', auth);
+    await security.handleMessage({ type: 'ready' });
+    await security.handleMessage({ type: 'ready', view: 'security' });
+    expect(security.post).toHaveBeenCalledWith({ type: 'me', me: ME });
   });
 
   it('initial tab is delivered in init', async () => {

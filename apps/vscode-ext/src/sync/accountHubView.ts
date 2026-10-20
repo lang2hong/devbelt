@@ -30,6 +30,10 @@ const ACTION_COMMANDS = new Set<string>([
   'devbelt.recoverSync',
   'devbelt.recoverByAccount',
   'devbelt.resetSync',
+  'devbelt.resetLocalSync',
+  'devbelt.destroySync',
+  'devbelt.syncDoctor',
+  'devbelt.authenticator',
   'devbelt.syncNow',
   'devbelt.syncPull',
   'devbelt.syncPush',
@@ -86,6 +90,7 @@ export class AccountHubView extends BaseWebView {
       // 标签子视图挂载后按 view 请求数据。
       if (msg.view === 'session') { await this.sendSession(); return; }
       if (msg.view === 'plans') { await this.sendPlans(); return; }
+      // sync / security 也只需要账户+同步状态；Security 页本身只触发命令。
       await this.sendAccount();
       return;
     }
@@ -150,7 +155,7 @@ export class AccountHubView extends BaseWebView {
     try {
       void this.auth.refreshEntitlement();
       const { devices } = await this.auth.client.listDevices();
-      this.post({ type: 'devices', devices, canRevoke: true });
+      this.post({ type: 'devices', devices, canRevoke: true, currentDeviceId: this.auth.currentDeviceId() });
     } catch (e) {
       this.post({ type: 'error', message: (e as Error).message });
     }
@@ -163,10 +168,17 @@ export class AccountHubView extends BaseWebView {
       return;
     }
     try {
-      await this.auth.refreshEntitlement();
+      let current = this.auth.getCachedEntitlement()?.planCode ?? 'free';
+      let periodEndTime: string | null = null;
+      try {
+        const me = await this.auth.getMe();
+        current = me.subscription?.planCode ?? current;
+        periodEndTime = me.subscription?.periodEndTime ?? null;
+      } catch {
+        // /me 失败不阻断套餐目录；保留缓存套餐。
+      }
       const plans = await this.auth.client.getPlans();
-      const current = this.auth.getCachedEntitlement()?.planCode ?? 'free';
-      this.post({ type: 'plans', plans, current, loggedIn: true });
+      this.post({ type: 'plans', plans, current, periodEndTime, loggedIn: true });
     } catch (e) {
       this.post({ type: 'error', message: (e as Error).message });
     }

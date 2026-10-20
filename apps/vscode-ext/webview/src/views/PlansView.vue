@@ -3,6 +3,7 @@ import { computed, onMounted, ref, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import { featureLabel, formatFeature, formatPrice, type PlanCatalog, type PlanDto } from '../utils/planFeatures';
+import { formatDateTime } from '../utils/formatTime';
 
 /**
  * 套餐面板：展示个人套餐目录与当前个人套餐，升级跳浏览器控制台。
@@ -17,8 +18,10 @@ const { t } = useI18n();
 const state = ref<'loading' | 'ready' | 'error' | 'loginRequired'>('loading');
 const catalog = ref<PlanCatalog | null>(null);
 const current = ref<string>('free');
+const periodEndTime = ref<string | null>(null);
 
 const personal = computed<PlanDto[]>(() => catalog.value?.personal ?? []);
+const currentPlan = computed<PlanDto | null>(() => personal.value.find((p) => p.code === current.value) ?? null);
 
 function isCurrent(plan: PlanDto): boolean {
   return plan.code === (current.value || 'free');
@@ -42,6 +45,7 @@ onMounted(() => {
       }
       catalog.value = msg.plans;
       current.value = msg.current ?? 'free';
+      periodEndTime.value = typeof msg.periodEndTime === 'string' ? msg.periodEndTime : null;
       state.value = 'ready';
     } else if (msg.type === 'error') {
       state.value = 'error';
@@ -62,6 +66,10 @@ onUnmounted(() => { __offMsg?.(); });
     <p v-else-if="state === 'loginRequired'" class="muted">{{ t('plan.loginRequired') }}</p>
 
     <template v-else>
+      <p class="summary">
+        {{ t('plan.current') }}：<b>{{ currentPlan?.name ?? current }}</b>
+        <span v-if="periodEndTime"> · {{ t('plan.expires') }} {{ formatDateTime(periodEndTime) }}</span>
+      </p>
       <h3 class="section">{{ t('plan.section.personal') }}</h3>
       <div class="grid">
         <div v-for="plan in personal" :key="plan.code" class="card" :class="{ current: isCurrent(plan) }">
@@ -89,6 +97,8 @@ onUnmounted(() => { __offMsg?.(); });
 h2 { font-size: 18px; font-weight: 700; color: var(--vscode-foreground); margin: 0 0 4px; }
 .section { font-size: 14px; font-weight: 600; color: var(--vscode-foreground); margin: 20px 0 10px; }
 .intro { margin: 0 0 8px; }
+.summary { margin: 8px 0 0; font-size: 13px; color: var(--vscode-descriptionForeground); }
+.summary b { color: var(--vscode-foreground); }
 .note { margin: 0 0 10px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .card { border: 1px solid var(--vscode-panel-border, #444); border-radius: 8px; padding: 14px 16px; }

@@ -27,9 +27,21 @@ interface DeviceItem {
 
 const devices = ref<DeviceItem[]>([]);
 const canRevoke = ref(true);
+const currentDeviceId = ref<string | null>(null);
+const pendingRevoke = ref<DeviceItem | null>(null);
 const errorMsg = ref('');
 
 const boundCount = computed(() => devices.value.filter((d) => d.status === 'active').length);
+const sortedDevices = computed(() => [...devices.value].sort((a, b) => {
+  if (a.deviceId === currentDeviceId.value) return -1;
+  if (b.deviceId === currentDeviceId.value) return 1;
+  if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+  return (b.lastUsedTime ?? '').localeCompare(a.lastUsedTime ?? '');
+}));
+
+function isCurrent(d: DeviceItem): boolean {
+  return !!currentDeviceId.value && d.deviceId === currentDeviceId.value;
+}
 
 function isBound(d: DeviceItem): boolean {
   return d.status === 'active';
@@ -42,8 +54,15 @@ function osInitial(d: DeviceItem): string {
   return ((d.devicePlatform || '?')[0] || '?').toUpperCase();
 }
 
-function revoke(deviceId: string) {
-  post({ type: 'revoke', deviceId });
+function revoke(d: DeviceItem): void {
+  pendingRevoke.value = d;
+}
+
+function confirmRevoke(): void {
+  const d = pendingRevoke.value;
+  if (!d) return;
+  pendingRevoke.value = null;
+  post({ type: 'revoke', deviceId: d.deviceId });
 }
 
 onMounted(() => {
@@ -52,6 +71,7 @@ onMounted(() => {
     if (msg.type === 'devices') {
       devices.value = msg.devices ?? [];
       canRevoke.value = msg.canRevoke !== false;
+      currentDeviceId.value = typeof msg.currentDeviceId === 'string' ? msg.currentDeviceId : null;
       errorMsg.value = '';
     } else if (msg.type === 'error') {
       errorMsg.value = msg.message;
@@ -72,11 +92,12 @@ onUnmounted(() => { __offMsg?.(); });
     </header>
 
     <div class="devices" v-if="devices.length">
-      <div v-for="d in devices" :key="d.deviceId" class="device">
+      <div v-for="d in sortedDevices" :key="d.deviceId" class="device" :class="{ current: isCurrent(d) }">
         <div class="d-icon">{{ osInitial(d) }}</div>
         <div class="d-body">
           <div class="d-top">
             <span class="d-name">{{ d.deviceName || d.deviceId }}</span>
+            <span v-if="isCurrent(d)" class="tag current-tag">{{ t('sessions.current') }}</span>
             <span class="tag" :class="isBound(d) ? 'bound' : 'unbound'">
               {{ isBound(d) ? t('sessions.bound') : t('sessions.unbound') }}
             </span>
@@ -85,7 +106,12 @@ onUnmounted(() => { __offMsg?.(); });
           <div v-if="d.lastUsedTime" class="d-last">{{ t('sessions.lastUsed') }} · {{ formatDateTime(d.lastUsedTime) }}</div>
         </div>
         <div class="d-action">
-          <button v-if="canRevoke" class="revoke-btn" @click="revoke(d.deviceId)">{{ t('sessions.kick') }}</button>
+          <button v-if="canRevoke && !isCurrent(d)" class="revoke-btn" @click="revoke(d)">{{ t('sessions.kick') }}</button>
+        </div>
+        <div v-if="pendingRevoke?.deviceId === d.deviceId" class="confirm">
+          <span>{{ t('sessions.revokeConfirm') }}</span>
+          <button class="revoke-btn" @click="confirmRevoke">{{ t('sessions.kick') }}</button>
+          <button class="cancel-btn" @click="pendingRevoke = null">{{ t('wv.common.cancel') }}</button>
         </div>
       </div>
     </div>
@@ -100,9 +126,9 @@ onUnmounted(() => { __offMsg?.(); });
 .title { font-size: 16px; font-weight: 600; }
 .sub { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 3px; }
 
-.devices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.devices { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
 .device {
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18));
   border-radius: 8px; padding: 14px 16px;
   background: var(--vscode-editor-background);
@@ -120,6 +146,8 @@ onUnmounted(() => { __offMsg?.(); });
 .d-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .d-name { font-weight: 600; font-size: 13px; }
 .tag { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; line-height: 1.4; }
+.device.current { border-color: var(--vscode-focusBorder, #007acc); }
+.current-tag { color: var(--vscode-focusBorder, #007acc); border: 1px solid var(--vscode-focusBorder, #007acc); }
 .tag.bound { color: var(--vscode-testing-iconPassed-color, #4ec9b0); border: 1px solid var(--vscode-testing-iconPassed-color, #4ec9b0); }
 .tag.unbound { color: var(--vscode-descriptionForeground); border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.18)); }
 
@@ -134,6 +162,8 @@ onUnmounted(() => { __offMsg?.(); });
 }
 .revoke-btn:hover { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
 
+.confirm { flex-basis: 100%; display: flex; align-items: center; gap: 8px; justify-content: flex-end; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.cancel-btn { padding: 5px 12px; border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4)); background: transparent; color: var(--vscode-foreground); border-radius: 6px; cursor: pointer; font-size: 12px; }
 .empty { color: var(--vscode-descriptionForeground); text-align: center; padding: 32px 0; font-size: 13px; }
 .err { color: var(--vscode-errorForeground); font-size: 12px; margin-top: 10px; }
 </style>
