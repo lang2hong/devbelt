@@ -466,6 +466,35 @@ describe('SyncEngine', () => {
     expect(outbox.list()[0].consecutiveFailureCount).toBe(1);
   });
 
+  it('鉴权失败（401）→ terminal，不消耗重试次数、不进入 pull', async () => {
+    const m = putMutation();
+    const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(401); }) });
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(m);
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.reason).toBe('authentication expired');
+    expect(outbox.list()[0].consecutiveFailureCount).toBe(0);
+    expect(client.getRecords).not.toHaveBeenCalled();
+  });
+
+  it('getState 401 → terminal（不再当临时故障重试）', async () => {
+    const client = clientWith({ getState: vi.fn(async () => { throw new SyncApiError(401); }) });
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.reason).toBe('authentication expired');
+  });
+
+  it('getRecords 401 → terminal', async () => {
+    const client = clientWith({ getRecords: vi.fn(async () => { throw new SyncApiError(401); }) });
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox: new PendingMutationStore(makeMemento(), '7', '1') });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.reason).toBe('authentication expired');
+  });
+
   it('failure-count 落盘失败 → error（结构化），保留条目，不进 pull', async () => {
     const m = putMutation();
     const client = clientWith({ putRecordSigned: vi.fn(async () => { throw new SyncApiError(500); }) });

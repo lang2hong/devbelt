@@ -67,7 +67,8 @@ export interface SyncConflictEntry {
 }
 
 export interface SyncTerminalEntry {
-  mutationId: string;
+  /** 出站 mutation 触发时携带；getState/feed 的鉴权终止没有 mutation。 */
+  mutationId?: string;
   code?: string;
   currentKeyEpoch?: string;
 }
@@ -160,10 +161,18 @@ class FeedProtocolError extends Error {
   }
 }
 
-type ErrorClass = 'terminal' | 'terminal-state' | 'terminal-epoch' | 'conflict' | 'retryable';
+type ErrorClass = 'terminal' | 'terminal-state' | 'terminal-epoch' | 'terminal-auth' | 'conflict' | 'retryable';
+
+/** 鉴权失败（refresh 已由 SyncClient 尝试过；仍 401/403 即会话不可恢复）。 */
+function isAuthError(err: unknown): err is SyncApiError {
+  return err instanceof SyncApiError && (err.status === 401 || err.status === 403);
+}
 
 /** §7.4 重放与错误处置分类表。 */
 function classifyError(e: SyncApiError): ErrorClass {
+  // 鉴权失败不是临时故障：当成 retryable 会把「登录已过期」拖成连续 5 轮失败后 stalled，
+  // 用户只看到笼统的「同步已暂停」。直接终止本轮，等会话层登出/重登后重建。
+  if (e.status === 401 || e.status === 403) return 'terminal-auth';
   switch (e.code) {
     case 'SYNC_PROTOCOL_UNSUPPORTED':
     case 'SYNC_SIGNATURE_INVALID':
@@ -518,6 +527,9 @@ export class SyncEngine {
     try {
       remoteState = this.parseState(await this.deps.client.getState());
     } catch (err) {
+      if (isAuthError(err)) {
+        return { stage: 'terminal', conflicts: [], applied: 0, terminal: { code: (err as SyncApiError).code }, reason: 'authentication expired' };
+      }
       return { stage: 'error', conflicts: [], applied: 0, reason: `getState failed: ${describe(err)}` };
     }
 
@@ -579,7 +591,7 @@ export class SyncEngine {
       } catch (err) {
         if (err instanceof SyncApiError) {
           const cls = classifyError(err);
-          if (cls === 'terminal' || cls === 'terminal-state' || cls === 'terminal-epoch') {
+          if (cls === 'terminal' || cls === 'terminal-state' || cls === 'terminal-epoch' || cls === 'terminal-auth') {
             if (err.code === 'SYNC_QUOTA_EXCEEDED') {
               // P6 §六：按类型配额拒绝 → 标记本地实体 localOnly/quota（不静默循环；终态已停重试）。
               try { await this.deps.onQuotaRejected?.({ type: m.type, localId: m.localId }); } catch { /* 回调失败不改变终态 */ }
@@ -587,9 +599,11 @@ export class SyncEngine {
             return {
               stage: 'terminal', conflicts, applied: 0,
               terminal: { mutationId: m.mutationId, code: err.code, currentKeyEpoch: err.currentKeyEpoch },
-              reason: cls === 'terminal-state'
-                ? 'outbox mutation requires init / epoch handling'
-                : cls === 'terminal-epoch' ? 'outbox mutation epoch stale' : undefined,
+              reason: cls === 'terminal-auth'
+                ? 'authentication expired'
+                : cls === 'terminal-state'
+                  ? 'outbox mutation requires init / epoch handling'
+                  : cls === 'terminal-epoch' ? 'outbox mutation epoch stale' : undefined,
             };
           }
           // B4：持久化冲突（密文暂缺），跳过 push 继续 pull —— pull 会带回远端版本，
@@ -710,6 +724,9 @@ export class SyncEngine {
       try {
         page = this.parsePage(await this.deps.client.getRecords(requested, remoteSnap, limit));
       } catch (err) {
+        if (isAuthError(err)) {
+          return { stage: 'terminal', conflicts, stalled, applied, changeSequence: lastCommitted, terminal: { code: (err as SyncApiError).code }, reason: 'authentication expired' };
+        }
         if (err instanceof FeedProtocolError) {
           return { stage: 'terminal', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `feed protocol unsupported: ${describe(err)}` };
         }

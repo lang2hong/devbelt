@@ -13,6 +13,7 @@ vi.mock('vscode', () => ({
 vi.mock('../../src/utils/diagnostics', () => ({ diagInfo: vi.fn(), diagWarn: vi.fn(), diagError: vi.fn() }));
 
 import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, syncNowPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
+import { diagError } from '../../src/utils/diagnostics';
 import { SyncApiError } from '@devbelt/db-host/sync/e2e/client';
 import type { InitialSyncMaterial } from '@devbelt/db-host/sync/keyLifecycle';
 import type { StateDto } from '@devbelt/db-host/sync/e2e/types';
@@ -157,6 +158,26 @@ describe('personal sync B1 commands', () => {
     expect(info).toHaveBeenCalledWith('Personal sync unlocked automatically (no passphrase needed).');
   });
 
+  it('unlock: 本地 DEK 可用时先解锁，不等待 /api/db/me', async () => {
+    const session = makeSession({ tryRestoreUnlock: vi.fn(async () => true) });
+    const { deps, info } = makeDeps(session, []);
+    await unlockPersonalSync(deps);
+
+    expect(deps.factory.ensureSession).toHaveBeenCalledBefore(deps.auth.refreshEntitlement as any);
+    // 不需要拉远端 state 就能自动解锁（离线可用）
+    expect(session.getRemoteState).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Personal sync unlocked automatically (no passphrase needed).');
+  });
+
+  it('syncEntry: 本地 DEK 可用 → 自动解锁，不探测远端', async () => {
+    const session = makeSession({ tryRestoreUnlock: vi.fn(async () => true) });
+    const { deps, info } = makeDeps(session, []);
+    await syncEntry(deps);
+
+    expect(session.getRemoteState).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('Personal sync unlocked automatically (no passphrase needed).');
+  });
+
   it('unlock 检出不一致：通知用户去面板处理（带「查看」按钮）', async () => {
     const session = makeSession({
       tryRestoreUnlock: vi.fn(async () => true),
@@ -187,7 +208,9 @@ describe('personal sync B1 commands', () => {
 
     await unlockPersonalSync(deps);
 
-    expect(deps.auth.refreshEntitlement).toHaveBeenCalledBefore(deps.factory.ensureSession as any);
+    expect(deps.factory.ensureSession).toHaveBeenCalled();
+    // 本地优先：先建会话，权益刷新放后台（不阻塞解锁）
+    expect(deps.factory.ensureSession).toHaveBeenCalledBefore(deps.auth.refreshEntitlement as any);
     expect(deps.unlockDek).toHaveBeenCalledWith('7', '1', 'sync secret!', state);
     expect(session.unlockFromState).toHaveBeenCalledWith(state, expect.any(Uint8Array));
     expect(session.syncNow).not.toHaveBeenCalled(); // 解锁是纯解锁：不自动同步
@@ -217,12 +240,14 @@ describe('personal sync B1 commands', () => {
     const encrypted = makeSession();
     const second = makeDeps(encrypted, ['wrong secret']);
     second.deps.unlockDek = vi.fn(async () => { throw new Error('GCM authentication failed'); });
+    vi.mocked(diagError).mockClear();
     await unlockPersonalSync(second.deps);
-    // 诊断补丁：弹窗文案附加真实错误原因（括号内），便于区分"口令错"与"落盘/其它故障"。
+    // 弹窗只给用户可理解的原因；真实错误只进诊断日志。
     expect(second.errorAction).toHaveBeenCalledWith(
-      'Sync passphrase mismatch. It may have been changed on another device.\n(GCM authentication failed)',
+      'Sync passphrase mismatch. It may have been changed on another device.',
       ['Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync'],
     );
+    expect(diagError).toHaveBeenCalledWith('sync unlock failed: GCM authentication failed');
     expect(encrypted.unlockFromState).not.toHaveBeenCalled();
     expect(encrypted.syncNow).not.toHaveBeenCalled();
   });
@@ -303,7 +328,7 @@ describe('personal sync B1 commands', () => {
 
     await unlockPersonalSync(deps);
 
-    expect(errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.\n(gcm)', [
+    expect(errorAction).toHaveBeenCalledWith('Sync passphrase mismatch. It may have been changed on another device.', [
       'Re-enter', 'Use Recovery Code', 'Use Account', 'Reset Sync', 'Reset Local Sync',
     ]);
     expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.recoverSync');

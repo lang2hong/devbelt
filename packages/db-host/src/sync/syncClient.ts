@@ -28,6 +28,21 @@ export const syncFetch: { impl: typeof undiciFetch } = { impl: undiciFetch };
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;
+  /** 登录响应携带的账户身份（旧服务端可能缺省，缺省时由 /api/db/me 补齐）。 */
+  user?: { userId: string };
+}
+
+/**
+ * refresh 被服务端明确拒绝（401/403）或本地已无 refresh token。
+ *
+ * 与网络错误/5xx 区分：只有这个错误代表会话不可恢复，调用方应清理本地登录态；
+ * 网络抖动不能把用户登出。
+ */
+export class AuthExpiredError extends Error {
+  constructor(readonly status: number) {
+    super(status === 0 ? 'no refresh token' : `Refresh rejected: ${status}`);
+    this.name = 'AuthExpiredError';
+  }
 }
 
 /** 设备信息（登录/刷新时通过 header 上报；deviceId 为同设备判同键） */
@@ -128,6 +143,13 @@ export class SyncClient {
     private readonly device?: DeviceInfo,
     /** fetch 实现可注入（测试 mock 用；默认 undici 包 fetch，绕过 VS Code 对 globalThis.fetch 的代理包装） */
     private readonly fetchImpl: typeof undiciFetch = syncFetch.impl,
+    /**
+     * refresh 被明确拒绝（401/403）或本地无 refresh token 时回调。
+     * 参数为本次尝试使用的 refresh token：调用方可据此判断存储是否已被
+     * 另一窗口轮换/重登，避免误删刚签发的新会话。
+     * 网络错误 / 5xx 不触发，避免把临时故障误判成登录失效。
+     */
+    private readonly onAuthExpired?: (failedRefreshToken?: string) => void | Promise<void>,
   ) {}
 
   /**
@@ -167,18 +189,41 @@ export class SyncClient {
   async refresh(): Promise<{ accessToken: string; refreshToken: string }> {
     // await：getRefreshToken 会去读 SecretStorage，拿的是跨窗口的最新值
     const rt = await this.getRefreshToken();
-    if (!rt) throw new Error('no refresh token');
+    if (!rt) {
+      // 没有 refresh token 就无法续期：通知上层清掉残留 access，避免「界面已登录、请求全 401」。
+      await this.onAuthExpired?.();
+      throw new AuthExpiredError(0);
+    }
     const res = await this.fetchImpl(`${this.baseUrl}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: rt, ...this.deviceFields() }),
       dispatcher: directAgent,
     } as any);
-    if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        await this.onAuthExpired?.(rt);
+        throw new AuthExpiredError(res.status);
+      }
+      throw new Error(`Refresh failed: ${res.status}`);
+    }
     const body = (await res.json()) as { accessToken: string; refreshToken: string };
     // await：轮换结果必须在本次调用返回前落盘，否则其他窗口仍会读到旧 token
     await this.onTokensRefreshed?.(body.accessToken, body.refreshToken);
     return body;
+  }
+
+  /**
+   * 单飞刷新入口（AI / 显式刷新 / 401 重试共用）。
+   *
+   * 与直接调用 `refresh()` 的区别：并发调用共享同一个 in-flight promise，
+   * 不会拿同一个一次性 refresh token 并发打服务端。
+   *
+   * @param tokenAtRequestTime 调用方看到的 access token；若期间已被其他请求刷新，
+   *   直接返回 true，不再重复轮换。
+   */
+  async refreshOnce(tokenAtRequestTime: string | undefined = this.getAccessToken()): Promise<boolean> {
+    return this.tryRefresh(tokenAtRequestTime);
   }
 
   /** 登出（撤销当前 refresh token） */

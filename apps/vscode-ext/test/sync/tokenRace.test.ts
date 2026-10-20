@@ -177,6 +177,31 @@ describe('多窗口共享 SecretStorage 时的 refresh 轮换', () => {
     expect(windowB.isLoggedIn()).toBe(false);
   });
 
+  it('错过 onDidChange 的窗口在另一窗口登出后不得复活已删除的 refresh token', async () => {
+    const secrets = createSharedSecrets();
+    await secrets.store(ACCESS_KEY, 'A1');
+    await secrets.store(REFRESH_KEY, 'R1');
+    installServerStub();
+
+    const windowA = new AuthService(secrets as any, 'http://localhost:3000');
+    const windowB = new AuthService(secrets as any, 'http://localhost:3000');
+    await windowA.init();
+    await windowB.init();
+    // 模拟休眠/Remote-SSH 窗口错过 SecretStorage 变更：dispose 后 B 仍持有内存里的 R1，
+    // 但共享存储中的 token 已被 A 删除。
+    windowB.dispose();
+
+    await windowA.logout();
+    fetchCalls = [];
+
+    // 旧实现会回退到内存 R1 并发起刷新（随后命中服务端复用检测）；
+    // 现实现必须直接判定为无 token，不发任何 refresh 请求。
+    await windowB.refreshTokens();
+
+    expect(fetchCalls.filter((c) => c.url.endsWith('/api/auth/refresh'))).toHaveLength(0);
+    expect(windowB.isLoggedIn()).toBe(false);
+  });
+
   it('dispose 后不再接收变更（不泄漏监听器）', async () => {
     const secrets = createSharedSecrets();
     await secrets.store(REFRESH_KEY, 'R1');

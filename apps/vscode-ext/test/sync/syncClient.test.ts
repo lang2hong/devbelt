@@ -34,7 +34,10 @@ function jsonRes(status: number, body: unknown = {}): Response {
  * 造一个 client + 可编程的 fetch。
  * token 存在闭包里，模拟 AuthService 的 getter/setter 行为。
  */
-function setup(handler: (call: Call, n: number) => Response | Promise<Response>) {
+function setup(
+  handler: (call: Call, n: number) => Response | Promise<Response>,
+  opts: { onAuthExpired?: () => void | Promise<void> } = {},
+) {
   const calls: Call[] = [];
   let access: string | undefined = 'access-1';
   let refreshTok: string | undefined = 'refresh-1';
@@ -58,6 +61,7 @@ function setup(handler: (call: Call, n: number) => Response | Promise<Response>)
     (a, r) => { access = a; refreshTok = r; },
     undefined,
     fetchMock as any,
+    opts.onAuthExpired,
   );
 
   return {
@@ -101,6 +105,39 @@ describe('401 自动刷新', () => {
     expect(t.calls.filter(isRefresh)).toHaveLength(1);
     // 业务请求只发了一次（没有拿旧 token 白重试）
     expect(t.calls.filter((c) => !isRefresh(c))).toHaveLength(1);
+  });
+
+  it('refresh 返回 401 时通知会话失效（只通知一次）', async () => {
+    const onAuthExpired = vi.fn();
+    const t = setup((c) => (isRefresh(c) ? jsonRes(401) : jsonRes(401)), { onAuthExpired });
+
+    await expect(t.client.getMe()).rejects.toThrow(/401/);
+    expect(onAuthExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('refresh 网络错误不通知会话失效', async () => {
+    const onAuthExpired = vi.fn();
+    const t = setup((c) => {
+      if (isRefresh(c)) throw new Error('network down');
+      return jsonRes(401);
+    }, { onAuthExpired });
+
+    await expect(t.client.getMe()).rejects.toThrow();
+    expect(onAuthExpired).not.toHaveBeenCalled();
+  });
+
+  it('refreshOnce 并发调用共用一次刷新', async () => {
+    let refreshCount = 0;
+    const t = setup((c) => {
+      if (isRefresh(c)) {
+        refreshCount += 1;
+        return jsonRes(200, { accessToken: 'access-2', refreshToken: 'refresh-2' });
+      }
+      return jsonRes(200);
+    });
+
+    await Promise.all([t.client.refreshOnce(), t.client.refreshOnce()]);
+    expect(refreshCount).toBe(1);
   });
 });
 

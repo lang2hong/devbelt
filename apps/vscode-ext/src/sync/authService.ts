@@ -86,6 +86,8 @@ export class AuthService {
   private static readonly ACCESS_TOKEN_KEY = 'devbelt.auth.accessToken';
   private static readonly REFRESH_TOKEN_KEY = 'devbelt.auth.refreshToken';
   private static readonly USER_EMAIL_KEY = 'devbelt.auth.email';
+  /** 规范 userId：解锁时用它定位本地 sync state/DEK，避免重启后必须联网拉 /api/db/me。 */
+  private static readonly USER_ID_KEY = 'devbelt.auth.userId';
   private static readonly ENTITLEMENT_CACHE_KEY = 'devbelt.sync.cachedEntitlement';
 
   /** 同步客户端（token 通过 getter 实时读取） */
@@ -99,10 +101,22 @@ export class AuthService {
   private cachedUserId?: string;
   /** 认证身份变更计数：login/logout 递增。用于丢弃飞行中 /api/db/me 的过期结果（换号/登出竞态）。 */
   private authGeneration = 0;
+  /** 刷新被拒后的清理幂等标记：并发 401 只清一次、只广播一次 logout。 */
+  private authExpiredHandled = false;
 
-  /** 读取当前用户规范 userId；缓存到内存，登出清空。 */
+  /**
+   * 读取当前用户规范 userId；内存 → 持久化 → /api/db/me。
+   *
+   * 持久化这一层是离线/弱网解锁的前提：本地 DEK 以 `<userId>.<epoch>` 为 key，
+   * 重启后若必须先联网拿 userId，断网时即使 DEK 还在也解不了锁。
+   */
   async getUserId(): Promise<string> {
     if (this.cachedUserId) return this.cachedUserId;
+    const stored = await this.secrets.get(AuthService.USER_ID_KEY);
+    if (stored) {
+      this.cachedUserId = stored;
+      return stored;
+    }
     const me = await this.getMe();
     return me.user.userId;
   }
@@ -158,6 +172,9 @@ export class AuthService {
       maxAiTokensMonthly: sub?.entitlement?.maxAiTokensMonthly ?? 0,
     });
     this.cachedUserId = me.user.userId;
+    try {
+      await this.secrets.store(AuthService.USER_ID_KEY, me.user.userId);
+    } catch { /* 缓存失败不影响本次请求；下次 me 会再写 */ }
     return me;
   }
 
@@ -192,12 +209,15 @@ export class AuthService {
       async (access, refresh) => {
         this.accessToken = access;
         this.refreshToken = refresh;
+        this.authExpiredHandled = false;
         // 必须 await：轮换结果要在下一次刷新读取之前落盘，否则另一个窗口
         // 仍可能读到旧值。原实现用 void，存在写入未完成的窗口。
         await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, access);
         await this.secrets.store(AuthService.REFRESH_TOKEN_KEY, refresh);
       },
       buildDeviceInfo(),
+      undefined,
+      (failedRefreshToken) => this.handleAuthExpired(failedRefreshToken),
     );
 
     // 每个 VS Code 窗口是独立扩展宿主进程，各有一份 AuthService，共享同一个
@@ -208,7 +228,11 @@ export class AuthService {
       if (e.key === AuthService.ACCESS_TOKEN_KEY) {
         void this.secrets.get(AuthService.ACCESS_TOKEN_KEY).then((v) => { this.accessToken = v; });
       } else if (e.key === AuthService.REFRESH_TOKEN_KEY) {
-        void this.secrets.get(AuthService.REFRESH_TOKEN_KEY).then((v) => { this.refreshToken = v; });
+        void this.secrets.get(AuthService.REFRESH_TOKEN_KEY).then((v) => {
+          this.refreshToken = v;
+          // 另一窗口重新登录/轮换后，本窗口应允许再次在 401 时执行清理
+          if (v) this.authExpiredHandled = false;
+        });
       }
       // 跨窗口 token 变更可能代表换号（另一窗口 A→B）：使飞行中的 /api/db/me 失效并清除
       // 派生身份缓存，避免账户 A 的权益/ userId 落进已持账户 B token 的本实例。
@@ -232,6 +256,14 @@ export class AuthService {
   async init(): Promise<void> {
     this.accessToken = await this.secrets.get(AuthService.ACCESS_TOKEN_KEY);
     this.refreshToken = await this.secrets.get(AuthService.REFRESH_TOKEN_KEY);
+    // 只有 access、没有 refresh：无法续期，不能算登录态。旧版本/半写残留会在
+    // 15 分钟后变成「界面已登录、所有请求 401」的僵尸态。只清内存、不删存储：
+    // 另一窗口可能正处在「先存 access、再存 refresh」之间，删掉会破坏它的登录。
+    if (!this.refreshToken) {
+      this.accessToken = undefined;
+      return;
+    }
+    this.authExpiredHandled = false;
     if (this.accessToken) void this.refreshEntitlement();
   }
 
@@ -248,13 +280,16 @@ export class AuthService {
    */
   private async readRefreshToken(): Promise<string | undefined> {
     const stored = await this.secrets.get(AuthService.REFRESH_TOKEN_KEY);
-    if (stored !== undefined) this.refreshToken = stored;
-    return stored ?? this.refreshToken;
+    // 必须把 undefined 也写回内存：另一窗口登出会删除该 key，若这里回退到内存值，
+    // 休眠/Remote-SSH 等错过 onDidChange 的窗口会一直用已删除的 token 刷新，
+    // 服务端判定复用后整个 family 被吊销 —— 这就是「隔几天必须重新登录」的根因。
+    this.refreshToken = stored;
+    return stored;
   }
 
-  /** 是否已登录（有 access token） */
+  /** 是否已登录（access + refresh 同时存在；只有 access 无法续期，不算登录态） */
   isLoggedIn(): boolean {
-    return !!this.accessToken;
+    return !!this.accessToken && !!this.refreshToken;
   }
 
   /** 读取当前 access token（供管理员面板外部打开时注入） */
@@ -263,18 +298,41 @@ export class AuthService {
   }
 
   /**
+   * refresh 被服务端拒绝（401/403）或本地已无 refresh token：会话不可恢复。
+   *
+   * 清掉本地凭据并广播 logout，让状态栏/同步会话立即失效。网络错误不会走到这里，
+   * 因此不会把临时断网误判成登录过期。幂等：并发 401 只处理一次。
+   */
+  private async handleAuthExpired(failedRefreshToken?: string): Promise<void> {
+    if (this.authExpiredHandled) return;
+    // 另一窗口可能已经轮换或重新登录：存储里已不是失败的那个 token 时，
+    // 只同步内存，不删除刚签发的新会话。
+    const stored = await this.secrets.get(AuthService.REFRESH_TOKEN_KEY);
+    if (failedRefreshToken && stored && stored !== failedRefreshToken) {
+      this.refreshToken = stored;
+      return;
+    }
+    this.authExpiredHandled = true;
+    this.accessToken = undefined;
+    this.refreshToken = undefined;
+    this.invalidateCachedIdentity();
+    try {
+      await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
+      await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
+      await this.secrets.delete(AuthService.USER_EMAIL_KEY);
+      await this.secrets.delete(AuthService.USER_ID_KEY);
+    } catch { /* SecretStorage 删除失败不应阻断登出 */ }
+    void eventBus.publish(new AuthEvent('logout'));
+  }
+
+  /**
    * 用 refresh token 换新 access（P9 修复：AI 请求 401 时自动续期一次）。
-   * 复用 `SyncClient.refresh` 的单飞/轮换/`onTokensRefreshed` 回存语义
-   * （refresh token 一次性，并发只能有一个刷新在飞）；失败返回 undefined，
-   * 调用方按"需重新登录"处理。
+   * 走 `SyncClient.refreshOnce` 的单飞路径：AI/同步/显式刷新并发时只轮换一次。
+   * 失败返回 undefined，调用方按"需重新登录"处理。
    */
   async refreshAccessToken(): Promise<string | undefined> {
-    try {
-      const result = await this.client.refresh();
-      return result.accessToken;
-    } catch {
-      return undefined;
-    }
+    const ok = await this.client.refreshOnce(this.accessToken);
+    return ok ? this.accessToken : undefined;
   }
 
   /** 注册并登录 */
@@ -308,10 +366,12 @@ export class AuthService {
     }
     this.accessToken = undefined;
     this.refreshToken = undefined;
+    this.authExpiredHandled = false;
     this.invalidateCachedIdentity();
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
+    await this.secrets.delete(AuthService.USER_ID_KEY);
     void eventBus.publish(new AuthEvent('logout'));
   }
 
@@ -322,7 +382,7 @@ export class AuthService {
 
   /** 手动刷新 token（测试用；生产路径由 401 自动刷新处理） */
   async refreshTokens(): Promise<void> {
-    await this.client.refresh();
+    await this.client.refreshOnce(this.accessToken);
   }
 
   /** 获取当前登录邮箱（用于展示） */
@@ -332,6 +392,15 @@ export class AuthService {
 
   private async saveSession(result: AuthResult, email: string): Promise<void> {
     this.authGeneration += 1;
+    this.authExpiredHandled = false;
+    // userId 先于 token 落盘：另一窗口在轮换/换号时先看到新 userId，再看到新 token，
+    // 避免「新 token + 旧 userId」把同步会话建到上一个账户。
+    if (result.user?.userId) {
+      this.cachedUserId = result.user.userId;
+      try {
+        await this.secrets.store(AuthService.USER_ID_KEY, result.user.userId);
+      } catch { /* 下次 getMe 会补写 */ }
+    }
     this.accessToken = result.accessToken;
     this.refreshToken = result.refreshToken;
     await this.secrets.store(AuthService.ACCESS_TOKEN_KEY, result.accessToken);

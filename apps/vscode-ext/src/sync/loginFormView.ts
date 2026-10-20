@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
+import { diagError } from '../utils/diagnostics';
 import type { AuthService } from './authService';
 
 /**
@@ -107,7 +108,9 @@ export class LoginFormView extends BaseWebView {
     const e = err as Error & { cause?: { code?: string; message?: string } };
     const cause = e.cause ? [e.cause.code, e.cause.message].filter(Boolean).join(': ') : '';
     const m = e.message || l10n('login.fail');
-    this.post({ type: 'error', message: cause ? `${m} [${cause}]` : m });
+    // 内部原因只进诊断通道，弹窗只给用户可理解的失败文案。
+    if (cause) diagError(`login failed: ${m} (${cause})`);
+    this.post({ type: 'error', message: m });
   }
 
   protected onDispose(): void {

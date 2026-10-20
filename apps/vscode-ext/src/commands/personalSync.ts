@@ -95,6 +95,28 @@ async function getSession(deps: PersonalSyncCommandDeps): Promise<SyncSessionPor
 }
 
 /**
+ * 解锁/智能入口专用：先用持久化 userId 建会话（零网络），失败才回落到刷新权益的完整路径。
+ *
+ * 本地 DEK 可用时，即使断网也应该能自动解锁；旧实现先 await refreshEntitlement()
+ * 再 ensureSession()，任何网络抖动都会在解锁前被报成「会话不可用，请重新登录」。
+ */
+async function getSessionForUnlock(deps: PersonalSyncCommandDeps): Promise<SyncSessionPort | undefined> {
+  if (!deps.auth.isLoggedIn()) {
+    deps.ui.warn(l10n('sync.loginRequired'));
+    return undefined;
+  }
+  try {
+    const session = await deps.factory.ensureSession();
+    if (session) {
+      // 权益刷新放后台：解锁不等网络；离线时静默失败，缓存保持上一次的值。
+      void deps.auth.refreshEntitlement();
+      return session;
+    }
+  } catch { /* 本地 userId 缺失（升级前）→ 回落联网路径 */ }
+  return getSession(deps);
+}
+
+/**
  * 本地重置用的会话解析：**不刷新权益**（refreshEntitlement 会打网络），
  * 以便远端不可达时仍能清本机状态。仅从已登录态与本地工厂派生。
  */
@@ -234,7 +256,7 @@ export async function initializePersonalSync(deps: PersonalSyncCommandDeps): Pro
 
 /** 解锁路径：先严格校验远端 state，再通过 SMP 解开 DEK，任何失败均保持 session locked。 */
 export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise<void> {
-  const session = await getSession(deps);
+  const session = await getSessionForUnlock(deps);
   if (!session) return;
   if (session.isUnlocked) {
     if (!session.epochStale) {
@@ -272,7 +294,7 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
     if (hadPendingCleanup) deps.ui.info(l10n('sync.cleanupResumed'));
   } catch (err) {
     // 诊断（真机排查）：catch 把「解封/落盘（Secrets/Memento）」多类失败压成同一文案，
-    // 真实原因必须同时落日志与弹窗，否则"口令不一致"会掩盖非口令故障。
+    // 真实原因落诊断日志；弹窗只给用户可理解的原因，避免把内部错误当成交互提示。
     const detail = err instanceof Error ? err.message : String(err);
     diagError(`sync unlock failed: ${detail}`);
     // 解锁失败分两类：
@@ -288,7 +310,7 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
         if (act === l10n('sync.resetLocalAction')) void vscode.commands.executeCommand('devbelt.resetLocalSync');
         else if (act) void vscode.commands.executeCommand('devbelt.resetSync');
       } else {
-        const act = await deps.ui.errorAction(`${l10n('sync.unlockPassphraseMismatch')}\n(${detail})`, [
+        const act = await deps.ui.errorAction(l10n('sync.unlockPassphraseMismatch'), [
           l10n('sync.retryEnter'), l10n('sync.useRecoveryCode'), l10n('sync.useAccount'),
           l10n('sync.resetSyncAction'), l10n('sync.resetLocalAction'),
         ]);
@@ -299,7 +321,7 @@ export async function unlockPersonalSync(deps: PersonalSyncCommandDeps): Promise
         else if (act === l10n('sync.resetSyncAction')) void vscode.commands.executeCommand('devbelt.resetSync');
       }
     } else {
-      deps.ui.error(staleHint ? l10n('sync.unlockEpochStale') : `${l10n('sync.unlockFailed')}\n(${detail})`);
+      deps.ui.error(staleHint ? l10n('sync.unlockEpochStale') : l10n('sync.unlockFailed'));
     }
     return;
   } finally {
@@ -340,10 +362,16 @@ async function notifyFindings(deps: PersonalSyncCommandDeps, session: SyncSessio
  * 二者都是纯动作，不自动同步（自动同步由开关或显式命令负责）。
  */
 export async function syncEntry(deps: PersonalSyncCommandDeps): Promise<void> {
-  const session = await getSession(deps);
+  const session = await getSessionForUnlock(deps);
   if (!session) return;
   if (session.isUnlocked) {
     deps.ui.info(l10n('sync.alreadyUnlocked'));
+    return;
+  }
+  // 本地 DEK 还在时不需要网络：先自动解锁，避免离线/弱网把「未解锁」误路由到远端探测。
+  if (await session.tryRestoreUnlock()) {
+    deps.ui.info(l10n('sync.autoUnlocked'));
+    await notifyFindings(deps, session);
     return;
   }
   // 本地 localEpoch 只是本机是否已持久化的指示，不能可靠区分「已初始化但本机无快照（第二台设备）」
