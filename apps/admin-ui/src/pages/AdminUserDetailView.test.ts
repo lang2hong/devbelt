@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
-import type { AdminUser } from '../api/admin';
+import type { AdminUser, AdminPlan } from '../api/admin';
 
 vi.mock('../api/admin', () => ({
   listUsers: vi.fn(),
+  listPlans: vi.fn(),
   setUserStatus: vi.fn(),
   setUserRole: vi.fn(),
   adjustUserSubscription: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock('@devbelt/auth-client', async (importOriginal) => ({
 }));
 
 import {
-  listUsers, getAdminAiQuota, getSyncOverview, listSyncRecords,
+  listUsers, listPlans, adjustUserSubscription, getAdminAiQuota, getSyncOverview, listSyncRecords,
   listAdminOrders, listAdminInvoices, queryAudit, listAdminUserAiRequests,
 } from '../api/admin';
 import AdminUserDetailView from './AdminUserDetailView.vue';
@@ -34,10 +35,15 @@ const USER: AdminUser = {
   role: 'user', lastLoginTime: '2026-10-10T08:00:00Z', planCode: 'free', deviceCount: 1,
   subscriptionVersion: null, periodEndTime: null, createTime: '2026-01-01T00:00:00Z',
 };
+const PLAN_FREE: AdminPlan = { id: 1, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', sortOrder: 10, status: 'active', version: 1, features: {} };
+const PLAN_PRO: AdminPlan = { id: 2, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 800, billingUnit: 'month', sortOrder: 20, status: 'active', version: 1, features: {} };
 
 beforeEach(() => {
   document.body.innerHTML = '';
   vi.mocked(listUsers).mockReset();
+  vi.mocked(listPlans).mockReset();
+  vi.mocked(listPlans).mockResolvedValue({ kind: 'ok', value: { items: [PLAN_FREE, PLAN_PRO], featureDefs: [] } });
+  vi.mocked(adjustUserSubscription).mockReset();
   vi.mocked(getAdminAiQuota).mockReset();
   vi.mocked(getSyncOverview).mockReset();
   vi.mocked(listSyncRecords).mockReset();
@@ -87,7 +93,7 @@ describe('AdminUserDetailView', () => {
           requestId: 'req-1', model: 'qwen-plus', usageMonth: '2026-10', status: 'completed',
           rawPromptTokens: 2000, rawCompletionTokens: 500,
           billingPromptTokens: 2000, billingCompletionTokens: 2000,
-          costCents: 3, usageEstimated: false, latencyMs: 1200, createTime: '2026-10-15T10:00:00Z',
+          costCents: null, usageEstimated: false, latencyMs: 1200, createTime: '2026-10-15T10:00:00Z',
         }],
         nextCursor: null,
       },
@@ -96,7 +102,10 @@ describe('AdminUserDetailView', () => {
       kind: 'ok',
       value: {
         snapshot: { used: 1200, reserved: 50, monthlyRemaining: 98800, topupRemaining: 3800, remaining: 102600, resetAt: '2026-11-01T00:00:00Z' },
-        grants: [{ grantId: 1, orderId: 7, skuCode: 'topup_500k', status: 'active', tokensTotal: 5000, tokensUsed: 1200, tokensReserved: 0, expiresTime: '2027-10-01T00:00:00Z' }],
+        grants: [
+          { grantId: 1, orderId: 7, skuCode: 'topup_500k', status: 'active', tokensTotal: 5000, tokensUsed: 1200, tokensReserved: 0, expiresTime: '2027-10-01T00:00:00Z' },
+          { grantId: 2, orderId: 8, skuCode: 'topup_1m', status: 'exhausted', tokensTotal: 1000, tokensUsed: 1000, tokensReserved: 0, expiresTime: '2027-10-01T00:00:00Z' },
+        ],
         months: [
           { usageMonth: '2026-10', promptTokens: 1000, completionTokens: 200, requestCount: 12 },
           { usageMonth: '2026-09', promptTokens: 300, completionTokens: 100, requestCount: 4 },
@@ -114,11 +123,77 @@ describe('AdminUserDetailView', () => {
     expect(text).toContain('¥38.00');
     expect(text).toContain('2026-10');
     expect(text).toContain('topup_500k');
+    expect(text).toContain('已用尽');
+    expect(text).toContain('计费输入 token');
+    expect(text).not.toContain('原始 token（对账口径）');
+    expect(text).not.toContain('¥0.00');
     expect(text).toContain('请求记录');
     expect(text).toContain('qwen-plus');
     expect(text).toContain('2,000');
     expect(text).toContain('4');
     expect(text).toContain('1.2s');
+  });
+
+  it('订阅到期：概览展示，调整订阅可写回到期时间', async () => {
+    const withEnd: AdminUser = { ...USER, planCode: 'pro', subscriptionVersion: 3, periodEndTime: '2026-12-31T12:00:00Z' };
+    vi.mocked(listUsers).mockResolvedValue({ kind: 'ok', value: { items: [withEnd], nextCursor: null } });
+    vi.mocked(adjustUserSubscription).mockResolvedValue({ kind: 'ok', value: { subscriptionVersion: 4 } });
+    const wrapper = await mountDetail();
+
+    expect(listPlans).toHaveBeenCalled();
+    expect(wrapper.text()).toContain('订阅到期');
+    expect(wrapper.text()).toContain('2026-12-31');
+
+    await wrapper.findAll('button').find((b) => b.text().trim() === '调整订阅')!.trigger('click');
+    await flushPromises();
+    const endInput = document.querySelector('.modal input[type="datetime-local"]') as HTMLInputElement;
+    endInput.value = '2027-01-15T10:30';
+    endInput.dispatchEvent(new Event('input'));
+    const reasonInput = document.querySelector('.modal input[placeholder="例如：活动赠送一个月"]') as HTMLInputElement;
+    reasonInput.value = '续费一个月';
+    reasonInput.dispatchEvent(new Event('input'));
+
+    const saveBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === '保存')!;
+    saveBtn.click();
+    await flushPromises();
+
+    expect(adjustUserSubscription).toHaveBeenCalledWith(
+      '7',
+      expect.objectContaining({
+        planCode: 'pro',
+        periodEndTime: new Date('2027-01-15T10:30').toISOString(),
+        reason: '续费一个月',
+      }),
+      expect.any(String),
+      'csrf',
+    );
+  });
+
+  it('切换用户：清空旧用户缓存的 tab 数据', async () => {
+    const other: AdminUser = { ...USER, userId: '8', email: 'other@b.com' };
+    vi.mocked(listUsers).mockImplementation(async (filters) => ({
+      kind: 'ok',
+      value: { items: filters?.userId === '8' ? [other] : [USER], nextCursor: null },
+    }));
+    vi.mocked(getAdminAiQuota).mockResolvedValue({
+      kind: 'ok',
+      value: {
+        snapshot: { used: 1000, reserved: 0, monthlyRemaining: 1000, topupRemaining: 5000, remaining: 6000, resetAt: null },
+        grants: [{ grantId: 1, orderId: 7, skuCode: 'topup_500k', status: 'active', tokensTotal: 5000, tokensUsed: 0, tokensReserved: 0, expiresTime: '2027-10-01T00:00:00Z' }],
+      },
+    });
+
+    const wrapper = await mountDetail();
+    await switchTab('AI 积分');
+    expect(document.body.textContent).toContain('topup_500k');
+
+    await wrapper.setProps({ userId: '8' });
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain('other@b.com');
+    expect(text).not.toContain('u@b.com');
+    expect(text).not.toContain('topup_500k');
   });
 
   it('订单页签：按用户过滤查询，渲染订单行', async () => {

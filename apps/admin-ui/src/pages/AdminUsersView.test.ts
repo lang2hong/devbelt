@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
-import type { AdminUser } from '../api/admin';
+import type { AdminUser, AdminPlan } from '../api/admin';
 import { toInclusiveEndIso } from '../lib/dateRange';
 
 vi.mock('../api/admin', () => ({
   listUsers: vi.fn(),
+  listPlans: vi.fn(),
   setUserStatus: vi.fn(),
 }));
 
@@ -15,14 +16,18 @@ vi.mock('@devbelt/auth-client', async (importOriginal) => ({
   setAccessToken: vi.fn(),
 }));
 
-import { listUsers, setUserStatus } from '../api/admin';
+import { listUsers, listPlans, setUserStatus } from '../api/admin';
 import AdminUsersView from './AdminUsersView.vue';
 
 const emptyPage = { kind: 'ok' as const, value: { items: [] as AdminUser[], nextCursor: null } };
+const PLAN_FREE: AdminPlan = { id: 1, code: 'free', kind: 'personal', name: 'Free', priceCents: 0, billingUnit: 'month', sortOrder: 10, status: 'active', version: 1, features: {} };
+const PLAN_PRO: AdminPlan = { id: 2, code: 'pro', kind: 'personal', name: 'Pro', priceCents: 800, billingUnit: 'month', sortOrder: 20, status: 'active', version: 1, features: {} };
 
 beforeEach(() => {
   vi.mocked(listUsers).mockReset();
   vi.mocked(listUsers).mockResolvedValue(emptyPage);
+  vi.mocked(listPlans).mockReset();
+  vi.mocked(listPlans).mockResolvedValue({ kind: 'ok', value: { items: [PLAN_FREE, PLAN_PRO], featureDefs: [] } });
   vi.mocked(setUserStatus).mockReset();
 });
 

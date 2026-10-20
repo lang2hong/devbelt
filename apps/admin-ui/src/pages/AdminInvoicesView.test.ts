@@ -26,7 +26,7 @@ beforeEach(() => {
 describe('AdminInvoicesView', () => {
   it('renders requested invoices with a handle action', async () => {
     const inv: AdminInvoice = {
-      invoiceId: '1', userId: '9', title: 'Acme', taxNo: null, email: 'b@a.com',
+      invoiceId: '1', userId: '9', title: 'Acme', taxNo: '91310000TEST', email: 'b@a.com',
       amountCents: 9900, status: 'requested', reason: null, createTime: '2026-01-01T00:00:00.000Z',
     };
     vi.mocked(listAdminInvoices).mockResolvedValue({ kind: 'ok', value: { items: [inv], nextCursor: null } });
@@ -35,6 +35,7 @@ describe('AdminInvoicesView', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Acme');
+    expect(wrapper.text()).toContain('91310000TEST');
     expect(wrapper.text()).toContain('处理中');
     expect(wrapper.findAll('button').some((b) => b.text().trim() === '处理')).toBe(true);
     wrapper.unmount();
@@ -42,7 +43,7 @@ describe('AdminInvoicesView', () => {
 
   it('rejecting without a reason does not submit', async () => {
     const inv: AdminInvoice = {
-      invoiceId: '1', userId: '9', title: 'Acme', taxNo: null, email: 'b@a.com',
+      invoiceId: '1', userId: '9', title: 'Acme', taxNo: '91310000TEST', email: 'b@a.com',
       amountCents: 9900, status: 'requested', reason: null, createTime: '2026-01-01T00:00:00.000Z',
     };
     vi.mocked(listAdminInvoices).mockResolvedValue({ kind: 'ok', value: { items: [inv], nextCursor: null } });
@@ -52,6 +53,7 @@ describe('AdminInvoicesView', () => {
 
     await wrapper.findAll('button').find((b) => b.text().trim() === '处理')!.trigger('click');
     await flushPromises();
+    expect(document.body.textContent).toContain('91310000TEST');
 
     const modalSelect = document.querySelector('.modal select') as HTMLSelectElement;
     modalSelect.value = 'rejected';

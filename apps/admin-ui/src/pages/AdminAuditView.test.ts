@@ -20,6 +20,7 @@ import AdminAuditView from './AdminAuditView.vue';
 const emptyPage = { kind: 'ok' as const, value: { items: [] as AdminAuditEvent[], nextCursor: null } };
 
 beforeEach(() => {
+  document.body.innerHTML = '';
   vi.mocked(queryAudit).mockReset();
   vi.mocked(queryAudit).mockResolvedValue(emptyPage);
 });
@@ -57,5 +58,29 @@ describe('AdminAuditView 检索竞态', () => {
     const tbody = wrapper.find('tbody');
     expect(tbody.exists() ? tbody.text() : '').not.toContain('auth.login.success');
     wrapper.unmount();
+  });
+
+  it('详情展示失败码、原因、来源 IP 与 Request ID', async () => {
+    const event: AdminAuditEvent = {
+      eventId: '9', eventTime: '2026-10-20T08:00:00.000Z', actorUserId: '7', actorRole: 'user',
+      eventType: 'auth.login.failed', targetType: 'user', targetId: '7',
+      sourceIp: '1.2.3.4', requestId: 'req-9', result: 'failed',
+      failureCode: 'AUTH_FAILED', reason: '密码错误',
+    };
+    vi.mocked(queryAudit).mockResolvedValue({ kind: 'ok', value: { items: [event], nextCursor: null } });
+
+    const wrapper = mount(AdminAuditView);
+    await flushPromises();
+    await wrapper.findAll('button').find((b) => b.text().trim() === '详情')!.trigger('click');
+    await flushPromises();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('AUTH_FAILED');
+    expect(text).toContain('密码错误');
+    expect(text).toContain('1.2.3.4');
+    expect(text).toContain('req-9');
+    expect(text).toContain('9');
+    wrapper.unmount();
+    document.body.innerHTML = '';
   });
 });

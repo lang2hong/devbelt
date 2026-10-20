@@ -154,13 +154,14 @@ async function confirm(): Promise<void> {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>发票ID</th><th>用户ID</th><th>抬头</th><th>金额</th><th>邮箱</th><th>状态</th><th>原因</th><th>申请时间</th><th></th></tr>
+        <tr><th>发票ID</th><th>用户ID</th><th>抬头</th><th>税号</th><th>金额</th><th>邮箱</th><th>状态</th><th>原因</th><th>申请时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="i in invoices" :key="i.invoiceId">
           <td class="mono">{{ i.invoiceId }}</td>
           <td class="mono"><a class="user-link" :href="withBase(`/users/${i.userId}`)" @click.prevent="goUser(i.userId)">{{ i.userId }}</a></td>
           <td>{{ i.title }}</td>
+          <td class="mono">{{ i.taxNo ?? '—' }}</td>
           <td>¥{{ fmtCents(i.amountCents) }}</td>
           <td>{{ i.email }}</td>
           <td><span class="badge" :class="i.status">{{ STATUS_LABEL[i.status] ?? i.status }}</span></td>
@@ -170,14 +171,21 @@ async function confirm(): Promise<void> {
             <button v-if="i.status === 'requested'" class="btn small" :disabled="busy" @click="openProcess(i)">处理</button>
           </td>
         </tr>
-        <tr v-if="invoices.length === 0"><td colspan="9" class="muted">无匹配发票。</td></tr>
+        <tr v-if="invoices.length === 0"><td colspan="10" class="muted">无匹配发票。</td></tr>
       </tbody>
     </table>
 
     <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
 
     <Modal v-if="processForm" title="处理发票" :closable="!busy" @close="closeProcess">
-      <p class="muted">{{ processForm.title }} · ¥{{ fmtCents(processForm.amountCents) }}</p>
+      <table class="kv">
+        <tbody>
+          <tr><th>抬头</th><td>{{ processForm.title }}</td></tr>
+          <tr><th>税号</th><td class="mono">{{ processForm.taxNo ?? '—' }}</td></tr>
+          <tr><th>金额</th><td>¥{{ fmtCents(processForm.amountCents) }}</td></tr>
+          <tr><th>接收邮箱</th><td>{{ processForm.email }}</td></tr>
+        </tbody>
+      </table>
       <label>处理结果</label>
       <select v-model="processStatus">
         <option v-for="s in PROCESS_OPTIONS" :key="s" :value="s">{{ STATUS_LABEL[s] }}</option>
@@ -200,6 +208,9 @@ async function confirm(): Promise<void> {
 .user-link:hover { text-decoration: underline; }
 label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 8px 0 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+.kv { border-collapse: collapse; width: 100%; margin-bottom: 10px; }
+.kv th { width: 88px; text-align: left; padding: 6px 10px 6px 0; color: var(--c-text-muted); font-weight: 500; font-size: 13px; vertical-align: top; }
+.kv td { padding: 6px 0; font-size: 13.5px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; background: var(--c-accent-bg); color: var(--c-accent); }
 .badge.rejected, .badge.failed { background: var(--c-danger-bg); color: var(--c-danger); }
 .badge.issued { background: var(--c-success-bg); color: var(--c-success-text); }

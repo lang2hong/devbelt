@@ -481,7 +481,7 @@ onMounted(load);
 .field.span2 { grid-column: 1 / -1; }
 .field label { font-size: 12px; color: var(--c-text-muted); }
 input[type='text'], input[type='number'], select { width: 100%; box-sizing: border-box; height: 34px; padding: 0 11px; border: 1px solid var(--c-border-strong); border-radius: 7px; font-size: 13px; background: var(--c-surface); color: inherit; }
-input:focus, select:focus { outline: none; border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(9,105,218,.15); }
+input:focus, select:focus { outline: none; border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-ring); }
 .suffix { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
 .suffix > span { font-size: 12px; color: var(--c-text-muted); white-space: nowrap; }
 .suffix.narrow { max-width: 280px; }
@@ -511,7 +511,6 @@ input:focus, select:focus { outline: none; border-color: var(--c-accent); box-sh
 .savebar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; margin-top: 4px; background: linear-gradient(var(--c-surface-muted)00, var(--c-surface-muted) 40%); }
 .savebar.inline { position: static; margin-top: 16px; background: none; }
 .spacer { flex: 1; }
-.btn:hover { background: var(--c-success-text); }
 .btn.ghost { background: var(--c-surface-muted); color: var(--c-text); border: 1px solid var(--c-border-strong); font-weight: 500; }
 
 .table-wrap { padding: 0; overflow: hidden; }

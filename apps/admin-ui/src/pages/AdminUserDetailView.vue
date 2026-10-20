@@ -4,7 +4,7 @@ import { withBase, router, navigate } from '../lib/router';
 import {
   listUsers, setUserRole, setUserStatus, adjustUserSubscription,
   getAdminAiQuota, getSyncOverview, listSyncRecords,
-  listAdminOrders, listAdminInvoices, queryAudit, listAdminUserAiRequests,
+  listAdminOrders, listAdminInvoices, queryAudit, listAdminUserAiRequests, listPlans,
   type AdminAiQuota, type AdminUser, type AdminSyncKindOverview, type AdminSyncRecord,
   type AdminOrder, type AdminInvoice, type AdminAuditEvent, type AdminAiRequestLog,
 } from '../api/admin';
@@ -52,8 +52,8 @@ function fmtTokens(n: number): string {
   return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n.toLocaleString();
 }
 
-function fmtCents(cents: number): string {
-  return `¥${(cents / 100).toFixed(2)}`;
+function fmtCents(cents: number | null): string {
+  return cents === null ? '—' : `¥${(cents / 100).toFixed(2)}`;
 }
 
 function fmtBytes(n: number): string {
@@ -68,6 +68,18 @@ const ORDER_STATUS: Record<string, string> = {
 const INVOICE_STATUS: Record<string, string> = {
   requested: '待处理', issued: '已开票', rejected: '已拒绝', failed: '开票失败',
 };
+const GRANT_STATUS: Record<string, string> = {
+  active: '生效中', exhausted: '已用尽', expired: '已过期', refunded: '已退款',
+};
+
+/** ISO → `<input type="datetime-local">` 的本地时间值（YYYY-MM-DDTHH:mm）。 */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 async function loadUser(): Promise<void> {
   userState.value = 'loading';
@@ -86,17 +98,35 @@ async function loadUser(): Promise<void> {
 
 onMounted(() => {
   void loadUser();
+  void loadPlanOptions();
 });
 
 watch(() => props.userId, () => {
+  resetUserData();
   void loadUser();
 });
+
+// ── 套餐选项（筛选用全量；调整订阅只允许启用中的套餐）──
+type PlanOption = { code: string; name: string; status: string };
+const planOptions = ref<PlanOption[]>([
+  { code: 'free', name: 'Free', status: 'active' },
+  { code: 'pro', name: 'Pro', status: 'active' },
+]);
+const activePlanOptions = computed(() => planOptions.value.filter((p) => p.status === 'active'));
+
+async function loadPlanOptions(): Promise<void> {
+  const r = await listPlans();
+  if (r.kind === 'ok' && r.value.items.length > 0) {
+    planOptions.value = r.value.items.map((p) => ({ code: p.code, name: p.name, status: p.status }));
+  }
+}
 
 // ── 操作弹窗（状态 / 订阅 / 角色）──
 const statusForm = ref<{ status: 'active' | 'disabled' } | null>(null);
 const statusReason = ref('');
 const subForm = ref(false);
 const subPlan = ref('free');
+const subPeriodEnd = ref('');
 const subReason = ref('');
 const roleForm = ref<{ role: 'user' | 'platform_admin' } | null>(null);
 const roleReason = ref('');
@@ -141,6 +171,7 @@ async function confirmStatus(): Promise<void> {
 function openSub(): void {
   subForm.value = true;
   subPlan.value = user.value?.planCode ?? 'free';
+  subPeriodEnd.value = toLocalInput(user.value?.periodEndTime ?? null);
   subReason.value = '';
   error.value = '';
 }
@@ -153,14 +184,19 @@ async function confirmSub(): Promise<void> {
     error.value = '请填写操作原因。';
     return;
   }
-  const tag = `sub:${u.userId}:${subPlan.value}:${reasonValue}:${u.subscriptionVersion ?? 0}`;
+  const end = subPeriodEnd.value ? new Date(subPeriodEnd.value) : null;
+  if (end && Number.isNaN(end.getTime())) {
+    error.value = '到期时间格式不正确。';
+    return;
+  }
+  const tag = `sub:${u.userId}:${subPlan.value}:${reasonValue}:${u.subscriptionVersion ?? 0}:${subPeriodEnd.value}`;
   busy.value = true;
   error.value = '';
   try {
     const csrf = await ensureCsrf();
     const r = await adjustUserSubscription(u.userId, {
       planCode: subPlan.value,
-      periodEndTime: null,
+      periodEndTime: end ? end.toISOString() : null,
       reason: reasonValue,
       expectedVersion: u.subscriptionVersion ?? 0,
     }, subWrite.ensure(tag), csrf);
@@ -383,6 +419,51 @@ async function loadAudit(reset: boolean): Promise<void> {
   }
 }
 
+/** 切换到另一个用户时清空所有按用户缓存的数据，避免复用组件显示旧用户内容。 */
+function resetUserData(): void {
+  user.value = null;
+  userState.value = 'loading';
+  userError.value = '';
+  error.value = '';
+  statusForm.value = null;
+  subForm.value = false;
+  roleForm.value = null;
+  statusWrite.keys.clear();
+  subWrite.keys.clear();
+
+  tab.value = 'overview';
+  loaded.value = new Set<TabKey>(['overview']);
+
+  aiQuota.value = null;
+  aiError.value = '';
+  aiRequests.value = [];
+  aiRequestsCursor.value = null;
+  aiRequestsLoaded.value = false;
+
+  orders.value = [];
+  ordersState.value = 'loading';
+  ordersError.value = '';
+  ordersCursor.value = null;
+
+  invoices.value = [];
+  invoicesState.value = 'loading';
+  invoicesError.value = '';
+  invoicesCursor.value = null;
+
+  syncKinds.value = [];
+  syncState.value = null;
+  syncRecords.value = [];
+  syncRecordsCursor.value = null;
+  syncKindFilter.value = '';
+  syncStateError.value = '';
+  syncLoading.value = false;
+
+  auditEvents.value = [];
+  auditState.value = 'loading';
+  auditError.value = '';
+  auditCursor.value = null;
+}
+
 function goBack(): void {
   navigate('/users');
 }
@@ -403,7 +484,7 @@ function goBack(): void {
             <span class="badge" :class="user.status === 'active' ? 'ok' : 'danger'">{{ user.status === 'active' ? '启用' : '禁用' }}</span>
             <span class="badge" :class="user.role === 'platform_admin' ? 'warn' : ''">{{ user.role === 'platform_admin' ? '管理员' : '普通用户' }}</span>
             套餐 {{ user.planCode ?? '—' }}<span v-if="user.subscriptionVersion != null" class="muted">（v{{ user.subscriptionVersion }}）</span> ·
-            设备 {{ user.deviceCount }} 台 · 注册于 {{ formatDateTime(user.createTime) }}<template v-if="user.lastLoginTime"> · 最近登录 {{ formatDateTime(user.lastLoginTime) }}</template>
+            设备 {{ user.deviceCount }} 台 · 注册于 {{ formatDateTime(user.createTime) }}<template v-if="user.periodEndTime"> · 订阅到期 {{ formatDateTime(user.periodEndTime) }}</template><template v-if="user.lastLoginTime"> · 最近登录 {{ formatDateTime(user.lastLoginTime) }}</template>
           </p>
         </div>
         <div class="head-actions">
@@ -430,6 +511,7 @@ function goBack(): void {
             <tr><th>角色</th><td>{{ user.role === 'platform_admin' ? '平台管理员' : '普通用户' }}</td></tr>
             <tr><th>套餐</th><td>{{ user.planCode ?? '—' }}<span v-if="user.subscriptionVersion != null" class="muted">（订阅版本 v{{ user.subscriptionVersion }}）</span></td></tr>
             <tr><th>设备数</th><td>{{ user.deviceCount }}</td></tr>
+            <tr><th>订阅到期</th><td>{{ formatDateTime(user.periodEndTime) }}</td></tr>
             <tr><th>注册时间</th><td>{{ formatDateTime(user.createTime) }}</td></tr>
             <tr><th>最近登录</th><td>{{ formatDateTime(user.lastLoginTime) }}</td></tr>
           </tbody>
@@ -455,9 +537,9 @@ function goBack(): void {
           </p>
 
           <h4>近月用量</h4>
-          <p class="muted small">输入/输出为原始 token（对账口径）；扣减按积分（计费 token ÷ 1000，输出经折算倍数加权）。</p>
+          <p class="muted small">输入/输出为计费 token（积分 = 计费 token ÷ 1000）；原始 token 见下方请求记录。</p>
           <table class="table">
-            <thead><tr><th>月份</th><th>输入 token</th><th>输出 token</th><th>请求数</th></tr></thead>
+            <thead><tr><th>月份</th><th>计费输入 token</th><th>计费输出 token</th><th>请求数</th></tr></thead>
             <tbody>
               <tr v-for="m in aiQuota.months ?? []" :key="m.usageMonth">
                 <td class="mono">{{ m.usageMonth }}</td>
@@ -477,7 +559,7 @@ function goBack(): void {
                 <td class="mono">{{ g.skuCode }}</td>
                 <td>{{ fmtCredits(g.tokensTotal) }}</td>
                 <td>{{ fmtCredits(g.tokensUsed) }}</td>
-                <td><span class="badge" :class="g.status === 'active' ? 'ok' : ''">{{ g.status === 'active' ? '生效中' : g.status }}</span></td>
+                <td><span class="badge" :class="g.status === 'active' ? 'ok' : ''">{{ GRANT_STATUS[g.status] ?? g.status }}</span></td>
                 <td>{{ formatDateTime(g.expiresTime) }}</td>
               </tr>
             </tbody>
@@ -634,9 +716,11 @@ function goBack(): void {
       <Modal v-if="subForm" title="调整订阅" :closable="!busy" @close="subForm = false">
         <FormField label="目标套餐" required>
           <select v-model="subPlan">
-            <option value="free">Free</option>
-            <option value="pro">Pro</option>
+            <option v-for="p in activePlanOptions" :key="p.code" :value="p.code">{{ p.name }}（{{ p.code }}）</option>
           </select>
+        </FormField>
+        <FormField label="订阅到期时间" hint="可选；留空表示不设置到期时间。">
+          <input v-model="subPeriodEnd" type="datetime-local" />
         </FormField>
         <FormField label="操作原因" required hint="必填，会记录到审计日志。">
           <input v-model="subReason" type="text" maxlength="500" placeholder="例如：活动赠送一个月" />

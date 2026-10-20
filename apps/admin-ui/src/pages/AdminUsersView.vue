@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { withBase, navigate } from '../lib/router';
-import { listUsers, setUserStatus, type AdminUser } from '../api/admin';
+import { listUsers, listPlans, setUserStatus, type AdminUser } from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
@@ -19,6 +19,11 @@ const planCodeFilter = ref('');
 const createdFrom = ref('');
 const createdTo = ref('');
 const nextCursor = ref<string | null>(null);
+type PlanOption = { code: string; name: string };
+const planOptions = ref<PlanOption[]>([
+  { code: 'free', name: 'Free' },
+  { code: 'pro', name: 'Pro' },
+]);
 
 const statusWrite = useIdempotencyKey();
 const statusForm = ref<{ userId: string; status: 'active' | 'disabled' } | null>(null);
@@ -78,7 +83,17 @@ async function load(reset = true): Promise<void> {
   }
 }
 
-onMounted(() => load());
+onMounted(() => {
+  void load();
+  void loadPlanOptions();
+});
+
+async function loadPlanOptions(): Promise<void> {
+  const r = await listPlans();
+  if (r.kind === 'ok' && r.value.items.length > 0) {
+    planOptions.value = r.value.items.map((p) => ({ code: p.code, name: p.name }));
+  }
+}
 
 function search(): void {
   users.value = [];
@@ -146,8 +161,7 @@ function openDetail(u: AdminUser): void {
       </select>
       <select v-model="planCodeFilter">
         <option value="">全部套餐</option>
-        <option value="free">Free</option>
-        <option value="pro">Pro</option>
+        <option v-for="p in planOptions" :key="p.code" :value="p.code">{{ p.name }}（{{ p.code }}）</option>
       </select>
       <label class="range">注册时间
         <input v-model="createdFrom" type="datetime-local" />

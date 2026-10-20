@@ -7,6 +7,7 @@ import { useIdempotencyKey } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
 import { toFromIso, toInclusiveEndIso } from '../lib/dateRange';
 import { auditEventLabel, auditTargetLabel } from '../lib/auditLabels';
+import Modal from '../components/Modal.vue';
 
 const events = ref<AdminAuditEvent[]>([]);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
@@ -17,6 +18,7 @@ const eventType = ref('');
 const actorUserId = ref('');
 const targetType = ref('');
 const nextCursor = ref<string | null>(null);
+const detailEvent = ref<AdminAuditEvent | null>(null);
 
 const EVENT_TYPE_SUGGESTIONS = [
   'admin.users.read', 'admin.user.disabled', 'admin.user.enabled', 'admin.user.subscription.changed',
@@ -75,6 +77,7 @@ async function load(reset = true): Promise<void> {
 onMounted(() => load());
 
 function search(): void {
+  detailEvent.value = null;
   events.value = [];
   nextCursor.value = null;
   void load(true);
@@ -147,7 +150,7 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>时间</th><th>操作者</th><th>操作</th><th>对象</th><th>结果</th></tr>
+        <tr><th>时间</th><th>操作者</th><th>操作</th><th>对象</th><th>结果</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="e in events" :key="e.eventId">
@@ -159,12 +162,33 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
           <td :title="e.eventType">{{ auditEventLabel(e.eventType) }}</td>
           <td>{{ e.targetType ? `${auditTargetLabel(e.targetType)} #${e.targetId ?? '—'}` : '—' }}</td>
           <td><span class="badge" :class="e.result === 'success' ? 'ok' : 'danger'">{{ e.result === 'success' ? '成功' : '失败' }}</span></td>
+          <td class="actions"><button class="btn small secondary" @click="detailEvent = e">详情</button></td>
         </tr>
-        <tr v-if="events.length === 0"><td colspan="5" class="muted">无匹配记录。</td></tr>
+        <tr v-if="events.length === 0"><td colspan="6" class="muted">无匹配记录。</td></tr>
       </tbody>
     </table>
 
     <p v-if="nextCursor" class="load-more"><button class="btn secondary" @click="load(false)">加载更多</button></p>
+
+    <Modal v-if="detailEvent" title="审计事件详情" @close="detailEvent = null">
+      <table class="kv">
+        <tbody>
+          <tr><th>事件 ID</th><td class="mono">{{ detailEvent.eventId }}</td></tr>
+          <tr><th>时间</th><td>{{ formatDateTime(detailEvent.eventTime) }}</td></tr>
+          <tr><th>操作者</th><td>{{ detailEvent.actorUserId ?? '系统' }}<span class="muted" v-if="detailEvent.actorRole">（{{ detailEvent.actorRole }}）</span></td></tr>
+          <tr><th>操作</th><td>{{ auditEventLabel(detailEvent.eventType) }}<span class="muted mono"> · {{ detailEvent.eventType }}</span></td></tr>
+          <tr><th>对象</th><td>{{ detailEvent.targetType ? `${auditTargetLabel(detailEvent.targetType)} #${detailEvent.targetId ?? '—'}` : '—' }}</td></tr>
+          <tr><th>结果</th><td><span class="badge" :class="detailEvent.result === 'success' ? 'ok' : 'danger'">{{ detailEvent.result === 'success' ? '成功' : '失败' }}</span></td></tr>
+          <tr><th>失败码</th><td class="mono">{{ detailEvent.failureCode ?? '—' }}</td></tr>
+          <tr><th>原因</th><td>{{ detailEvent.reason ?? '—' }}</td></tr>
+          <tr><th>来源 IP</th><td class="mono">{{ detailEvent.sourceIp ?? '—' }}</td></tr>
+          <tr><th>Request ID</th><td class="mono">{{ detailEvent.requestId ?? '—' }}</td></tr>
+        </tbody>
+      </table>
+      <div class="modal-actions">
+        <button class="btn secondary" @click="detailEvent = null">关闭</button>
+      </div>
+    </Modal>
   </section>
 </template>
 
@@ -172,4 +196,8 @@ async function doExport(format: 'csv' | 'json'): Promise<void> {
 .range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-muted); }
 .user-link { color: var(--c-accent); text-decoration: none; }
 .user-link:hover { text-decoration: underline; }
+.mono { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.kv { border-collapse: collapse; width: 100%; }
+.kv th { width: 96px; text-align: left; padding: 7px 10px 7px 0; color: var(--c-text-muted); font-weight: 500; font-size: 13px; vertical-align: top; white-space: nowrap; }
+.kv td { padding: 7px 0; font-size: 13.5px; word-break: break-all; }
 </style>
