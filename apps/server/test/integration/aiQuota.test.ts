@@ -5,6 +5,7 @@ import { migrations, LEGACY_MIGRATION_VERSIONS } from '../../src/repository/mysq
 import { withTransaction, type MysqlDb } from '../../src/repository/mysql/db.js';
 import { MysqlAiUsageRepo } from '../../src/modules/ai/repository/aiUsageRepo.js';
 import { MysqlAiTopupRepo } from '../../src/modules/ai/repository/aiTopupRepo.js';
+import { MysqlUserRepo } from '../../src/modules/auth/repository/userRepo.js';
 import { AiTopupService } from '../../src/modules/ai/service/aiTopupService.js';
 import { AiQuotaService } from '../../src/modules/ai/service/aiQuotaService.js';
 import { AiQuotaExceededError } from '../../src/modules/ai/domain/errors.js';
@@ -132,7 +133,8 @@ describe.skipIf(!URL)('AI 月额度账本（real MySQL）', () => {
  * 双段 FIFO（月额度耗尽后由 grants 承接）。无真库环境时跳过。
  */
 describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
-  const USER_T = 990_010;
+  /** 真实 users 行由 beforeAll 创建（orders.user_id 有外键，不能用凭空的固定 id）。 */
+  let USER_T = 0;
 
   let pool: ReturnType<typeof createTestPool>;
   let db: MysqlDb;
@@ -143,6 +145,8 @@ describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
     pool = createTestPool();
     db = pool as unknown as MysqlDb;
     await runMigrations(db, [...migrations], LEGACY_MIGRATION_VERSIONS);
+    const userRepo = new MysqlUserRepo(() => db);
+    USER_T = (await userRepo.create(`ai-topup-${Date.now()}@example.com`, 'hash', 'AI Topup')).id;
     topupRepo = new MysqlAiTopupRepo(() => db);
     const plans = new FakePlanRepo([makeFreePlan()]);
     const free = plans.plans.find((p: Plan) => p.code === 'free')!;
@@ -158,9 +162,10 @@ describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
   });
 
   afterAll(async () => {
-    await db.query('DELETE FROM ai_quota_grants WHERE user_id IN (?, ?)', [USER_T, 990_011]);
-    await db.query("DELETE FROM orders WHERE purpose = 'topup' AND user_id IN (?, ?)", [USER_T, 990_011]);
-    await db.query('DELETE FROM ai_token_usage WHERE user_id IN (?, ?)', [USER_T, 990_011]);
+    await db.query('DELETE FROM ai_quota_grants WHERE user_id = ?', [USER_T]);
+    await db.query("DELETE FROM orders WHERE purpose = 'topup' AND user_id = ?", [USER_T]);
+    await db.query('DELETE FROM ai_token_usage WHERE user_id = ?', [USER_T]);
+    await db.query('DELETE FROM users WHERE id = ?', [USER_T]);
     await pool.end();
   });
 

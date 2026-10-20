@@ -45,7 +45,7 @@ test('公开套餐页 /plans 无需登录', async ({ page }) => {
   const res = await page.goto('/plans');
   expect(res?.status()).toBe(200);
   await expect(page.getByRole('heading', { name: '套餐' })).toBeVisible();
-  // 套餐卡来自 billing 目录（Free / Pro / ¥99）
+  // 套餐卡来自 billing 目录（Free / Pro / ¥8；migration 013 已把 pro 从 ¥99 改为 ¥8）
   await expect(page.getByText('Pro', { exact: true })).toBeVisible();
-  await expect(page.getByText('¥99')).toBeVisible();
+  await expect(page.getByText('¥8')).toBeVisible();
 });
