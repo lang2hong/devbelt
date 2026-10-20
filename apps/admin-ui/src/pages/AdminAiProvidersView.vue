@@ -243,7 +243,7 @@ async function toggleStatus(p: AdminAiProvider): Promise<void> {
 input, select, textarea { box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid var(--c-border-strong); border-radius: 6px; font-size: 14px; margin-bottom: 8px; font-family: inherit; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
-.badge.active { background: #dafbe1; color: var(--c-success-text); }
-.badge.disabled { background: #ffebe9; color: var(--c-danger); }
+.badge.active { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.disabled { background: var(--c-danger-bg); color: var(--c-danger); }
 .notice { color: var(--c-success-text); font-size: 13px; }
 </style>

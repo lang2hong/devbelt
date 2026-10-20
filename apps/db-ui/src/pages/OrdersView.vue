@@ -143,9 +143,9 @@ select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-bo
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; }
 .badge.pending { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .badge.paid { background: var(--c-accent-bg); color: var(--c-accent); }
-.badge.fulfilled { background: #dafbe1; color: var(--c-success-text); }
-.badge.failed, .badge.expired, .badge.refunded { background: #ffebe9; color: var(--c-danger); }
-.detail { border-top: 1px solid #eaeef2; padding: 12px 16px; }
+.badge.fulfilled { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.failed, .badge.expired, .badge.refunded { background: var(--c-danger-bg); color: var(--c-danger); }
+.detail { border-top: 1px solid var(--c-divider); padding: 12px 16px; }
 .detail dl { margin: 0; display: grid; grid-template-columns: 92px 1fr; gap: 6px 12px; }
 .detail dt { color: var(--c-text-muted); font-size: 13px; }
 .detail dd { margin: 0; font-size: 13px; color: var(--c-text); word-break: break-all; }

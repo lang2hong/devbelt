@@ -5,6 +5,7 @@ import { safeReturnTo } from './lib/returnTo';
 import { refreshSession } from '@devbelt/auth-client';
 import { getAccessToken, ensureCsrf, logout } from '@devbelt/auth-client';
 import { me, type ConsoleMe } from './api/me';
+import { applyTheme, getTheme, nextTheme, THEME_LABEL, type ThemeChoice } from './lib/theme';
 import AccountView from './pages/AccountView.vue';
 import DevicesView from './pages/DevicesView.vue';
 import SyncView from './pages/SyncView.vue';
@@ -126,6 +127,12 @@ async function onLogout(): Promise<void> {
   // 本机 token 已清除，但服务器 refresh-cookie 会话未被确认注销：提示并允许重试，避免静默假登出。
   logoutError.value = true;
 }
+
+const theme = ref<ThemeChoice>(getTheme());
+function toggleTheme(): void {
+  theme.value = nextTheme(theme.value);
+  applyTheme(theme.value);
+}
 </script>
 
 <template>
@@ -150,6 +157,7 @@ async function onLogout(): Promise<void> {
           >{{ g.title }}</a>
           <span class="spacer"></span>
           <span class="email">{{ me_.user.email }}</span>
+          <button class="btn small ghost" :title="'主题：' + THEME_LABEL[theme]" @click="toggleTheme">{{ THEME_LABEL[theme] }}</button>
           <button class="btn ghost small" @click="onLogout">登出</button>
         </nav>
         <nav v-if="activeGroup" class="subnav" aria-label="子导航">
@@ -184,7 +192,7 @@ async function onLogout(): Promise<void> {
 .nav a { color: var(--c-text-muted); text-decoration: none; font-size: 14px; padding: 6px 12px; border-radius: var(--r-sm); }
 .nav a:hover { background: var(--c-surface-muted); color: var(--c-text); }
 .nav a.on { color: var(--c-accent-text); background: var(--c-accent-bg); font-weight: 600; }
-.subnav { display: flex; gap: 20px; padding: 0 24px; border-top: 1px solid #eaeef2; background: var(--c-surface); }
+.subnav { display: flex; gap: 20px; padding: 0 24px; border-top: 1px solid var(--c-divider); background: var(--c-surface); }
 .subnav a { padding: 10px 2px; font-size: 13.5px; color: var(--c-text-muted); text-decoration: none; border-bottom: 2px solid transparent; }
 .subnav a:hover { color: var(--c-text); }
 .subnav a.on { color: var(--c-text); font-weight: 600; border-bottom-color: var(--c-accent); }

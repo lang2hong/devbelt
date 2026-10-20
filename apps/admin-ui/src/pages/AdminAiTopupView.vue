@@ -503,8 +503,8 @@ h3 { font-size: 15px; font-weight: 700; color: var(--c-text); margin: 28px 0 8px
 input, select, .modal-actions { margin-bottom: 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
-.badge.active { background: #dafbe1; color: var(--c-success-text); }
-.badge.disabled, .badge.refunded, .badge.expired, .badge.failed { background: #ffebe9; color: var(--c-danger); }
+.badge.active { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.disabled, .badge.refunded, .badge.expired, .badge.failed { background: var(--c-danger-bg); color: var(--c-danger); }
 .badge.pending { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .badge.paid, .badge.fulfilled { background: var(--c-accent-bg); color: var(--c-accent); }
 .badge.exhausted { background: var(--c-surface-muted); color: var(--c-text-muted); }

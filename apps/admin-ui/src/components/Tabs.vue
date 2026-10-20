@@ -20,7 +20,7 @@ defineEmits<{ 'update:modelValue': [value: T] }>();
 </template>
 
 <style scoped>
-.tabs { display: inline-flex; gap: 4px; background: #eaeef2; padding: 3px; border-radius: var(--r-md); }
+.tabs { display: inline-flex; gap: 4px; background: var(--c-badge-bg); padding: 3px; border-radius: var(--r-md); }
 .tabs button { border: none; background: transparent; padding: 6px 14px; border-radius: var(--r-sm); font-size: 13px; color: var(--c-text-muted); cursor: pointer; font-family: inherit; }
 .tabs button:hover { color: var(--c-text); }
 .tabs button.on { background: var(--c-surface); color: var(--c-text); box-shadow: var(--shadow-sm); font-weight: 600; }

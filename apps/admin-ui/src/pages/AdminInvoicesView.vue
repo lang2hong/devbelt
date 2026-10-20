@@ -201,7 +201,7 @@ async function confirm(): Promise<void> {
 label { display: block; font-size: 13px; color: var(--c-text-muted); margin: 8px 0 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; background: var(--c-accent-bg); color: var(--c-accent); }
-.badge.rejected, .badge.failed { background: #ffebe9; color: var(--c-danger); }
-.badge.issued { background: #dafbe1; color: var(--c-success-text); }
+.badge.rejected, .badge.failed { background: var(--c-danger-bg); color: var(--c-danger); }
+.badge.issued { background: var(--c-success-bg); color: var(--c-success-text); }
 .badge.requested { background: var(--c-warn-bg); color: var(--c-warn-text); }
 </style>

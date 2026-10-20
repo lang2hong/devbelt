@@ -5,6 +5,7 @@ import { safeReturnTo } from './lib/returnTo';
 import { ADMIN_DEFAULT_PATH, ADMIN_ROUTES } from './routes';
 import { refreshSession, getAccessToken, logout } from '@devbelt/auth-client';
 import { me, type ConsoleMe } from './api/me';
+import { applyTheme, getTheme, nextTheme, THEME_LABEL, type ThemeChoice } from './lib/theme';
 import AdminNav from './pages/AdminNav.vue';
 import AdminUsersView from './pages/AdminUsersView.vue';
 import AdminUserDetailView from './pages/AdminUserDetailView.vue';
@@ -75,6 +76,12 @@ async function onLogout(): Promise<void> {
   }
   logoutError.value = true;
 }
+
+const theme = ref<ThemeChoice>(getTheme());
+function toggleTheme(): void {
+  theme.value = nextTheme(theme.value);
+  applyTheme(theme.value);
+}
 </script>
 
 <template>
@@ -84,6 +91,7 @@ async function onLogout(): Promise<void> {
       <AdminNav v-if="state === 'ready'" />
       <div class="side-foot" v-if="me_">
         <span class="email" :title="me_.user.email">{{ me_.user.email }}</span>
+        <button class="btn small ghost" :title="'主题：' + THEME_LABEL[theme]" @click="toggleTheme">{{ THEME_LABEL[theme] }}</button>
         <button class="btn small ghost" @click="onLogout">登出</button>
       </div>
     </aside>
@@ -109,9 +117,9 @@ async function onLogout(): Promise<void> {
 }
 .brand { display: flex; align-items: center; gap: 8px; padding: 0 8px 4px; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
 .brand small { font-weight: 500; font-size: 12px; color: var(--c-text-subtle); }
-.logo { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--c-accent); color: #fff; font-size: 14px; }
-.side-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 10px 8px 0; border-top: 1px solid var(--c-border); }
-.email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--c-text-muted); }
+.logo { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--c-accent); color: var(--c-on-accent); font-size: 14px; }
+.side-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 8px 0; border-top: 1px solid var(--c-border); }
+.email { flex: 1 1 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--c-text-muted); }
 .body { padding: 28px 32px 64px; max-width: 1280px; width: 100%; }
 .logout-warn {
   margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--c-warn-border); border-radius: var(--r-md);

@@ -181,7 +181,7 @@ input { width: 100%; box-sizing: border-box; }
 .toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: none; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px; opacity: .55; }
 .toggle:hover { opacity: 1; }
 .btn.accent { background: var(--c-accent); }
-.badge { display: inline-flex; padding: 1px 8px; border-radius: var(--r-pill); font-size: 12px; background: #eaeef2; color: var(--c-text-muted); }
+.badge { display: inline-flex; padding: 1px 8px; border-radius: var(--r-pill); font-size: 12px; background: var(--c-badge-bg); color: var(--c-text-muted); }
 .badge.ok { background: var(--c-success-bg); color: var(--c-success-text); }
 .badge.warn { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .ok { color: var(--c-success-text); font-size: 13px; }

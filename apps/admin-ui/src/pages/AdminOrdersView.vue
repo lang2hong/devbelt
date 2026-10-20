@@ -251,6 +251,6 @@ async function confirmRefund(): Promise<void> {
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
 .badge.pending { background: var(--c-warn-bg); color: var(--c-warn-text); }
 .badge.paid { background: var(--c-accent-bg); color: var(--c-accent); }
-.badge.fulfilled { background: #dafbe1; color: var(--c-success-text); }
-.badge.failed, .badge.expired, .badge.refunded { background: #ffebe9; color: var(--c-danger); }
+.badge.fulfilled { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.failed, .badge.expired, .badge.refunded { background: var(--c-danger-bg); color: var(--c-danger); }
 </style>

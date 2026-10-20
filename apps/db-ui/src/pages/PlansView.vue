@@ -86,7 +86,7 @@ function canUpgrade(plan: PlanDto): boolean {
 .badge { background: var(--c-accent); color: var(--c-surface); font-size: 12px; padding: 2px 8px; border-radius: 10px; }
 .price { font-size: 14px; font-weight: 600; color: var(--c-text); margin: 8px 0 12px; }
 .features { list-style: none; padding: 0; margin: 0; }
-.features li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-top: 1px dashed #eaeef2; font-size: 13px; }
+.features li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-top: 1px dashed var(--c-divider); font-size: 13px; }
 .features li:first-child { border-top: none; }
 .label { color: var(--c-text-muted); }
 .value { color: var(--c-text); text-align: right; }

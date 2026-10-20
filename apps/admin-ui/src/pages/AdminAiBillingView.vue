@@ -592,8 +592,8 @@ async function togglePricing(p: AdminAiModelPricing): Promise<void> {
 .bar input, .bar select { width: auto; margin-bottom: 0; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
-.badge.active { background: #dafbe1; color: var(--c-success-text); }
-.badge.disabled { background: #ffebe9; color: var(--c-danger); }
+.badge.active { background: var(--c-success-bg); color: var(--c-success-text); }
+.badge.disabled { background: var(--c-danger-bg); color: var(--c-danger); }
 .check { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 4px 0 12px; }
 .notice { color: var(--c-success-text); font-size: 13px; }
 .neg { color: var(--c-danger); font-weight: 700; }

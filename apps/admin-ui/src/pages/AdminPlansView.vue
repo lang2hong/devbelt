@@ -460,14 +460,14 @@ onMounted(load);
 
 <style scoped>
 
-.tabs { display: inline-flex; gap: 4px; background: #eaeef2; padding: 3px; border-radius: 8px; }
+.tabs { display: inline-flex; gap: 4px; background: var(--c-badge-bg); padding: 3px; border-radius: 8px; }
 .tabs button { border: none; background: transparent; padding: 6px 14px; border-radius: 6px; font-size: 13px; color: var(--c-text-muted); cursor: pointer; }
-.tabs button.on { background: var(--c-surface); color: #1f2328; box-shadow: 0 1px 2px rgba(31,35,40,.12); font-weight: 600; }
+.tabs button.on { background: var(--c-surface); color: var(--c-text); box-shadow: 0 1px 2px rgba(31,35,40,.12); font-weight: 600; }
 
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.segmented { display: inline-flex; gap: 4px; background: #eaeef2; padding: 3px; border-radius: 8px; }
+.segmented { display: inline-flex; gap: 4px; background: var(--c-badge-bg); padding: 3px; border-radius: 8px; }
 .segmented button { border: none; background: transparent; padding: 5px 14px; border-radius: 6px; font-size: 13px; color: var(--c-text-muted); cursor: pointer; }
-.segmented button.on { background: var(--c-surface); color: #1f2328; box-shadow: 0 1px 2px rgba(31,35,40,.12); font-weight: 600; }
+.segmented button.on { background: var(--c-surface); color: var(--c-text); box-shadow: 0 1px 2px rgba(31,35,40,.12); font-weight: 600; }
 .pills { display: flex; flex-wrap: wrap; gap: 8px; }
 .pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--c-border-strong); background: var(--c-surface); color: var(--c-text); padding: 6px 14px; border-radius: 999px; font-size: 13px; cursor: pointer; }
 .pill.on { border-color: var(--c-accent); background: var(--c-accent-bg); color: var(--c-accent-text); font-weight: 600; }
@@ -489,7 +489,7 @@ input:focus, select:focus { outline: none; border-color: var(--c-accent); box-sh
 
 .rows { border: 1px solid var(--c-border); border-radius: 8px; overflow: hidden; }
 .row { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(280px, 1.2fr); gap: 16px; align-items: center; padding: 12px 16px; }
-.row + .row { border-top: 1px solid #eaeef2; }
+.row + .row { border-top: 1px solid var(--c-divider); }
 .row-label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .row-name { font-size: 13px; font-weight: 500; }
 .row-key { font-size: 11px; color: var(--c-text-subtle); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -502,7 +502,7 @@ input:focus, select:focus { outline: none; border-color: var(--c-accent); box-sh
 
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--c-text); }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-.switch .track { width: 36px; height: 20px; border-radius: 999px; background: #cfd8e3; position: relative; transition: background .15s; flex: none; }
+.switch .track { width: 36px; height: 20px; border-radius: 999px; background: var(--c-border-strong); position: relative; transition: background .15s; flex: none; }
 .switch .thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--c-surface); box-shadow: 0 1px 2px rgba(31,35,40,.25); transition: transform .15s; }
 .switch input:checked + .track { background: var(--c-success); }
 .switch input:checked + .track .thumb { transform: translateX(16px); }
@@ -516,7 +516,7 @@ input:focus, select:focus { outline: none; border-color: var(--c-accent); box-sh
 
 .table-wrap { padding: 0; overflow: hidden; }
 .table th { text-align: left; font-weight: 600; color: var(--c-text-muted); font-size: 12px; padding: 10px 16px; background: var(--c-surface-muted); border-bottom: 1px solid var(--c-border); }
-.table td { padding: 11px 16px; border-bottom: 1px solid #eaeef2; }
+.table td { padding: 11px 16px; border-bottom: 1px solid var(--c-divider); }
 .table tr:last-child td { border-bottom: none; }
 .table tr.on td { background: var(--c-accent-bg); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--c-text-muted); }

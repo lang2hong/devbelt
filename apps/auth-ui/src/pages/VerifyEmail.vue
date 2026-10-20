@@ -195,7 +195,7 @@ button.primary {
 .resend {
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid #eaeef2;
+  border-top: 1px solid var(--c-divider);
 }
 
 .resend input {
