@@ -74,7 +74,9 @@ describe('AdminUserDetailView', () => {
     expect(text).toContain('启用');
     expect(text).toContain('普通用户');
     expect(text).toContain('用户 ID');
-    expect(text).toContain('2026-01-01 08:00:00');
+    // 时间以本地时区渲染（CI=UTC，本地=+8）：只断言日期，避免时区依赖。
+    expect(text).toContain('注册时间');
+    expect(text).toContain('2026-01-01');
   });
 
   it('AI 积分页签：指标卡/充值聚合/近月用量/充值余额 + 请求记录', async () => {

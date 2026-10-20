@@ -218,8 +218,9 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
         gatewayFor: (c) => new MemoryPaymentGateway(c),
       });
 
-      const { orderNo } = await svc.createOrder(userId, 'pro', 'wechat');
-      const cbBody = Buffer.from(JSON.stringify({ orderNo, channelTradeNo: uniqueTradeNo(), amountCents: 9900, status: 'success' }));
+      const { orderNo, amountCents } = await svc.createOrder(userId, 'pro', 'wechat');
+      // 金额取创建订单的实际价格（pro 已由 migration 013 改为 ¥8），不写死历史价格。
+      const cbBody = Buffer.from(JSON.stringify({ orderNo, channelTradeNo: uniqueTradeNo(), amountCents, status: 'success' }));
       const headers = { 'x-payment-signature': signMemoryCallback(cbBody) };
 
       const outcome = await svc.handleCallback('wechat', cbBody, headers);
@@ -265,9 +266,9 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
         gatewayFor: (c) => new MemoryPaymentGateway(c),
       });
 
-      const { orderNo } = await svc.createOrder(userId, 'pro', 'wechat');
+      const { orderNo, amountCents } = await svc.createOrder(userId, 'pro', 'wechat');
       const tradeNo = uniqueTradeNo();
-      const cbBody = Buffer.from(JSON.stringify({ orderNo, channelTradeNo: tradeNo, amountCents: 9900, status: 'success' }));
+      const cbBody = Buffer.from(JSON.stringify({ orderNo, channelTradeNo: tradeNo, amountCents, status: 'success' }));
       const headers = { 'x-payment-signature': signMemoryCallback(cbBody) };
 
       const [a, b] = await Promise.all([
@@ -320,8 +321,8 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       const orderB = await svc.createOrder(userB, 'pro', 'wechat');
       const tradeNo = uniqueTradeNo();
 
-      const bodyA = Buffer.from(JSON.stringify({ orderNo: orderA.orderNo, channelTradeNo: tradeNo, amountCents: 9900, status: 'success' }));
-      const bodyB = Buffer.from(JSON.stringify({ orderNo: orderB.orderNo, channelTradeNo: tradeNo, amountCents: 9900, status: 'success' }));
+      const bodyA = Buffer.from(JSON.stringify({ orderNo: orderA.orderNo, channelTradeNo: tradeNo, amountCents: orderA.amountCents, status: 'success' }));
+      const bodyB = Buffer.from(JSON.stringify({ orderNo: orderB.orderNo, channelTradeNo: tradeNo, amountCents: orderB.amountCents, status: 'success' }));
 
       const [ra, rb] = await Promise.all([
         svc.handleCallback('wechat', bodyA, { 'x-payment-signature': signMemoryCallback(bodyA) }),

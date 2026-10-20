@@ -299,8 +299,8 @@ jobs:
 
       # db-ui 构建经 auth-client 源码把 `@devbelt/db-host/*` 解析到 db-host 的 dist；
       # 全新 checkout 无 dist（gitignored），必须先建 db-core + db-host（同 vsix-smoke job）。
-      - name: Build db-core + db-host + server + SPAs
-        run: pnpm -C packages/db-core build && pnpm -C packages/db-host build && pnpm -C apps/server build && DEVBELT_DB_CONSOLE_BASE=/db/ pnpm -C apps/db-ui build && DEVBELT_DB_AUTH_BASE=/ pnpm -C apps/auth-ui build && DEVBELT_DB_ADMIN_BASE=/admin/ pnpm -C apps/admin-ui build
+      - name: Build db-core + db-host + ai-core + server + SPAs
+        run: pnpm -C packages/db-core build && pnpm -C packages/db-host build && pnpm -C packages/ai-core build && pnpm -C apps/server build && DEVBELT_DB_CONSOLE_BASE=/db/ pnpm -C apps/db-ui build && DEVBELT_DB_AUTH_BASE=/ pnpm -C apps/auth-ui build && DEVBELT_DB_ADMIN_BASE=/admin/ pnpm -C apps/admin-ui build
 
       - name: Prepare Ed25519 signing keys
         run: |
@@ -352,7 +352,7 @@ jobs:
 
       # 扩展 bundle（out/）+ webview dist 必须先就绪，vsce 才能打进 vsix。
       - name: Build extension
-        run: pnpm -C packages/db-core build && pnpm -C packages/db-host build && pnpm -C apps/vscode-ext build
+        run: pnpm -C packages/db-core build && pnpm -C packages/db-host build && pnpm -C packages/ai-core build && pnpm -C apps/vscode-ext build
 
       - name: Run VSIX install smoke
         run: xvfb-run -a pnpm -C apps/vscode-ext vsix:smoke

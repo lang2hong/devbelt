@@ -52,7 +52,7 @@ describe.skipIf(!URL)('AI 月额度账本（real MySQL）', () => {
     await pool.end();
   });
 
-  it('migration 008：maxAiTokensMonthly 已按 free=100K / pro=2M 幂等入种子', async () => {
+  it('migration 013：maxAiTokensMonthly 已按 free=200K / pro=1M 幂等入种子', async () => {
     const [rows] = (await pool.query(
       `SELECT p.code AS code, v.value_json AS value_json
          FROM plans p
@@ -63,8 +63,8 @@ describe.skipIf(!URL)('AI 月额度账本（real MySQL）', () => {
     const byCode = new Map(
       rows.map((r) => [r.code, typeof r.value_json === 'string' ? JSON.parse(r.value_json) : r.value_json]),
     );
-    expect(byCode.get('free')).toBe(100_000);
-    expect(byCode.get('pro')).toBe(2_000_000);
+    expect(byCode.get('free')).toBe(200_000);
+    expect(byCode.get('pro')).toBe(1_000_000);
 
     // 重跑 migration 幂等：不追加定义/取值行。
     await runMigrations(db, [...migrations], LEGACY_MIGRATION_VERSIONS);
@@ -146,7 +146,8 @@ describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
     topupRepo = new MysqlAiTopupRepo(() => db);
     const plans = new FakePlanRepo([makeFreePlan()]);
     const free = plans.plans.find((p: Plan) => p.code === 'free')!;
-    free.features = { ...free.features, maxAiTokensMonthly: 1000 };
+    // FIFO 用例需要月段先耗尽：给一个小于单次预占（800）的月额度。
+    free.features = { ...free.features, maxAiTokensMonthly: 500 };
     quota = new AiQuotaService(
       new MysqlAiUsageRepo(() => db),
       topupRepo,
@@ -165,14 +166,15 @@ describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
 
   it('migration 009：SKU 种子存在且 orders 扩列生效', async () => {
     const skus = await topupRepo.listActiveSkus();
-    expect(skus.map((s) => s.code)).toEqual(['topup_500k', 'topup_2m', 'topup_10m']);
+    // migration 013：500 档停用，新增 1,000/5,000 积分档；按 sort_order 返回。
+    expect(skus.map((s) => s.code)).toEqual(['topup_1m', 'topup_2m', 'topup_5m', 'topup_10m']);
     const [cols] = await db.query<any[]>('SHOW COLUMNS FROM orders LIKE ?', ['purpose']);
     expect(cols).toHaveLength(1);
   });
 
   it('手工建单 + fulfill 重放：uq_grants_order 幂等（仅一行账本）', async () => {
     const service = new AiTopupService(topupRepo, (fn) => withTransaction(db, fn));
-    const created = await service.createManualOrder({ userId: USER_T, skuCode: 'topup_500k' });
+    const created = await service.createManualOrder({ userId: USER_T, skuCode: 'topup_1m' });
     expect(created.grantInserted).toBe(true);
     const [orderRows] = await db.query<any[]>('SELECT id FROM orders WHERE order_no = ?', [created.orderNo]);
     const orderId = Number(orderRows[0]!.id);
@@ -183,8 +185,8 @@ describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
       topupRepo.insertGrantInTx(tx, {
         userId: USER_T,
         orderId,
-        skuCode: 'topup_500k',
-        tokens: 500_000,
+        skuCode: 'topup_1m',
+        tokens: 1_000_000,
         expiresTime: new Date('2026-12-31T00:00:00Z'),
       }),
     );
@@ -197,10 +199,13 @@ describe.skipIf(!URL)('AI 加油包账本（real MySQL，P9.1）', () => {
     const available = await topupRepo.availability(USER_T, new Date('2026-10-15T00:00:00Z'));
     expect(available.remaining).toBeGreaterThan(0);
     const reservation = await quota.reserve(USER_T, { estimatedPromptTokens: 800, maxCompletionTokens: 0 });
+    // 月额度 500 先吃满，余下 300 由 grants 承接。
+    expect(reservation.reservedPromptTokens).toBe(500);
     expect(reservation.grantAllocations.length).toBe(1);
+    expect(reservation.grantAllocations[0]!.tokens).toBe(300);
     await quota.settle(reservation, { promptTokens: 800, completionTokens: 0 });
     const after = await topupRepo.availability(USER_T, new Date('2026-10-15T00:00:00Z'));
-    // 800 ≤ 月额度 1000 → 月段吸收，grants 不扣
-    expect(after.remaining).toBe(available.remaining);
+    // availability 只统计 grants：月段 500 已耗尽，grants 扣 300。
+    expect(after.remaining).toBe(available.remaining - reservation.grantAllocations[0]!.tokens);
   });
 });
