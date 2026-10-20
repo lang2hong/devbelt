@@ -19,7 +19,7 @@ function onKeydown(event: KeyboardEvent): void {
     <textarea
       v-model="model"
       class="ai-input-box"
-      rows="3"
+      rows="2"
       :placeholder="t('wv.ai.input.placeholder')"
       :disabled="props.generating"
       @keydown="onKeydown"
@@ -37,25 +37,33 @@ function onKeydown(event: KeyboardEvent): void {
 
 <style scoped>
 .ai-input {
-  padding: 6px 10px 10px;
-  border-top: 1px solid var(--vscode-panel-border);
+  position: relative;
+  margin: 6px 12px 12px;
 }
 .ai-input-box {
   width: 100%;
   box-sizing: border-box;
-  resize: vertical;
+  resize: none;
+  min-height: 64px;
+  max-height: 200px;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
-  border-radius: 4px;
-  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, transparent));
+  border-radius: 22px;
+  padding: 12px 96px 12px 18px;
   font-family: inherit;
-  font-size: var(--vscode-font-size, 13px);
+  font-size: calc(var(--vscode-font-size, 13px) + 1px);
+  line-height: 1.5;
+}
+.ai-input-box:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
 }
 .ai-input-actions {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
   display: flex;
-  justify-content: flex-end;
   gap: 6px;
-  margin-top: 6px;
 }
 </style>

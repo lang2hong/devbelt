@@ -665,7 +665,7 @@ function openContextDetail(): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 .ai-body {
@@ -695,7 +695,8 @@ function openContextDetail(): void {
   color: var(--vscode-foreground);
   font-family: inherit;
   font-size: calc(var(--vscode-font-size, 13px) - 2px);
-  padding: 4px 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
   cursor: pointer;
   text-align: left;
 }

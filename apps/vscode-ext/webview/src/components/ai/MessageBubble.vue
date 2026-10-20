@@ -127,9 +127,11 @@ watch(
 
 <style scoped>
 .ai-bubble {
-  padding: 6px 10px;
-  border-radius: 6px;
-  margin: 4px 0;
+  padding: 4px 2px;
+  border-radius: 18px;
+  margin: 8px 0;
+  line-height: 1.6;
+  font-size: calc(var(--vscode-font-size, 13px) + 1px);
   max-width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -137,11 +139,15 @@ watch(
 .ai-bubble-user {
   background: var(--vscode-input-background, rgba(128, 128, 128, 0.15));
   align-self: flex-end;
+  max-width: 88%;
+  padding: 8px 14px;
+  border-radius: 18px 18px 4px 18px;
 }
 .ai-bubble-assistant {
-  background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.08));
+  background: transparent;
 }
 .ai-bubble-error {
+  padding: 8px 14px;
   border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
   color: var(--vscode-errorForeground, #f48771);
 }
@@ -151,8 +157,8 @@ watch(
 }
 .ai-inline-code {
   background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
-  padding: 0 3px;
-  border-radius: 3px;
+  padding: 1px 5px;
+  border-radius: 5px;
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: var(--vscode-editor-font-size, 12px);
 }

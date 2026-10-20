@@ -51,7 +51,10 @@ onBeforeUnmount(() => observer?.disconnect());
 <template>
   <div ref="scroller" class="ai-messages" @scroll.passive="onScroll">
     <div ref="content" class="ai-messages-inner">
-      <p v-if="messages.length === 0 && !streaming" class="ai-empty">{{ t('wv.ai.empty') }}</p>
+      <div v-if="messages.length === 0 && !streaming" class="ai-empty">
+        <span class="ai-empty-spark ai-gradient-text" aria-hidden="true">✦</span>
+        <p class="ai-empty-text ai-gradient-text">{{ t('wv.ai.empty') }}</p>
+      </div>
       <MessageBubble v-for="(message, index) in messages" :key="index" :message="message" :db-type="props.dbType" :msg-idx="index" />
       <MessageBubble
         v-if="streaming"
@@ -70,7 +73,7 @@ onBeforeUnmount(() => observer?.disconnect());
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  padding: 6px 10px;
+  padding: 10px 14px;
 }
 .ai-messages-inner {
   display: flex;
@@ -79,8 +82,21 @@ onBeforeUnmount(() => observer?.disconnect());
   min-width: 0;
 }
 .ai-empty {
-  color: var(--vscode-descriptionForeground);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12vh;
   text-align: center;
-  margin-top: 24px;
+}
+.ai-empty-spark {
+  font-size: 28px;
+  line-height: 1;
+}
+.ai-empty-text {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 </style>

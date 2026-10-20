@@ -11,8 +11,8 @@ body {
   background: var(--vscode-button-secondaryBackground, transparent);
   color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
   border: 1px solid var(--vscode-button-border, transparent);
-  border-radius: 3px;
-  padding: 2px 8px;
+  border-radius: 999px;
+  padding: 3px 12px;
   cursor: pointer;
   font-size: calc(var(--vscode-font-size, 13px) - 1px);
   font-family: inherit;
@@ -30,6 +30,15 @@ body {
 .ai-btn-primary {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
+  border-radius: 999px;
+}
+
+/* Gemini 风点缀：渐变只用于标题/强调，底色与正文仍走 --vscode-* 以兼容各主题。 */
+.ai-gradient-text {
+  background: linear-gradient(90deg, #4285f4, #9b72cb 55%, #d96570);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .ai-btn-primary:hover:not(:disabled) {
