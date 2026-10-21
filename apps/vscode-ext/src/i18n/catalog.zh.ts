@@ -1249,6 +1249,7 @@ export const zh: MessageCatalog = {
   'wv.es.body': '请求体（JSON）',
   'wv.es.send': '发送',
   'wv.es.running': '执行中…',
+  'wv.es.cancelRequest': '取消请求',
   'wv.es.history': '历史',
   'wv.es.history.empty': '暂无请求历史。',
   'wv.es.history.clear': '清空历史',

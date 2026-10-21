@@ -88,6 +88,10 @@ function send(req: { id: string; method: string; path: string; body: string | nu
   result.value = null;
   post({ type: 'esRest', ...req });
 }
+function cancelRest(): void {
+  if (!lastRequest || !running.value) return;
+  post({ type: 'esCancelRest', id: lastRequest.id });
+}
 function confirmOk(): void {
   const c = confirm.value;
   confirm.value = null;
@@ -453,7 +457,7 @@ function confirmKeydown(e: KeyboardEvent): void {
       @run="runDsl" @save="saveDsl" @remove-saved="removeSavedDsl" @index-change="syncDslIndex" @load-more="loadMoreDsl" />
     <NodesTab v-show="tab === 'nodes'" :items="nodes" :error="nodesError" />
     <LogPanel v-show="tab === 'log'" :items="logEntries" />
-    <RestConsole v-show="tab === 'rest'" :read-only="readOnly" :running="running" :result="result" @send="send" />
+    <RestConsole v-show="tab === 'rest'" :read-only="readOnly" :running="running" :result="result" @send="send" @cancel="cancelRest" />
     </div>
 
     <div v-if="confirm" class="es-modal-backdrop">

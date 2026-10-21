@@ -21,6 +21,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   (e: 'send', payload: { id: string; method: string; path: string; body: string | null }): void;
+  (e: 'cancel'): void;
 }>();
 
 const { t } = useI18n();
@@ -114,7 +115,7 @@ onUnmounted(() => {
         <option v-for="m in methods" :key="m" :value="m">{{ m }}</option>
       </select>
       <input v-model="path" class="es-path" :placeholder="t('wv.es.path')" @keydown.enter="send" />
-      <button class="es-send" :disabled="running" @click="send">{{ running ? t('wv.es.running') : t('wv.es.send') }}</button>
+      <button class="es-send" :class="{ 'es-cancel': running }" @click="running ? emit('cancel') : send()">{{ running ? t('wv.es.cancelRequest') : t('wv.es.send') }}</button>
     </div>
     <div v-if="readOnly" class="es-readonly">{{ t('wv.es.readOnly') }}</div>
     <textarea v-model="body" :disabled="bodyDisabled" class="es-body" :placeholder="t('wv.es.body')" rows="4" />
@@ -160,6 +161,7 @@ onUnmounted(() => {
 .es-rest-request { display: flex; gap: 6px; flex-wrap: wrap; }
 .es-method { width: 90px; }
 .es-path { flex: 1; min-width: 180px; }
+.es-send.es-cancel { color: var(--vscode-errorForeground, #f85149); }
 .es-readonly { font-size: 12px; color: var(--vscode-editorWarning-foreground, #d29922); }
 .es-body { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
 .es-error { color: var(--vscode-errorForeground, #f85149); font-size: 12px; }

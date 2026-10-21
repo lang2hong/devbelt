@@ -1271,6 +1271,7 @@ export const en: MessageCatalog = {
   'wv.es.body': 'Request body (JSON)',
   'wv.es.send': 'Send',
   'wv.es.running': 'Running…',
+  'wv.es.cancelRequest': 'Cancel request',
   'wv.es.history': 'History',
   'wv.es.history.empty': 'No request history yet.',
   'wv.es.history.clear': 'Clear history',

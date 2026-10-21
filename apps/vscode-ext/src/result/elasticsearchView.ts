@@ -53,8 +53,8 @@ export class ElasticsearchView extends BaseWebView {
   /** ready 前缓存的「外部注入 DSL 执行」（如 AI Chat 面板运行）。 */
   private pendingDslInject: { type: 'esInjectDsl'; index: string; body: string } | null = null;
   private pending?: PendingConfirm;
-  /** 在途 REST 请求（每请求独立；dispose 时统一 abort，请求之间互不取消）。 */
-  private readonly inflight = new Set<AbortController>();
+  /** 在途 REST 请求（按请求 ID 独立；用户取消只 abort 对应请求，dispose 统一 abort）。 */
+  private readonly inflight = new Map<string, { ac: AbortController; cancelled: boolean }>();
   /** S4：请求日志订阅取消函数。 */
   private logUnsub?: () => void;
   /** S4.5：字段建议缓存（mapping 提取，per index）。 */
@@ -134,6 +134,7 @@ export class ElasticsearchView extends BaseWebView {
     }
     if (msg?.type === 'esRefreshCluster') { await this.pushCluster(); return; }
     if (msg?.type === 'esRest') { await this.handleRest(msg); return; }
+    if (msg?.type === 'esCancelRest') { this.cancelRest(msg.id); return; }
     if (msg?.type === 'esConfirm') { await this.handleConfirm(msg); return; }
     if (msg?.type === 'esLoadIndices') { await this.pushIndices(); return; }
     if (msg?.type === 'esLoadIndex') { await this.pushIndex(msg.id, msg.name); return; }
@@ -151,7 +152,7 @@ export class ElasticsearchView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
-    for (const ac of this.inflight) ac.abort();
+    for (const entry of this.inflight.values()) entry.ac.abort();
     this.inflight.clear();
     this.logUnsub?.();
     this.logUnsub = undefined;
@@ -514,9 +515,16 @@ export class ElasticsearchView extends BaseWebView {
     await this.pushSavedDsl();
   }
 
+  /** 用户取消：只中止指定请求；结果在 handleRest 的 abort 分支回写。 */
+  private cancelRest(id: string): void {
+    const entry = this.inflight.get(String(id ?? ''));
+    if (!entry) return;
+    entry.cancelled = true;
+    entry.ac.abort();
+  }
+
   /** 危险确认 → 只读 403 转单条解锁 → 执行 + 审计。 */
   private async handleRest(msg: Extract<EsUpMessage, { type: 'esRest' }>): Promise<void> {
-    const session = await this.session();
     const method = String(msg.method ?? 'GET').toUpperCase();
     // 原始输入（含 query/fragment）用于审计与确认展示；实际请求用拆出的 path/query。
     const rawInput = String(msg.path ?? '').trim();
@@ -554,17 +562,24 @@ export class ElasticsearchView extends BaseWebView {
     // 2) 执行（只读 force 解锁经 force 参数）。每请求独立 AbortController：
     //    索引操作与 REST 控制台可并发；同为 REST 的连续请求也不再互相取消。
     let res: EsResponse;
-    const ac = new AbortController();
-    this.inflight.add(ac);
+    const entry = { ac: new AbortController(), cancelled: false };
+    this.inflight.set(msg.id, entry);
     try {
-      res = await session.es.request(method, path, parsedBody as unknown, query, { force: msg.force === true, signal: ac.signal });
+      const session = await this.session();
+      res = await session.es.request(method, path, parsedBody as unknown, query, { force: msg.force === true, signal: entry.ac.signal });
     } catch (err) {
-      if (ac.signal.aborted) return; // dispose 中止：面板已关闭，不再回写结果
+      if (entry.ac.signal.aborted) {
+        // 用户取消回写 cancelled；dispose 中止不回写。
+        if (entry.cancelled) {
+          this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'cancelled', reason: l10n('wv.es.cancelled') } }, tookMs: 0 });
+        }
+        return;
+      }
       const message = (err as Error).message ?? String(err);
       this.postResult(msg.id, { status: 0, headers: {}, body: { error: { type: 'network_error', reason: message } }, tookMs: 0 });
       return;
     } finally {
-      this.inflight.delete(ac);
+      this.inflight.delete(msg.id);
     }
     // 3) 只读拦截（仅切面伪造的 403 哨兵；真实 ES 权限 403 不误弹解锁）。
     if (res.status === 403 && msg.force !== true && this.conn.readOnly === true && isReadOnlyGateResponse(res)) {

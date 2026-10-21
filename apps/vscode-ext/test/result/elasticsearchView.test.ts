@@ -752,6 +752,37 @@ describe('复核修复 N1（inflight）', () => {
     expect(ids).toEqual(['r1', 'r2']);
   });
 
+  it('esCancelRest：只中止指定请求并回写 cancelled', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    const signals: AbortSignal[] = [];
+    let startedCount = 0;
+    let bothStarted!: () => void;
+    const startedP = new Promise<void>((r) => { bothStarted = r; });
+    es.request.mockImplementation((_m: string, _p: string, _b: unknown, _q: unknown, o: any) => {
+      const idx = signals.length;
+      signals.push(o.signal);
+      startedCount += 1;
+      if (startedCount === 2) bothStarted();
+      if (idx === 0) {
+        return new Promise((_resolve, reject) => {
+          o.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }
+      return Promise.resolve(ok(200, { idx }));
+    });
+    const p1 = view.handleMessage({ type: 'esRest', id: 'r1', method: 'GET', path: '/slow', body: null });
+    const p2 = view.handleMessage({ type: 'esRest', id: 'r2', method: 'GET', path: '/fast', body: null });
+    await startedP;
+    await view.handleMessage({ type: 'esCancelRest', id: 'r1' });
+    await Promise.all([p1, p2]);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    const results = posts(view).filter((m) => m.type === 'esRestResult');
+    expect(results.find((m) => m.id === 'r1')).toMatchObject({ status: 0, body: { error: { type: 'cancelled' } } });
+    expect(results.find((m) => m.id === 'r2')).toMatchObject({ status: 200 });
+  });
+
   it('N1：dispose 统一 abort 全部在途请求，且不再回写结果', async () => {
     const { view, es } = makeView();
     await mount(view);

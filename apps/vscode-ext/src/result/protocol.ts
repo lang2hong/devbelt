@@ -458,6 +458,7 @@ export type EsDownMessage =
 export type EsUpMessage =
   | { type: 'esRefreshCluster' }
   | { type: 'esRest'; id: string; method: string; path: string; body: string | null; confirmedDanger?: boolean; force?: boolean }
+  | { type: 'esCancelRest'; id: string }
   | { type: 'esConfirm'; id: string; accept: boolean; typedName?: string | null }
   | { type: 'esLoadIndices' }
   | { type: 'esLoadIndex'; id: string; name: string }
