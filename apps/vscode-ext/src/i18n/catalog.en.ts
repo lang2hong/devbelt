@@ -1340,6 +1340,8 @@ export const en: MessageCatalog = {
   'wv.ai.chart.total': 'Total {total}',
   'wv.ai.chart.pie': 'Pie',
   'wv.ai.quota.none': 'Sign in to use the server proxy credits.',
+  'wv.ai.quota.delta': '-{credits} credits',
+  'wv.ai.quota.barTitle': 'Quota used',
   'wv.ai.rules.title': 'Business rules',
   'wv.ai.rules.domain': 'Business terminology (one per line, term=meaning)',
   'wv.ai.rules.domainPlaceholder': 'e.g.\nGMV=total of completed orders\nActive user=logged in within 30 days',

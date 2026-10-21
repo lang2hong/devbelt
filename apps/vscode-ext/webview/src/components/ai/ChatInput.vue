@@ -28,23 +28,25 @@ function onKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="ai-input">
-    <textarea
-      v-model="model"
-      class="ai-input-box"
-      ref="box"
-      rows="1"
-      :placeholder="t('wv.ai.input.placeholder')"
-      :disabled="props.generating"
-      @keydown="onKeydown"
-      @input="resize"
-    ></textarea>
-    <div class="ai-input-actions">
-      <button v-if="props.generating" class="ai-btn ai-btn-primary" @click="emit('stop')">
-        {{ t('wv.ai.stop') }}
-      </button>
-      <button v-else class="ai-btn ai-btn-primary" :disabled="!model.trim()" @click="emit('send')">
-        {{ t('wv.ai.send') }}
-      </button>
+    <div class="ai-input-field">
+      <textarea
+        ref="box"
+        v-model="model"
+        class="ai-input-box"
+        rows="1"
+        :placeholder="t('wv.ai.input.placeholder')"
+        :disabled="props.generating"
+        @keydown="onKeydown"
+        @input="resize"
+      ></textarea>
+      <div class="ai-input-actions">
+        <button v-if="props.generating" class="ai-btn ai-btn-primary" @click="emit('stop')">
+          {{ t('wv.ai.stop') }}
+        </button>
+        <button v-else class="ai-btn ai-btn-primary" :disabled="!model.trim()" @click="emit('send')">
+          {{ t('wv.ai.send') }}
+        </button>
+      </div>
     </div>
     <p class="ai-input-hint">{{ t('wv.ai.input.hint') }}</p>
   </div>
@@ -52,8 +54,10 @@ function onKeydown(event: KeyboardEvent): void {
 
 <style scoped>
 .ai-input {
-  position: relative;
   margin: 6px 12px 12px;
+}
+.ai-input-field {
+  position: relative;
 }
 .ai-input-box {
   width: 100%;
@@ -65,7 +69,7 @@ function onKeydown(event: KeyboardEvent): void {
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, transparent));
   border-radius: 22px;
-  padding: 12px 96px 12px 18px;
+  padding: 12px 116px 12px 18px;
   font-family: inherit;
   font-size: calc(var(--vscode-font-size, 13px) + 1px);
   line-height: 1.5;
@@ -86,5 +90,13 @@ function onKeydown(event: KeyboardEvent): void {
   bottom: 10px;
   display: flex;
   gap: 6px;
+}
+.ai-input-actions .ai-btn {
+  min-width: 92px;
+  height: 36px;
+  padding: 0 20px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
 }
 </style>

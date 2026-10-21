@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 export interface ProviderState {
@@ -124,6 +124,21 @@ function toCredits(tokens: number): string {
   return String(Number(credits.toFixed(1)));
 }
 
+const deltaLabel = ref<string | null>(null);
+let deltaTimer: number | undefined;
+watch(
+  () => props.quota,
+  (next, prev) => {
+    if (!next || !prev) return;
+    const saved = prev.remaining - next.remaining;
+    if (saved <= 0) return;
+    deltaLabel.value = t('wv.ai.quota.delta', { credits: toCredits(saved) });
+    if (deltaTimer) window.clearTimeout(deltaTimer);
+    deltaTimer = window.setTimeout(() => { deltaLabel.value = null; }, 2400);
+  },
+);
+onBeforeUnmount(() => { if (deltaTimer) window.clearTimeout(deltaTimer); });
+
 const quotaLabel = computed(() => {
   const quota = props.quota;
   if (!quota) return t('wv.ai.quota.none');
@@ -137,6 +152,14 @@ const quotaLabel = computed(() => {
   }
   return t('wv.ai.quota.value', { used: toCredits(quota.used), limit: toCredits(quota.limit), remaining: toCredits(quota.remaining) });
 });
+
+const usedPct = computed(() => {
+  const q = props.quota;
+  if (!q) return 0;
+  const total = q.used + q.remaining;
+  return total > 0 ? Math.min(100, Math.max(0, (q.used / total) * 100)) : 0;
+});
+const quotaLow = computed(() => !!props.quota && props.quota.remaining <= 0);
 
 function onSelect(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -174,7 +197,8 @@ function onSelect(event: Event): void {
       </button>
     </div>
     <div class="ai-context-row">
-      <span class="ai-context-summary">{{ quotaLabel }}</span>
+      <span class="ai-context-summary" :class="{ 'ai-quota-low': quotaLow }">{{ quotaLabel }}</span>
+      <span v-if="deltaLabel" class="ai-quota-delta" role="status" aria-live="polite">{{ deltaLabel }}</span>
       <button class="ai-btn ai-quota-refresh" :title="t('wv.ai.quota.refresh')" @click="emit('refreshQuota')">↻</button>
       <button
         v-if="quota"
@@ -185,6 +209,9 @@ function onSelect(event: Event): void {
       <span class="ai-spacer"></span>
       <button class="ai-btn" @click="emit('openModelAccess')">{{ t('wv.ai.modelAccess') }}</button>
       <button class="ai-btn" @click="emit('openSettings')">{{ t('wv.ai.settings') }}</button>
+    </div>
+    <div v-if="quota" class="ai-quota-bar" :class="{ low: quotaLow }" :title="t('wv.ai.quota.barTitle')">
+      <span :style="{ width: `${usedPct}%` }"></span>
     </div>
   </div>
 </template>

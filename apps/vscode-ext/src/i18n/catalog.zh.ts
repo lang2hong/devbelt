@@ -1318,6 +1318,8 @@ export const zh: MessageCatalog = {
   'wv.ai.chart.total': '总计 {total}',
   'wv.ai.chart.pie': '饼图',
   'wv.ai.quota.none': '登录后使用服务端代理积分。',
+  'wv.ai.quota.delta': '-{credits} 积分',
+  'wv.ai.quota.barTitle': '额度使用比例',
   'wv.ai.rules.title': '业务规则',
   'wv.ai.rules.domain': '业务术语（每行一条，词=含义）',
   'wv.ai.rules.domainPlaceholder': '例：\nGMV=已完成订单总额\n活跃用户=近 30 天登录过',
