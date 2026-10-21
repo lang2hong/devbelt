@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSparklinePath, filterCommandLog, isNearBottom, pushCommandHistory } from '../../webview/src/components/redis/types';
+import { buildSparklinePath, filterCommandLog, filterSlowlog, formatDurationMicros, isNearBottom, parseRedisInfoSections, pushCommandHistory, redisInfoValue } from '../../webview/src/components/redis/types';
 
 describe('pushCommandHistory（Console 命令历史）', () => {
   it('忽略空白与连续重复，按时间正序保留最近 N 条', () => {
@@ -50,5 +50,51 @@ describe('buildSparklinePath（空值断点）', () => {
   it('无足够有效点时不生成路径', () => {
     expect(buildSparklinePath([null, null], 100, 28)).toBe('');
     expect(buildSparklinePath([1], 100, 28)).toBe('');
+  });
+});
+
+describe('parseRedisInfoSections / redisInfoValue（ServerStatus）', () => {
+  const info = [
+    '# Server',
+    'redis_version:7.2.0',
+    'executable:/usr/bin/redis-server',
+    '',
+    '# Clients',
+    'connected_clients:3',
+    'global_clients:3',
+    'uptime_in_seconds:3661',
+  ].join('\n');
+
+  it('按 # 分节并保留冒号后的完整值', () => {
+    const sections = parseRedisInfoSections(info);
+    expect(sections.map((s) => s.name)).toEqual(['Server', 'Clients']);
+    expect(sections[0].rows[1]).toEqual(['executable', '/usr/bin/redis-server']);
+    expect(sections[1].rows).toContainEqual(['uptime_in_seconds', '3661']);
+  });
+
+  it('跨节查找字段，缺失返回 null', () => {
+    const sections = parseRedisInfoSections(info);
+    expect(redisInfoValue(sections, 'connected_clients')).toBe('3');
+    expect(redisInfoValue(sections, 'missing')).toBeNull();
+  });
+});
+
+describe('filterSlowlog / formatDurationMicros（SlowLog）', () => {
+  const entries = [
+    { command: 'GET foo', clientAddr: '127.0.0.1:1', clientName: 'app' },
+    { command: 'SET bar 1', clientAddr: '127.0.0.1:2', clientName: 'worker' },
+  ];
+
+  it('按命令或客户端过滤，空查询返回副本', () => {
+    expect(filterSlowlog(entries, 'get')).toEqual([entries[0]]);
+    expect(filterSlowlog(entries, 'worker')).toEqual([entries[1]]);
+    expect(filterSlowlog(entries, '')).toEqual(entries);
+    expect(filterSlowlog(entries, '')).not.toBe(entries);
+  });
+
+  it('微秒原值 + 毫秒可读值；非法值 —', () => {
+    expect(formatDurationMicros(1234)).toBe('1,234 µs (1.23 ms)');
+    expect(formatDurationMicros(0)).toBe('0 µs (0.00 ms)');
+    expect(formatDurationMicros(Number.NaN)).toBe('—');
   });
 });

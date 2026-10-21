@@ -1,6 +1,6 @@
 import { Event, EventEmitter, TreeDataProvider, TreeItem, TreeItemCollapsibleState, ThemeIcon, ThemeColor, Uri, window } from 'vscode';
 import type { CancellationToken } from 'vscode';
-import { DatabaseType, DialectRegistry, parseCatIndices, redisDatabases, redisKeyspace, sortIndexSummaries } from '@devbelt/db-core';
+import { DatabaseType, DialectRegistry, parseCatIndices, redisKeyspace, sortIndexSummaries } from '@devbelt/db-core';
 import { connectionColorToken } from '../utils/connectionColor';
 import { ConnectionStore, type SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
@@ -11,7 +11,7 @@ import { dbTypeIconFile, type ConnIconState } from './dbTypeIcon';
 import { connectionResource } from './connectionDecoration';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { RedisKeyTreeState } from './redisKeyTreeState';
-import { mergeRedisDbIndexes } from './redisDbList';
+import { visibleRedisDbIndexes } from './redisDbList';
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
 
@@ -318,11 +318,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.id = `${conn.id}:cluster`;
         return [node];
       }
-      // D11「DB 列表来源」：CONFIG GET databases（可用时全列，含空库）∪ keyspace ∪ 默认库；
-      // 空库无 keyspace 计数（无 description），仍可达（搜索/新建键）。
+      // D11「DB 列表来源」：仅展示 keyspace 中实际有键的库；全空实例保留默认库以便新建键。
       const stats = await redisKeyspace(session.client);
       const byIndex = new Map(stats.map((s) => [s.index, s]));
-      const indexes = mergeRedisDbIndexes(stats.map((s) => s.index), await redisDatabases(session.client), conn.redisDb ?? 0);
+      const indexes = visibleRedisDbIndexes(stats.map((s) => s.index), conn.redisDb ?? 0);
       return indexes.map((index) => {
         const label = `db${index}`;
         const node = new DbTreeNode(

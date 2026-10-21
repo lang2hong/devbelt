@@ -246,6 +246,11 @@ onUnmounted(() => {
 input { padding: 3px 5px; font-size: 12px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; }
 input.id, input.num { width: 120px; flex: none; }
 table { width: 100%; border-collapse: collapse; }
+table.entries, table.groups {
+  border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, transparent);
+}
 th, td { text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.12)); vertical-align: top; }
 th.check { width: 28px; }
 .row-actions { white-space: nowrap; text-align: right; }

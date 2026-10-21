@@ -696,6 +696,7 @@
       {
         "command": "devbelt.refreshConnection",
         "title": "%cmd.refreshConnection%",
+        "icon": "$(refresh)",
         "category": "DB Client"
       },
       {
@@ -766,6 +767,7 @@
       {
         "command": "devbelt.copyNodeName",
         "title": "%cmd.copyName%",
+        "icon": "$(copy)",
         "category": "DB Client"
       },
       {
@@ -1391,7 +1393,7 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^column\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.refreshNode",
@@ -1617,7 +1619,17 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^schema\\./",
-          "group": "9_copy"
+          "group": "0_copy"
+        },
+        {
+          "command": "devbelt.refreshConnection",
+          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
+          "group": "inline"
+        },
+        {
+          "command": "devbelt.copyNodeName",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
+          "group": "inline"
         },
         {
           "command": "devbelt.openConnection",
@@ -1707,7 +1719,7 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && (viewItem == esIndexCategory.ELASTICSEARCH || viewItem == esIndexCategory.ELASTICSEARCH.ro || viewItem == esIndex.ELASTICSEARCH || viewItem == esIndex.ELASTICSEARCH.ro)",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.redis.console",
@@ -1752,7 +1764,7 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && (viewItem == redisDb.REDIS || viewItem == redisDb.REDIS.ro)",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.redis.deleteByPattern",
@@ -1797,12 +1809,7 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && (viewItem == redisKey.REDIS || viewItem == redisKey.REDIS.ro)",
-          "group": "9_copy"
-        },
-        {
-          "command": "devbelt.deleteConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "8_danger"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.refreshNode",
@@ -1872,92 +1879,92 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_table\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_view\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_function\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_event\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_query\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_index\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_trigger\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^category_foreignKey\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^view\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^index\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^trigger\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^foreignKey\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^routine\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^event\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^savedQuery\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^queryFolder\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^group\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         },
         {
           "submenu": "devbelt.connectionManage",
@@ -1986,11 +1993,6 @@
         }
       ],
       "devbelt.connectionManage": [
-        {
-          "command": "devbelt.refreshConnection",
-          "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE|REDIS|ELASTICSEARCH)(\\.ro)?$/",
-          "group": "0_refresh"
-        },
         {
           "command": "devbelt.moveConnectionUp",
           "when": "view == devbelt.explorer && viewItem =~ /^connection/",
@@ -2022,9 +2024,9 @@
           "group": "3_edit"
         },
         {
-          "command": "devbelt.copyNodeName",
+          "command": "devbelt.deleteConnection",
           "when": "view == devbelt.explorer && viewItem =~ /^connection/",
-          "group": "9_copy"
+          "group": "8_danger"
         }
       ],
       "devbelt.connectionTools": [
@@ -2126,7 +2128,7 @@
         {
           "command": "devbelt.copyNodeName",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
-          "group": "9_copy"
+          "group": "0_copy"
         }
       ],
       "devbelt.databaseData": [

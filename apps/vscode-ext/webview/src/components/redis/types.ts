@@ -103,6 +103,59 @@ export function matchesTextFilter(text: string, filter: string): boolean {
   return !q || text.toLowerCase().includes(q);
 }
 
+export interface RedisInfoSection {
+  name: string;
+  rows: [string, string][];
+}
+
+/** Redis INFO 文本 → 分节 key/value 表；仅接受 `key:value` 行。 */
+export function parseRedisInfoSections(info: string): RedisInfoSection[] {
+  const out: RedisInfoSection[] = [];
+  let current: RedisInfoSection = { name: '', rows: [] };
+  for (const raw of info.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('#')) {
+      if (current.name || current.rows.length) out.push(current);
+      current = { name: line.replace(/^#\s*/, ''), rows: [] };
+      continue;
+    }
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    current.rows.push([line.slice(0, colon), line.slice(colon + 1)]);
+  }
+  if (current.name || current.rows.length) out.push(current);
+  return out;
+}
+
+/** 在 INFO 分节中按字段名查找第一个值（跨节）。 */
+export function redisInfoValue(sections: readonly RedisInfoSection[], key: string): string | null {
+  for (const section of sections) {
+    for (const [k, v] of section.rows) if (k === key) return v;
+  }
+  return null;
+}
+
+export interface SlowlogFilterItem {
+  command: string;
+  clientAddr: string;
+  clientName: string;
+}
+
+/** SlowLog 搜索：命令、客户端地址/名称，大小写不敏感。 */
+export function filterSlowlog<T extends SlowlogFilterItem>(entries: readonly T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...entries];
+  return entries.filter((e) => `${e.command} ${e.clientAddr} ${e.clientName}`.toLowerCase().includes(q));
+}
+
+/** SlowLog 耗时：保留微秒原值，同时给出毫秒可读值。 */
+export function formatDurationMicros(micros: number): string {
+  if (!Number.isFinite(micros) || micros < 0) return '—';
+  const us = Math.round(micros);
+  return `${us.toLocaleString('en-US')} µs (${(us / 1000).toFixed(2)} ms)`;
+}
+
 /** 命令历史：去掉空行与连续重复，按时间正序保留最近 limit 条。 */
 export function pushCommandHistory(history: readonly string[], command: string, limit = 50): string[] {
   const line = command.trim();

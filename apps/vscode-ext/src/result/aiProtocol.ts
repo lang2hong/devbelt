@@ -101,6 +101,17 @@ export interface AiFinishDown {
 export interface AiQuotaUpdateDown {
   type: 'quotaUpdate';
   quota: AiQuotaState | null;
+  /** 本次刷新是否成功（手动刷新反馈；缺省按 quota 是否存在判断）。 */
+  ok?: boolean;
+  /** 手动刷新请求 id；用于忽略自动刷新与手动刷新的交错回执。 */
+  requestId?: string;
+}
+
+/** 模型保存后的轻量 provider 状态更新（不重建上下文明细）。 */
+export interface AiProviderUpdateDown {
+  type: 'providerUpdate';
+  provider: AiProviderState;
+  isLoggedIn: boolean;
 }
 
 export interface AiContextChangedDown {
@@ -145,7 +156,8 @@ export interface AiModelAccessDown {
   customModels: Record<string, string[]>;
   hasKey: boolean;
   prefs: { selection: boolean; custom: boolean; key: boolean };
-  catalog: Array<{
+  /** 完整快照携带；保存回执省略以跳过厂商目录网络请求。 */
+  catalog?: Array<{
     code: string;
     name: { en: string; zh: string };
     baseUrl: string;
@@ -227,6 +239,7 @@ export type AiDownMessage =
   | AiChunkDown
   | AiFinishDown
   | AiQuotaUpdateDown
+  | AiProviderUpdateDown
   | AiContextChangedDown
   | AiSessionListDown
   | AiSessionLoadedDown
@@ -360,7 +373,7 @@ export type AiUpMessage =
   | AiRequestTableNoteUp
   | AiSaveTableNoteUp
   | AiFetchColumnSampleUp
-  | { type: 'requestQuotaRefresh' }
+  | { type: 'requestQuotaRefresh'; requestId?: string }
   | { type: 'openConsole'; path: string }
   | { type: 'openSettings' }
   | { type: 'setApiKey' }

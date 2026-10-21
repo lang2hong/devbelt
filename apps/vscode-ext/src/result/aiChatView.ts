@@ -286,7 +286,7 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'requestQuotaRefresh':
-        await this.refreshQuota();
+        await this.refreshQuota(typeof msg.requestId === 'string' ? msg.requestId : undefined);
         return;
       case 'openConsole': {
         // 白名单（P9.1c）：Chat 配额条「购买加油包」跳浏览器控制台购买页。
@@ -751,11 +751,11 @@ export class AiChatView extends BaseWebView {
 
   /** Context 抽屉明细：schema 文本 + 域上下文/默认指令原文（只读展示）。 */
   /** 模型接入快照（配置/目录/勾选；不含 Key 值）。 */
-  private async pushModelAccess(saveError?: string): Promise<void> {
+  private async pushModelAccess(saveError?: string, includeCatalog = true): Promise<void> {
     const fields = this.deps.modelAccessStore.current();
     const prefs = this.deps.modelAccessStore.getPrefs();
     const hasKey = await this.deps.keyStore.hasApiKey();
-    const catalog = await this.deps.providerCatalog.get();
+    const catalog = includeCatalog ? await this.deps.providerCatalog.get() : undefined;
     this.post({
       type: 'modelAccess',
       mode: fields.mode,
@@ -766,7 +766,7 @@ export class AiChatView extends BaseWebView {
       customModels: fields.customModels,
       hasKey,
       prefs,
-      catalog,
+      ...(catalog ? { catalog } : {}),
       ...(saveError ? { saveError } : {}),
     } as never);
   }
@@ -774,7 +774,7 @@ export class AiChatView extends BaseWebView {
   private async onSaveModelAccess(msg: AiSaveModelAccessUp): Promise<void> {
     const parsed = parseModelAccessSave(msg);
     if (!parsed.ok) {
-      await this.pushModelAccess(parsed.error);
+      await this.pushModelAccess(parsed.error, false);
       return;
     }
     const value = parsed.value;
@@ -790,9 +790,11 @@ export class AiChatView extends BaseWebView {
     if (value.clearKey) await this.deps.keyStore.clearApiKey();
     else if (value.apiKey) await this.deps.keyStore.setApiKey(value.apiKey);
     await applyModelAccessRuntime({ mode: value.mode, baseUrl: value.baseUrl, model: value.model });
-    // 保存回执：新快照 + 刷新 provider 状态（配额/提示条随模式变化）。
-    await this.pushInit();
-    await this.pushModelAccess();
+    // 保存回执：只回模型配置 + provider 状态，不重建 schema 上下文/不拉厂商目录。
+    await this.pushModelAccess(undefined, false);
+    await this.pushProviderUpdate();
+    // 配额刷新走后台，不阻塞保存回执。
+    void this.refreshQuota();
   }
 
   /** 测试连接（不保存）：直连 chat/completions 最小请求，失败映射稳定原因码。 */
@@ -952,9 +954,19 @@ export class AiChatView extends BaseWebView {
     this.post({ type: 'sessionLoaded', session: session ?? emptySession() } as never);
   }
 
-  private async refreshQuota(): Promise<void> {
-    const quota = await this.fetchQuotaState();
-    this.post({ type: 'quotaUpdate', quota } as never);
+  private async refreshQuota(requestId?: string): Promise<void> {
+    try {
+      const quota = await this.fetchQuotaState();
+      this.post({ type: 'quotaUpdate', quota, ok: quota !== null, ...(requestId ? { requestId } : {}) } as never);
+    } catch {
+      this.post({ type: 'quotaUpdate', quota: null, ok: false, ...(requestId ? { requestId } : {}) } as never);
+    }
+  }
+
+  /** 轻量 provider 状态回执（模型保存后使用；不查 schema/上下文）。 */
+  private async pushProviderUpdate(): Promise<void> {
+    const provider = await this.deps.service.describeProvider();
+    this.post({ type: 'providerUpdate', provider, isLoggedIn: this.deps.auth.isLoggedIn() } as never);
   }
 
   private async fetchQuotaState(): Promise<AiQuotaState | null> {

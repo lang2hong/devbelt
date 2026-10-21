@@ -39,7 +39,10 @@ describe('树右键菜单分组', () => {
   it('连接/表/数据库的高级操作已进入对应子菜单', () => {
     const has = (menu: string, cmd: string): boolean => (menus[menu] ?? []).some((e) => e.command === cmd);
     expect(has('devbelt.connectionManage', 'devbelt.cloneConnection')).toBe(true);
-    expect(has('devbelt.connectionManage', 'devbelt.refreshConnection')).toBe(true);
+    expect(has('devbelt.connectionManage', 'devbelt.deleteConnection')).toBe(true);
+    expect(has('devbelt.connectionManage', 'devbelt.refreshConnection')).toBe(false);
+    expect(context.some((e) => e.command === 'devbelt.refreshConnection' && e.group === 'inline')).toBe(true);
+    expect(context.some((e) => e.command === 'devbelt.copyNodeName' && e.group === 'inline')).toBe(true);
     expect(has('devbelt.connectionTools', 'devbelt.importData')).toBe(true);
     expect(has('devbelt.connectionTools', 'devbelt.manageUsers')).toBe(true);
     expect(has('devbelt.tableStructure', 'devbelt.addColumn')).toBe(true);

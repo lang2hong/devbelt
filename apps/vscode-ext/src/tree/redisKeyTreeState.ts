@@ -524,13 +524,19 @@ export class RedisKeyTreeState {
         ...group.keys.map((k) => this.redisKeyNode(parent, k)),
       ];
       // 搜索也提供续页（MATCH 由 loadMoreRedisKeys 沿用），否则大结果集只能看到第一页。
-      // 达软上限→「载入全部」；扫完→不可点击的「已全部加载」哨兵；否则→「加载更多」。
+      // 达软上限→「载入全部」；未扫完→唯一「加载更多」；扫完不再挂哨兵。
       if (keys.length >= REDIS_TREE_SOFT_CAP) out.push(this.redisLoadAllNode(parent));
-      else if (this.redisTreeDone(conn, dbIndex)) out.push(this.redisLoadedAllNode(parent));
-      else out.push(this.redisLoadMoreNode(parent));
+      else if (!this.redisTreeDone(conn, dbIndex)) out.push(this.redisLoadMoreNode(parent));
       return out;
     }
     const full = this.redisFolderFull.get(this.redisFullFolderKey(conn.id, dbIndex, prefix));
+    const partKey = this.redisFolderPartKey(conn.id, dbIndex, prefix);
+    const partStarted = this.redisFolderCursors.has(partKey) || this.redisFolderClusterCursors.has(partKey);
+    // 文件夹首次展开自动补一页，避免每层都先显示「加载更多」；仍有剩余时保留唯一哨兵。
+    if (!full?.complete && !this.redisTreeDone(conn, dbIndex) && !this.redisFolderScanDone(conn, dbIndex, prefix) && !partStarted) {
+      const res = await this.loadMoreFolderKeys(parent, 1);
+      if (res.error) window.showErrorMessage(l10n('redis.tree.loadFailed'));
+    }
     // 仅完整快照优先；否则回退根扁平集（取消/错误不落快照，自然不会出现空文件夹视图）。
     const keys = full?.complete ? full.keys : (this.redisKeys.get(this.redisRootKey(conn.id, dbIndex)) ?? []);
     const group = groupRedisKeyChildren(keys, prefix, sep);
@@ -595,21 +601,6 @@ export class RedisKeyTreeState {
     const count = source.filter((k) => k.startsWith(base)).length;
     n.description = l10n('redis.tree.loadedCount', { count: String(count) });
     n.command = { command: 'devbelt.redis.loadMoreFolderKeys', title: l10n('redis.tree.loadMore') };
-    return n;
-  }
-
-  /** 根层扫完的「已全部加载」哨兵（不可点击），明确告知不会再有更多。 */
-  private redisLoadedAllNode(parent: DbTreeNode): DbTreeNode {
-    const n = new DbTreeNode(
-      l10n('redis.tree.loadedAll', { count: String(this.redisLoadedCount(parent)) }),
-      TreeItemCollapsibleState.None,
-      NodeKind.RedisKeysLoadedAll,
-      parent.conn,
-      undefined,
-      parent,
-    );
-    n.redisDbIndex = parent.redisDbIndex;
-    n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:loadedall`;
     return n;
   }
 

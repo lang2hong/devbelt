@@ -165,6 +165,8 @@ export class RedisView extends BaseWebView {
     if (msg?.type === 'ready') {
       if (!this.initSent) {
         this.initSent = true;
+        // 新一轮 webview 加载：ready 前禁止直接 post，避免重载窗口期值消息丢失。
+        this.webviewReady = false;
         this.post({ type: 'init', mode: 'redis' });
         return;
       }
@@ -431,8 +433,8 @@ export class RedisView extends BaseWebView {
     // 命令日志/连接事件订阅：任一面板打开即建立（断线审计依赖此）。
     this.ensureSubscriptions(session);
     if (this.panelType === 'keyBrowser') {
-      // 值面板：无键树，仅按 initialKey（树点键）加载值；否则空态等用户从树选键。
-      const k = this.initialKey;
+      // 值面板：优先 initialKey（树点键），重载后回退 lastKey，避免面板空白。
+      const k = this.initialKey ?? this.lastKey;
       this.initialKey = undefined;
       if (k) await this.enqueuePushValue(k);
       return;

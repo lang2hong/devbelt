@@ -12,7 +12,7 @@ import { connectionTargetChanged } from '../utils/connectionTarget';
 import { diagInfo, diagWarn } from '../utils/diagnostics';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { ElasticsearchConnectionSession, RedisConnectionSession } from '../connection/connectionSession';
+import type { RedisConnectionSession } from '../connection/connectionSession';
 import { esAuthMissingMessage, esAuthOf } from '../connection/esAuth';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
@@ -28,15 +28,6 @@ async function redisServerVersion(session: RedisConnectionSession): Promise<stri
     const info = await session.client.info('server');
     const m = /^redis_version:([^\r\n]+)/m.exec(info);
     return m ? m[1].trim() : '';
-  } catch { return ''; }
-}
-
-/** ES：GET / 取 version.number（打开连接时展示；失败留空）。 */
-async function esServerVersion(session: ElasticsearchConnectionSession): Promise<string> {
-  try {
-    const res = await session.es.ping();
-    const body = res.body as { version?: { number?: string } } | null;
-    return body?.version?.number ?? '';
   } catch { return ''; }
 }
 
@@ -160,7 +151,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       const ver = session.kind === 'redis'
         ? await redisServerVersion(session)
         : session.kind === 'elasticsearch'
-          ? await esServerVersion(session)
+          ? (session.serverVersion ?? '')
           : await queryServerVersion(session, conn.dbType);
       treeProvider.setConnVersion(conn.id, `${conn.dbType} ${ver}`.trim());
       treeProvider.refresh();

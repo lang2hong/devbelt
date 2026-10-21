@@ -163,7 +163,13 @@ const modelAccess = ref<{
 const showModelAccessDialog = ref(false);
 const maTestResult = ref<ModelAccessTestResult | null>(null);
 const maTesting = ref(false);
-let savingModelAccess = false;
+const savingModelAccess = ref(false);
+/** 手动积分刷新状态：id 用于忽略自动刷新回执交错。 */
+const quotaRefreshing = ref(false);
+const quotaFeedback = ref<'ok' | 'failed' | null>(null);
+const quotaRequestId = ref<string | null>(null);
+let quotaSeq = 0;
+let quotaFeedbackTimer: number | undefined;
 function openModelAccess(): void {
   post({ type: 'requestModelAccess' });
   showModelAccessDialog.value = true;
@@ -179,7 +185,8 @@ function saveModelAccess(payload: {
   clearKey: boolean;
   prefs: ModelAccessSyncPrefs;
 }): void {
-  savingModelAccess = true;
+  if (savingModelAccess.value) return;
+  savingModelAccess.value = true;
   post({ type: 'saveModelAccess', ...payload });
 }
 function testModelAccess(payload: { baseUrl: string; model: string; apiKey: string }): void {
@@ -210,6 +217,8 @@ onMounted(() => {
         setLanguage(!!msg.isZh);
         provider.value = msg.provider ?? null;
         quota.value = msg.quota ?? null;
+        quotaRefreshing.value = false;
+        quotaFeedback.value = null;
         context.value = msg.context ?? null;
         connections.value = Array.isArray(msg.connections) ? msg.connections : [];
         sessions.value = Array.isArray(msg.sessions) ? msg.sessions : [];
@@ -277,16 +286,19 @@ onMounted(() => {
             custom: msg.prefs?.custom !== false,
             key: msg.prefs?.key !== false,
           },
-          catalog: Array.isArray(msg.catalog) ? msg.catalog : [],
+          catalog: Array.isArray(msg.catalog) && msg.catalog.length > 0 ? msg.catalog : modelAccess.value.catalog,
           ...(msg.saveError ? { saveError: String(msg.saveError) } : {}),
         };
         // 保存回执：成功关弹层；失败保留并显示错误码。
-        if (savingModelAccess) {
-          savingModelAccess = false;
+        if (savingModelAccess.value) {
+          savingModelAccess.value = false;
           if (!msg.saveError) showModelAccessDialog.value = false;
         }
         break;
       }
+      case 'providerUpdate':
+        provider.value = msg.provider ?? null;
+        break;
       case 'modelAccessTest':
         maTesting.value = false;
         maTestResult.value = (msg.result && typeof msg.result === 'object') ? msg.result : null;
@@ -301,6 +313,12 @@ onMounted(() => {
       case 'quotaUpdate':
         // 刷新失败（null）时保留旧值，避免界面闪成"未登录"。
         if (msg.quota) quota.value = msg.quota;
+        if (quotaRefreshing.value && typeof msg.requestId === 'string' && msg.requestId === quotaRequestId.value) {
+          quotaRefreshing.value = false;
+          quotaFeedback.value = msg.ok === false ? 'failed' : 'ok';
+          if (quotaFeedbackTimer) window.clearTimeout(quotaFeedbackTimer);
+          quotaFeedbackTimer = window.setTimeout(() => { quotaFeedback.value = null; }, 1800);
+        }
         break;
       case 'contextChanged': {
         const nextConnId = String(msg.context?.connId ?? '');
@@ -404,20 +422,26 @@ onMounted(() => {
   post({ type: 'ready' });
 });
 
-// 积分自动刷新：面板重新可见 / 窗口聚焦 / 可见时每 60s。
-function refreshQuota(): void {
-  post({ type: 'requestQuotaRefresh' });
+// 积分自动刷新：面板重新可见 / 窗口聚焦 / 可见时每 60s；手动刷新带 loading/回执。
+function refreshQuota(manual = true): void {
+  const requestId = `q${++quotaSeq}`;
+  if (manual) {
+    quotaRefreshing.value = true;
+    quotaFeedback.value = null;
+    quotaRequestId.value = requestId;
+  }
+  post({ type: 'requestQuotaRefresh', requestId });
 }
 function onVisibilityChange(): void {
-  if (document.visibilityState === 'visible') refreshQuota();
+  if (document.visibilityState === 'visible') refreshQuota(false);
 }
 function onWindowFocus(): void {
-  refreshQuota();
+  refreshQuota(false);
 }
 document.addEventListener('visibilitychange', onVisibilityChange);
 window.addEventListener('focus', onWindowFocus);
 const quotaTimer = window.setInterval(() => {
-  if (document.visibilityState === 'visible') refreshQuota();
+  if (document.visibilityState === 'visible') refreshQuota(false);
 }, 60_000);
 
 onUnmounted(() => {
@@ -425,6 +449,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   window.removeEventListener('focus', onWindowFocus);
   window.clearInterval(quotaTimer);
+  if (quotaFeedbackTimer) window.clearTimeout(quotaFeedbackTimer);
 });
 
 function send(): void {
@@ -583,6 +608,8 @@ function openContextDetail(): void {
       :provider="provider"
       :context="context"
       :quota="quota"
+      :quota-refreshing="quotaRefreshing"
+      :quota-feedback="quotaFeedback"
       :connections="connections"
       :selected-conn-id="selectedConnId"
       :include-column-comments="includeColumnComments"
@@ -704,6 +731,7 @@ function openContextDetail(): void {
       :save-error="modelAccess.saveError"
       :test-result="maTestResult"
       :testing="maTesting"
+      :saving="savingModelAccess"
       @close="showModelAccessDialog = false"
       @save="saveModelAccess"
       @test="testModelAccess"

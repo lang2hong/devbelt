@@ -52,6 +52,8 @@ export interface ElasticsearchConnectionSession {
   capabilities: EsCapabilities;
   es: EsClient;
   connId: string;
+  /** 建连首次 `GET /` 已返回的版本；供树节点直接展示，避免二次 ping。 */
+  serverVersion?: string | null;
   isAlive: () => boolean;
   close: () => void;
 }

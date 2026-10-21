@@ -170,6 +170,30 @@ export function bodyAllowedFor(method: string): boolean {
   return method.toUpperCase() !== 'HEAD';
 }
 
+/** REST 路径归一化：去首尾空白并补齐前导 `/`；空串保持为空。 */
+export function normalizeEsRestPath(raw: string): string {
+  const s = raw.trim();
+  if (!s) return '';
+  return s.startsWith('/') ? s : `/${s}`;
+}
+
+export interface EsLogFilterItem {
+  method: string;
+  path: string;
+  status: number;
+  error?: string;
+}
+
+/** 请求日志客户端过滤：method/path/error 文本，可只看失败。 */
+export function filterEsLogEntries<T extends EsLogFilterItem>(items: readonly T[], query: string, onlyErrors: boolean): T[] {
+  const q = query.trim().toLowerCase();
+  return items.filter((e) => {
+    if (onlyErrors && !(e.status === 0 || e.status >= 400 || !!e.error)) return false;
+    if (!q) return true;
+    return `${e.method} ${e.path} ${e.error ?? ''}`.toLowerCase().includes(q);
+  });
+}
+
 /** 搜索模式自动识别：以 `{` 开头视为 DSL（完整 search body），否则文本 query_string。 */
 export function detectSearchMode(input: string): 'text' | 'dsl' {
   return input.trimStart().startsWith('{') ? 'dsl' : 'text';

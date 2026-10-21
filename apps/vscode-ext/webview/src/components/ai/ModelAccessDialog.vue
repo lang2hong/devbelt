@@ -29,6 +29,7 @@ const props = defineProps<{
   saveError?: string;
   testResult?: ModelAccessTestResult | null;
   testing?: boolean;
+  saving?: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -156,7 +157,7 @@ function canSave(): boolean {
 }
 
 function save(): void {
-  if (!canSave()) return;
+  if (props.saving || !canSave()) return;
   const vendors = [...customVendors.value];
   let vid = vendorId.value;
   if (isNewVendor.value) {
@@ -270,9 +271,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       </div>
 
       <div class="ai-ma-footer">
-        <button class="ai-btn" :disabled="testing" @click="emit('close')">{{ t('wv.ai.cancel') }}</button>
-        <button v-if="mode === 'openai-compatible'" class="ai-btn" :disabled="testing || !canSave()" @click="test">{{ testing ? t('wv.ai.ma.testing') : t('wv.ai.ma.test') }}</button>
-        <button class="ai-btn ai-ma-primary" :disabled="!canSave()" @click="save">{{ t('wv.ai.notes.save') }}</button>
+        <button class="ai-btn" :disabled="saving" @click="emit('close')">{{ t('wv.ai.cancel') }}</button>
+        <button v-if="mode === 'openai-compatible'" class="ai-btn" :disabled="testing || saving || !canSave()" @click="test">{{ testing ? t('wv.ai.ma.testing') : t('wv.ai.ma.test') }}</button>
+        <button class="ai-btn ai-ma-primary" :disabled="saving || !canSave()" @click="save">{{ saving ? t('wv.ai.ma.saving') : t('wv.ai.notes.save') }}</button>
       </div>
     </div>
   </div>

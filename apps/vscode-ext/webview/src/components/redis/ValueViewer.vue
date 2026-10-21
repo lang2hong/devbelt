@@ -594,7 +594,16 @@ function copyValue(text: string): void {
 input, select, textarea { padding: 3px 5px; font-size: 12px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; }
 textarea { flex: 1; min-height: 120px; resize: vertical; font-family: var(--vscode-editor-font-family, monospace); }
 textarea.hex { color: var(--vscode-descriptionForeground); }
+/* 值内容卡片：统一边缘轮廓，避免值与工具条视觉上悬空。 */
+.string, .hash, .list, .set, .zset, .too-large {
+  border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, transparent);
+  padding: 8px;
+  box-sizing: border-box;
+}
 .string { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.hash, .list, .set, .zset { flex: 1; min-height: 0; overflow: auto; }
 .tabs { display: flex; gap: 4px; padding-bottom: 4px; }
 .tabs button { padding: 2px 8px; font-size: 12px; cursor: pointer; border: none; background: transparent; color: var(--vscode-foreground); border-bottom: 2px solid transparent; }
 .tabs button.active { border-bottom-color: var(--vscode-focusBorder); font-weight: 600; }

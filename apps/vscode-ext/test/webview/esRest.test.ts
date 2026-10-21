@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregationRows, aliasNames, bodyAllowedFor, detectSearchMode, docSavePath, esErrorReason, fieldSuggestions, filterJson, needsConfirm, shouldAutoLoad, textToSearchBody, validateDslBody, validateRestBody } from '../../webview/src/components/elasticsearch/types';
+import { aggregationRows, aliasNames, bodyAllowedFor, detectSearchMode, docSavePath, esErrorReason, fieldSuggestions, filterEsLogEntries, filterJson, needsConfirm, normalizeEsRestPath, shouldAutoLoad, textToSearchBody, validateDslBody, validateRestBody } from '../../webview/src/components/elasticsearch/types';
 
 describe('validateRestBody（REST 控制台请求体校验）', () => {
   it('空白 → 无 body', () => {
@@ -19,6 +19,33 @@ describe('validateRestBody（REST 控制台请求体校验）', () => {
     expect(validateRestBody("{'a':1}")).toEqual({ ok: false });
   });
 });
+describe('normalizeEsRestPath（REST 路径归一化）', () => {
+  it('补齐前导 / 并去首尾空白；空串保持为空', () => {
+    expect(normalizeEsRestPath('')).toBe('');
+    expect(normalizeEsRestPath('  ')).toBe('');
+    expect(normalizeEsRestPath('_cat/indices')).toBe('/_cat/indices');
+    expect(normalizeEsRestPath('  /idx/_search?pretty  ')).toBe('/idx/_search?pretty');
+  });
+});
+
+describe('filterEsLogEntries（请求日志过滤）', () => {
+  const items = [
+    { method: 'GET', path: '/idx/_search', status: 200 },
+    { method: 'POST', path: '/idx/_doc', status: 400, error: 'mapper_parsing_exception' },
+    { method: 'DELETE', path: '/idx', status: 0, error: 'ECONNREFUSED' },
+  ];
+
+  it('方法/路径/错误文本过滤（大小写不敏感）', () => {
+    expect(filterEsLogEntries(items, 'mapper', false)).toHaveLength(1);
+    expect(filterEsLogEntries(items, 'post', false)[0].path).toBe('/idx/_doc');
+    expect(filterEsLogEntries(items, 'search', false)).toHaveLength(1);
+  });
+
+  it('只看失败：status 0 / >=400 / 有 error', () => {
+    expect(filterEsLogEntries(items, '', true)).toEqual([items[1], items[2]]);
+  });
+});
+
 describe('aliasNames（索引别名提取）', () => {
   it('标准形状 { index: { aliases: {...} } }', () => {
     expect(aliasNames({ users: { aliases: { 'users-read': {}, 'users-all': {} } } })).toEqual(['users-all', 'users-read']);

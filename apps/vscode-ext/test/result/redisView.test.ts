@@ -283,7 +283,32 @@ describe('RedisView S3 键树/值/编辑', () => {
     expect(v.data).toEqual({ kind: 'string', text: 'val', base64: Buffer.from('val').toString('base64'), binary: false, bytes: 3 });
   });
 
-  it('reloadKeys：树侧写操作后刷新当前值（键树已在 explorer）', async () => {
+  it('webview 重载后二次 ready 自动回载 lastKey（双击键不再空白）', async () => {
+  const session: any = {
+    kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},
+    client: {
+      sendCommand: async (n: string) => (n === 'TYPE' ? 'string' : n === 'TTL' ? -1 : n === 'STRLEN' ? 3 : n === 'GET' ? 'val' : 'OK'),
+      runExclusive: <T>(fn: () => Promise<T>): Promise<T> => fn(),
+      info: async () => '',
+    },
+  };
+  const manager: any = { retain: vi.fn(), release: vi.fn(), connect: async () => session };
+  const view: any = RedisView.open(conn, manager, 'keyBrowser', 0, 'user:1');
+  await view.handleMessage({ type: 'ready' });
+  await view.handleMessage({ type: 'ready' });
+  (view.post as any).mockClear();
+
+  // 模拟 BaseWebView 收到新 __load 后重置 initSent。
+  view.initSent = false;
+  await view.handleMessage({ type: 'ready' });
+  expect(posts(view).some((m) => m.type === 'value')).toBe(false);
+  await view.handleMessage({ type: 'ready' });
+  const v = posts(view).find((m) => m.type === 'value');
+  expect(v?.key).toBe('user:1');
+  expect(v?.data?.kind).toBe('string');
+});
+
+it('reloadKeys：树侧写操作后刷新当前值（键树已在 explorer）', async () => {
     const sent: [string, (string | number)[]][] = [];
     const session: any = {
       kind: 'redis', db: 0, mode: 'standalone', readOnly: false, isAlive: () => true, close: () => {},

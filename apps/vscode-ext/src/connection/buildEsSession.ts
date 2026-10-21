@@ -34,12 +34,15 @@ export async function buildEsSession(
     // S4：请求日志汇入命令日志缓冲（面板按连接订阅）。
     onLog: (entry) => recordEsRequest(conn.id, entry),
   });
+  let serverVersion: string | null = null;
   try {
     const res = await client.ping();
     if (res.status >= 400) {
       // 不引 i18n：装配模块需在无 vscode 运行的测试中可加载，文案由上层展示。
       throw new Error(parseEsError(res.body)?.reason ?? `Elasticsearch connection failed (HTTP ${res.status})`);
     }
+    const body = res.body as { version?: { number?: unknown } } | null;
+    serverVersion = typeof body?.version?.number === 'string' ? body.version.number : null;
   } catch (err) {
     client.close();
     throw err;
@@ -56,6 +59,7 @@ export async function buildEsSession(
     capabilities: esCapabilities(conn.readOnly === true),
     es: client,
     connId: conn.id,
+    serverVersion,
     isAlive: () => client.isAlive(),
     close: () => {
       client.close();

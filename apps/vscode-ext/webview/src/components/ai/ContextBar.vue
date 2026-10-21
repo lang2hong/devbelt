@@ -45,6 +45,8 @@ const props = defineProps<{
   provider: ProviderState | null;
   context: ContextState | null;
   quota: QuotaState | null;
+  quotaRefreshing?: boolean;
+  quotaFeedback?: 'ok' | 'failed' | null;
   connections: { id: string; name: string }[];
   selectedConnId?: string;
   includeColumnComments: boolean;
@@ -67,6 +69,9 @@ const { t } = useI18n();
 const providerLabel = computed(() =>
   props.provider?.mode === 'openai-compatible' ? t('wv.ai.provider.byok') : t('wv.ai.provider.serverProxy'),
 );
+
+/** BYOK 直连上游，不消耗服务端积分；积分区整体隐藏，避免误导。 */
+const showQuota = computed(() => props.provider?.mode !== 'openai-compatible');
 
 const providerHint = computed(() => {
   const reason = props.provider?.reason;
@@ -197,20 +202,28 @@ function onSelect(event: Event): void {
       </button>
     </div>
     <div class="ai-context-row">
-      <span class="ai-context-summary" :class="{ 'ai-quota-low': quotaLow }">{{ quotaLabel }}</span>
-      <span v-if="deltaLabel" class="ai-quota-delta" role="status" aria-live="polite">{{ deltaLabel }}</span>
-      <button class="ai-btn ai-quota-refresh" :title="t('wv.ai.quota.refresh')" @click="emit('refreshQuota')">↻</button>
-      <button
-        v-if="quota"
-        class="ai-btn ai-quota-buy"
-        :title="t('wv.ai.quota.buy.title')"
-        @click="emit('openConsole', '/db/ai-topup')"
-      >{{ t('wv.ai.quota.buy') }}</button>
+      <template v-if="showQuota">
+        <span class="ai-context-summary" :class="{ 'ai-quota-low': quotaLow }">{{ quotaLabel }}</span>
+        <span v-if="deltaLabel" class="ai-quota-delta" role="status" aria-live="polite">{{ deltaLabel }}</span>
+        <span v-if="quotaFeedback" class="ai-quota-notice" :class="quotaFeedback" role="status" aria-live="polite">
+          {{ quotaFeedback === 'ok' ? t('wv.ai.quota.refreshOk') : t('wv.ai.quota.refreshFailed') }}
+        </span>
+        <button class="ai-btn ai-quota-refresh" :disabled="quotaRefreshing" :title="quotaRefreshing ? t('wv.ai.quota.refreshing') : t('wv.ai.quota.refresh')" @click="emit('refreshQuota')">
+          {{ quotaRefreshing ? '…' : '↻' }}
+        </button>
+        <button
+          v-if="quota"
+          class="ai-btn ai-quota-buy"
+          :title="t('wv.ai.quota.buy.title')"
+          @click="emit('openConsole', '/db/ai-topup')"
+        >{{ t('wv.ai.quota.buy') }}</button>
+      </template>
+      <span v-else class="ai-context-summary ai-byok-note">{{ t('wv.ai.quota.byok') }}</span>
       <span class="ai-spacer"></span>
       <button class="ai-btn" @click="emit('openModelAccess')">{{ t('wv.ai.modelAccess') }}</button>
       <button class="ai-btn" @click="emit('openSettings')">{{ t('wv.ai.settings') }}</button>
     </div>
-    <div v-if="quota" class="ai-quota-bar" :class="{ low: quotaLow }" :title="t('wv.ai.quota.barTitle')">
+    <div v-if="showQuota && quota" class="ai-quota-bar" :class="{ low: quotaLow }" :title="t('wv.ai.quota.barTitle')">
       <span :style="{ width: `${usedPct}%` }"></span>
     </div>
   </div>
@@ -264,6 +277,11 @@ function onSelect(event: Event): void {
 .ai-hint {
   color: var(--vscode-editorWarning-foreground, #cca700);
 }
+.ai-quota-notice { font-size: calc(var(--vscode-font-size, 13px) - 2px); }
+.ai-quota-notice.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
+.ai-quota-notice.failed { color: var(--vscode-errorForeground, #f85149); }
+.ai-byok-note { opacity: .75; }
+.ai-quota-refresh:disabled { opacity: .5; cursor: default; }
 .ai-conn-select {
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));

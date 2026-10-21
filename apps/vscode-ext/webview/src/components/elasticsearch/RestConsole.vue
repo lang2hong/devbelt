@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
-import { bodyAllowedFor, validateRestBody } from './types';
+import JsonTree from './JsonTree.vue';
+import { bodyAllowedFor, normalizeEsRestPath, validateRestBody } from './types';
 import type { EsRestHistoryItem } from './types';
 
 export interface EsRestResultView {
@@ -28,7 +29,10 @@ const path = ref('');
 const body = ref('');
 const history = ref<EsRestHistoryItem[]>([]);
 const showHeaders = ref(false);
+const showTree = ref(true);
 const localError = ref('');
+const copied = ref(false);
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 let seq = 0;
 function nextId(): string { seq += 1; return `e${seq}`; }
 
@@ -38,8 +42,9 @@ const bodyDisabled = computed(() => !bodyAllowedFor(method.value));
 
 function send(): void {
   if (props.running) return; // 在途请求期间 Enter/历史双击不再绕过按钮 disabled 重复提交
-  const p = path.value.trim();
+  const p = normalizeEsRestPath(path.value);
   if (!p) return;
+  path.value = p;
   const raw = bodyDisabled.value ? '' : body.value;
   const checked = validateRestBody(raw);
   if (!checked.ok) {
@@ -60,18 +65,45 @@ function reuse(item: EsRestHistoryItem): void {
 function clearHistory(): void { history.value = []; }
 function sendHistory(item: EsRestHistoryItem): void { reuse(item); send(); }
 
+watch(() => props.result?.id, () => {
+  const result = props.result;
+  if (!result) return;
+  history.value = history.value.map((item) => item.id === result.id
+    ? { ...item, status: result.status, tookMs: result.tookMs }
+    : item);
+});
+
 const prettyBody = computed(() => {
   const b = props.result?.body;
   if (b === null || b === undefined) return '';
   try { return JSON.stringify(b, null, 2); } catch { return String(b); }
 });
+const isJsonBody = computed(() => {
+  const b = props.result?.body;
+  return b !== null && b !== undefined && typeof b === 'object';
+});
 const headerRows = computed(() => Object.entries(props.result?.headers ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v] as const));
-const statusClass = computed(() => {
-  const s = props.result?.status ?? 0;
-  if (s === 0) return 'bad';
-  if (s < 300) return 'ok';
-  if (s < 400) return 'warn';
+function statusClassOf(status: number): string {
+  if (status === 0) return 'bad';
+  if (status < 300) return 'ok';
+  if (status < 400) return 'warn';
   return 'bad';
+}
+const statusClass = computed(() => statusClassOf(props.result?.status ?? 0));
+
+async function copyResponse(): Promise<void> {
+  if (!prettyBody.value) return;
+  try {
+    await navigator.clipboard.writeText(prettyBody.value);
+    copied.value = true;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => { copied.value = false; }, 1500);
+  } catch {
+    copied.value = false;
+  }
+}
+onUnmounted(() => {
+  if (copiedTimer) clearTimeout(copiedTimer);
 });
 </script>
 
@@ -95,12 +127,15 @@ const statusClass = computed(() => {
           <span class="es-status" :class="statusClass">{{ result.status }}</span>
           <span>{{ t('wv.es.response.took') }} {{ result.tookMs }} ms</span>
           <button class="es-link" @click="showHeaders = !showHeaders">{{ t('wv.es.response.headers') }}</button>
+          <button v-if="isJsonBody" class="es-link" @click="showTree = !showTree">{{ showTree ? t('wv.es.response.raw') : t('wv.es.response.tree') }}</button>
+          <button v-if="prettyBody" class="es-link" @click="copyResponse">{{ copied ? t('wv.es.response.copied') : t('wv.es.response.copy') }}</button>
           <span v-if="result.truncated" class="es-truncated">{{ t('wv.es.response.truncated') }}</span>
         </div>
         <table v-if="showHeaders && headerRows.length" class="es-headers">
           <tr v-for="[k, v] in headerRows" :key="k"><td>{{ k }}</td><td>{{ v }}</td></tr>
         </table>
-        <pre v-if="prettyBody" class="es-response-body">{{ prettyBody }}</pre>
+        <JsonTree v-if="result && isJsonBody && showTree" :value="result.body" fill />
+        <pre v-else-if="prettyBody" class="es-response-body">{{ prettyBody }}</pre>
         <div v-else-if="!result" class="es-empty">{{ t('wv.es.response.empty') }}</div>
       </div>
 
@@ -113,6 +148,7 @@ const statusClass = computed(() => {
         <div v-for="item in history" :key="item.id" class="es-history-item" @click="reuse(item)" @dblclick="sendHistory(item)">
           <span class="es-history-method">{{ item.method }}</span>
           <span class="es-history-path">{{ item.path }}</span>
+          <span class="es-history-status" :class="statusClassOf(item.status)">{{ item.status || '…' }}</span>
         </div>
       </div>
     </div>
@@ -120,18 +156,18 @@ const statusClass = computed(() => {
 </template>
 
 <style scoped>
-.es-rest { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
-.es-rest-request { display: flex; gap: 6px; }
+.es-rest { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 1; }
+.es-rest-request { display: flex; gap: 6px; flex-wrap: wrap; }
 .es-method { width: 90px; }
-.es-path { flex: 1; }
+.es-path { flex: 1; min-width: 180px; }
 .es-readonly { font-size: 12px; color: var(--vscode-editorWarning-foreground, #d29922); }
-.es-body { width: 100%; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.es-body { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
 .es-error { color: var(--vscode-errorForeground, #f85149); font-size: 12px; }
-.es-rest-main { display: flex; gap: 12px; min-height: 0; }
-.es-result { flex: 3; min-width: 0; }
-.es-history { flex: 1; min-width: 160px; border-left: 1px solid var(--vscode-panel-border); padding-left: 8px; }
+.es-rest-main { display: flex; gap: 12px; min-height: 0; flex: 1; }
+.es-result { flex: 3; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.es-history { flex: 1; min-width: 170px; border-left: 1px solid var(--vscode-panel-border); padding-left: 8px; overflow: auto; }
 .es-section-title { font-weight: 600; font-size: 12px; margin-bottom: 4px; display: flex; justify-content: space-between; }
-.es-result-meta { display: flex; gap: 10px; font-size: 12px; align-items: center; margin-bottom: 4px; }
+.es-result-meta { display: flex; gap: 10px; font-size: 12px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
 .es-status { font-weight: 700; }
 .es-status.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
 .es-status.warn { color: var(--vscode-editorWarning-foreground, #d29922); }
@@ -139,9 +175,14 @@ const statusClass = computed(() => {
 .es-headers { width: 100%; font-size: 11px; opacity: .85; margin-bottom: 4px; }
 .es-headers td { vertical-align: top; padding-right: 8px; }
 .es-response-body { max-height: 46vh; overflow: auto; font-size: 12px; }
-.es-history-item { font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.es-history-item { font-size: 12px; cursor: pointer; padding: 2px 4px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 5px; align-items: center; }
 .es-history-item:hover { background: var(--vscode-list-hoverBackground); }
-.es-history-method { font-weight: 600; margin-right: 6px; }
+.es-history-method { font-weight: 600; flex: none; }
+.es-history-path { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.es-history-status { flex: none; font-size: 11px; }
+.es-history-status.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
+.es-history-status.warn { color: var(--vscode-editorWarning-foreground, #d29922); }
+.es-history-status.bad { color: var(--vscode-errorForeground, #f85149); }
 .es-empty { opacity: .7; font-size: 12px; }
 .es-link { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 11px; padding: 0; }
 .es-truncated { font-size: 11px; color: var(--vscode-editorWarning-foreground, #d29922); }
