@@ -8,22 +8,22 @@ import { setLanguage, t } from '../../webview/src/composables/useI18n';
 describe('useI18n', () => {
   it('默认英文（init 消息到达前）', () => {
     setLanguage(false);
-    expect(t('common.save')).toBe('Save');
+    expect(t('wv.common.save')).toBe('Save');
   });
 
   it('setLanguage(true) 后取中文', () => {
     setLanguage(true);
-    expect(t('common.save')).toBe('保存');
+    expect(t('wv.common.save')).toBe('保存');
   });
 
   it('语言可来回切换', () => {
     setLanguage(true);
-    const zhText = t('common.cancel');
+    const zhText = t('wv.common.cancel');
     setLanguage(false);
-    const enText = t('common.cancel');
+    const enText = t('wv.common.cancel');
     expect(zhText).not.toBe(enText);
     setLanguage(true);
-    expect(t('common.cancel')).toBe(zhText);
+    expect(t('wv.common.cancel')).toBe(zhText);
   });
 
   it('缺失键回退到英文', () => {

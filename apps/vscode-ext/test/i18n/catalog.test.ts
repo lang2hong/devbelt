@@ -69,6 +69,34 @@ describe('i18n catalog', () => {
     const wvZh = zhKeys.filter((k) => k.startsWith('wv.'));
     expect(wvEn.sort()).toEqual(wvZh.sort());
   });
+
+  it('catalog 没有运行时未引用的死键', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const path = await import('node:path');
+    const roots = [
+      path.resolve(__dirname, '../../src'),
+      path.resolve(__dirname, '../../webview/src'),
+    ];
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = path.join(dir, name);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(ts|vue)$/.test(name) && !p.endsWith('.test.ts') && !/catalog\.(en|zh)\.ts$/.test(p)) files.push(p);
+      }
+    };
+    for (const root of roots) walk(root);
+    const text = files.map((file) => readFileSync(file, 'utf8')).join('\n');
+    // 动态键：`t(\`prefix.${value}\`)` 的静态前缀必须保留。
+    const dynamicPrefixes = [...text.matchAll(/(?<![\w$])(?:l10n|t)\(\s*`([^`]*)\$\{/g)].map((m) => m[1]);
+    const referenced = (key: string): boolean =>
+      text.includes(`'${key}'`)
+      || text.includes(`"${key}"`)
+      || text.includes('`' + key + '`')
+      || dynamicPrefixes.some((prefix) => key.startsWith(prefix));
+    const unused = enKeys.filter((key) => !referenced(key));
+    expect(unused, `发现未被运行时引用的死键:\n${unused.join('\n')}`).toEqual([]);
+  });
 });
 
 /**
