@@ -140,6 +140,7 @@ export class ElasticsearchView extends BaseWebView {
     if (msg?.type === 'esLoadDocs') { await this.pushDocs(msg.id, msg.index, msg.searchAfter, msg.size, msg.query, msg.queryMode, msg.defaultOperator); return; }
     if (msg?.type === 'esGetDoc') { await this.pushDoc(msg.id, msg.index, msg.docId); return; }
     if (msg?.type === 'esRunDsl') { await this.runDsl(msg.id, msg.index, msg.body, msg.size, msg.searchAfter); return; }
+    if (msg?.type === 'esBulkDelete') { await this.bulkDeleteDocs(msg.id, msg.index, msg.ids); return; }
     if (msg?.type === 'esLoadNodes') { await this.pushNodes(); return; }
     if (msg?.type === 'esLoadSavedDsl') { await this.pushSavedDsl(); return; }
     if (msg?.type === 'esSaveDsl') { await this.saveDsl(msg.name, msg.index, msg.body); return; }
@@ -410,6 +411,65 @@ export class ElasticsearchView extends BaseWebView {
       });
     } catch (err) {
       this.post({ type: 'esDslError', id, index, error: errorInfo(err) });
+    }
+  }
+
+  /** 批量删除文档：去重 → 只读保护 → `_bulk` → 按 item 状态统计成功/失败。 */
+  private async bulkDeleteDocs(id: string, index: string, ids: string[]): Promise<void> {
+    const idx = String(index ?? '').trim();
+    const clean = [...new Set((Array.isArray(ids) ? ids : []).map((v) => String(v ?? '')).filter(Boolean))];
+    if (!idx || !clean.length) {
+      this.post({
+        type: 'esBulkDeleteResult', id, index: idx, status: 0, tookMs: 0, deleted: 0, failed: 0,
+        body: { error: { type: 'validation', reason: l10n('wv.es.docs.bulkEmpty') } },
+      });
+      return;
+    }
+    if (this.conn.readOnly === true) {
+      this.post({
+        type: 'esBulkDeleteResult', id, index: idx, status: 0, tookMs: 0, deleted: 0, failed: clean.length,
+        body: { error: { type: 'read_only', reason: l10n('wv.es.docs.bulkReadOnly') } },
+      });
+      return;
+    }
+    try {
+      const session = await this.session();
+      const res = await session.es.bulkDelete(idx, clean);
+      const items = (res.body as { items?: unknown } | null)?.items;
+      let deleted = 0;
+      let failed = 0;
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const status = (item as { delete?: { status?: unknown } } | null)?.delete?.status;
+          if (typeof status === 'number' && status < 300) deleted += 1;
+          else failed += 1;
+        }
+      } else {
+        failed = clean.length;
+      }
+      this.post({
+        type: 'esBulkDeleteResult',
+        id,
+        index: idx,
+        status: res.status,
+        tookMs: res.tookMs,
+        deleted,
+        failed,
+        body: truncateJson(res.body).value,
+      });
+      AuditLogger.tryLog({
+        action: 'es_rest',
+        connName: this.conn.name || this.conn.host,
+        database: '',
+        sql: `POST /${idx}/_bulk (${clean.length} docs)`,
+        costTime: res.tookMs,
+      });
+    } catch (err) {
+      const message = (err as Error).message ?? String(err);
+      this.post({
+        type: 'esBulkDeleteResult', id, index: idx, status: 0, tookMs: 0, deleted: 0, failed: clean.length,
+        body: { error: { type: 'network_error', reason: message } },
+      });
     }
   }
 

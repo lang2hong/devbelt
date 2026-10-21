@@ -21,6 +21,8 @@ const props = defineProps<{
   fields: EsFieldInfo[];
   canPrev: boolean;
   hasNext: boolean;
+  bulkRunning: boolean;
+  bulkResult: { status: number; tookMs: number; deleted: number; failed: number; body: unknown } | null;
 }>();
 const emit = defineEmits<{
   (e: 'load', searchAfter: unknown[] | null): void;
@@ -30,6 +32,7 @@ const emit = defineEmits<{
   (e: 'next'): void;
   (e: 'prev'): void;
   (e: 'op', payload: { method: string; path: string; body: string | null }): void;
+  (e: 'bulkDelete', payload: { index: string; ids: string[] }): void;
 }>();
 
 const { t } = useI18n();
@@ -97,12 +100,17 @@ interface DocEditor { id: string | null; text: string; seqNo: number | null; pri
 const editor = ref<DocEditor | null>(null);
 const editorError = ref('');
 const pendingDelete = ref<string | null>(null);
+const selected = ref<Set<string>>(new Set());
+const pendingBulk = ref(false);
 
 watch(() => props.index, () => {
   expanded.value = null;
   jumpId.value = '';
   pendingDelete.value = null;
+  selected.value = new Set();
+  pendingBulk.value = false;
 });
+watch(() => props.hits, () => { selected.value = new Set(); });
 watch(() => props.query, (q) => {
   if (props.queryMode === 'dsl') dslText.value = q;
   else searchInput.value = q;
@@ -144,6 +152,29 @@ function saveDoc(): void {
   emit('op', { method: e.id ? 'PUT' : 'POST', path, body: e.text });
   editor.value = null;
 }
+function toggleSelect(id: string): void {
+  const next = new Set(selected.value);
+  if (next.has(id)) next.delete(id); else next.add(id);
+  selected.value = next;
+}
+const allSelected = computed(() => !!props.hits?.length && props.hits.every((h) => selected.value.has(h.id)));
+function toggleAll(event: Event): void {
+  selected.value = (event.target as HTMLInputElement).checked
+    ? new Set((props.hits ?? []).map((h) => h.id))
+    : new Set();
+}
+function clearSelection(): void { selected.value = new Set(); }
+function askBulkDelete(): void {
+  if (!selected.value.size || props.readOnly || props.bulkRunning) return;
+  pendingBulk.value = true;
+}
+function confirmBulkDelete(): void {
+  const ids = [...selected.value];
+  pendingBulk.value = false;
+  if (!ids.length) return;
+  selected.value = new Set();
+  emit('bulkDelete', { index: props.index, ids });
+}
 function askDelete(id: string): void { pendingDelete.value = id; }
 function confirmDelete(): void {
   const id = pendingDelete.value;
@@ -160,6 +191,11 @@ function jump(): void {
 const errorClass = computed(() => (props.opResult?.status ?? 0) >= 400 || (props.opResult?.status ?? -1) === 0 ? 'bad' : 'ok');
 /** N3：失败操作展示 ES 结构化原因。 */
 const opReason = computed(() => esErrorReason(props.opResult?.body));
+const bulkClass = computed(() => {
+  const r = props.bulkResult;
+  return (r?.failed ?? 0) > 0 || (r?.status ?? -1) === 0 || (r?.status ?? 0) >= 400 ? 'bad' : 'ok';
+});
+const bulkReason = computed(() => esErrorReason(props.bulkResult?.body));
 </script>
 
 <template>
@@ -211,6 +247,19 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
       <div v-if="opResult.status === 409" class="es-error-detail">{{ t('wv.es.docs.versionConflict') }}</div>
       <div v-else-if="opResult.status >= 400 && opReason" class="es-error-detail">{{ opReason }}</div>
     </div>
+    <div v-if="bulkResult" class="es-op-result" :class="bulkClass">
+      {{ t('wv.es.docs.bulkResult', { deleted: bulkResult.deleted, failed: bulkResult.failed }) }}
+      <span class="es-op-meta">· {{ bulkResult.status }} ({{ bulkResult.tookMs }} ms)</span>
+      <div v-if="bulkReason" class="es-error-detail">{{ bulkReason }}</div>
+    </div>
+    <div v-if="selected.size" class="es-docs-bulk">
+      <span>{{ t('wv.es.docs.selected', { count: selected.size }) }}</span>
+      <button class="es-link danger" :class="{ ro: readOnly }" :disabled="readOnly || bulkRunning"
+        :title="readOnly ? t('wv.es.docs.bulkReadOnly') : undefined" @click="askBulkDelete">
+        {{ bulkRunning ? t('wv.es.docs.bulkDeleting') : t('wv.es.docs.bulkDelete') }}
+      </button>
+      <button class="es-link" @click="clearSelection">{{ t('wv.es.docs.clearSelection') }}</button>
+    </div>
     <p v-if="truncated" class="es-warn">{{ t('wv.es.response.truncated') }}</p>
 
     <div v-if="editor" class="es-doc-editor">
@@ -233,10 +282,14 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
     <div v-if="hits === null && !error" class="es-empty">{{ t('wv.es.indices.loading') }}</div>
     <div v-else-if="!hits?.length && !error" class="es-empty">{{ t('wv.es.docs.empty') }}</div>
     <table v-else-if="hits?.length" class="es-docs-table">
-      <thead><tr><th>{{ t('wv.es.docs.id') }}</th><th>{{ t('wv.es.docs.source') }}</th><th /></tr></thead>
+      <thead><tr>
+        <th class="es-docs-check"><input type="checkbox" :checked="allSelected" :aria-label="t('wv.es.docs.selectAll')" @change="toggleAll" @click.stop /></th>
+        <th>{{ t('wv.es.docs.id') }}</th><th>{{ t('wv.es.docs.source') }}</th><th />
+      </tr></thead>
       <tbody>
         <template v-for="hit in hits" :key="hit.id">
           <tr class="es-doc-row" @click="toggle(hit.id)">
+            <td class="es-docs-check"><input type="checkbox" :checked="selected.has(hit.id)" :aria-label="`${t('wv.es.docs.select')} ${hit.id}`" @change="toggleSelect(hit.id)" @click.stop /></td>
             <td class="es-doc-id-cell">{{ hit.id }}</td>
             <td class="es-doc-preview">{{ JSON.stringify(hit.source) }}</td>
             <td class="es-doc-actions">
@@ -244,10 +297,21 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
               <button class="es-link danger" :class="{ ro: readOnly }" :title="readOnly ? t('wv.es.roAction') : undefined" @click.stop="askDelete(hit.id)">{{ t('wv.es.docs.delete') }}</button>
             </td>
           </tr>
-          <tr v-if="expanded === hit.id"><td colspan="3"><JsonTree :value="hit.source" /></td></tr>
+          <tr v-if="expanded === hit.id"><td colspan="4"><JsonTree :value="hit.source" /></td></tr>
         </template>
       </tbody>
     </table>
+
+    <div v-if="pendingBulk" class="es-modal-backdrop">
+      <div class="es-modal">
+        <div class="es-modal-title">{{ t('wv.es.docs.confirmBulkDelete') }}</div>
+        <p class="es-modal-detail">{{ t('wv.es.docs.confirmBulkDeleteDetail', { count: selected.size, index }) }}</p>
+        <div class="es-modal-actions">
+          <button :disabled="bulkRunning" @click="confirmBulkDelete">{{ t('wv.es.confirm.ok') }}</button>
+          <button @click="pendingBulk = false">{{ t('wv.es.confirm.cancel') }}</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="pendingDelete" class="es-modal-backdrop">
       <div class="es-modal">
@@ -275,6 +339,8 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
 .es-docs-fields { max-width: 220px; }
 .es-docs-operator { width: 70px; }
 .es-docs-mode { font-weight: 600; }
+.es-docs-bulk { display: flex; gap: 8px; align-items: center; font-size: 12px; margin: 4px 0; padding: 4px 6px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
+.es-docs-check { width: 22px; text-align: center; }
 .es-docs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .es-docs-table th { text-align: left; border-bottom: 1px solid var(--vscode-panel-border); padding: 4px 6px; }
 .es-docs-table td { padding: 3px 6px; border-bottom: 1px solid var(--vscode-panel-border, #3333); vertical-align: top; }
@@ -293,6 +359,7 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
 .es-error { color: var(--vscode-errorForeground, #f85149); font-size: 12px; }
 .es-error-detail { opacity: .8; }
 .es-op-result { font-size: 12px; margin: 4px 0; }
+.es-op-meta { opacity: .7; }
 .es-op-result.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
 .es-op-result.bad { color: var(--vscode-errorForeground, #f85149); }
 .es-warn { color: var(--vscode-editorWarning-foreground, #d29922); font-size: 12px; }

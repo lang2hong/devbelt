@@ -50,6 +50,8 @@ const docsQuery = ref('');
 const docsMode = ref<'text' | 'dsl'>('text');
 const docsOperator = ref<'OR' | 'AND'>('OR');
 const docsFields = ref<EsFieldInfo[]>([]);
+const bulkRunning = ref(false);
+const bulkResult = ref<{ status: number; tookMs: number; deleted: number; failed: number; body: unknown } | null>(null);
 /** 「在 DSL 打开」预填种子（DslTab 消费）。 */
 const dslSeed = ref<{ body: string; index: string; at: number } | null>(null);
 /** 分页游标栈（当前页 cursor 在 docsCursor；prev 时弹栈）。 */
@@ -127,6 +129,13 @@ function sendIndexOp(payload: { method: string; path: string; body: string | nul
 }
 function sendDocOp(payload: { method: string; path: string; body: string | null }): void {
   queueOp(payload, 'doc');
+}
+function bulkDeleteDocs(payload: { index: string; ids: string[] }): void {
+  const ids = [...new Set(payload.ids.filter(Boolean))];
+  if (!payload.index || !ids.length || bulkRunning.value) return;
+  bulkRunning.value = true;
+  bulkResult.value = null;
+  post({ type: 'esBulkDelete', id: nextOpId(), index: payload.index, ids });
 }
 
 // ── S4 请求方法 ──
@@ -255,6 +264,7 @@ function resetIndexState(): void {
   docsRequest.clear();
   indexRequest.clear();
   opResult.value = null;
+  bulkResult.value = null;
 }
 
 /**
@@ -360,6 +370,11 @@ onMounted(() => {
       dslAppendId = null;
       dslRunning.value = false;
       dslError.value = msg.error;
+    } else if (msg.type === 'esBulkDeleteResult') {
+      bulkRunning.value = false;
+      if (msg.index !== indexName.value) return;
+      bulkResult.value = { status: msg.status, tookMs: msg.tookMs, deleted: msg.deleted, failed: msg.failed, body: msg.body };
+      if (msg.status < 300 && msg.deleted > 0) refreshDocs();
     } else if (msg.type === 'esNodes') {
       nodes.value = msg.items ?? [];
       nodesError.value = null;
@@ -432,8 +447,8 @@ function confirmKeydown(e: KeyboardEvent): void {
       :op-result="opResult?.kind === 'index' ? opResult : null" @reload="requestIndex" @op="sendIndexOp" />
     <DocumentsTab v-show="tab === 'documents'" :index="indexName" :hits="docs.hits" :total="docs.total" :truncated="docs.truncated"
       :error="docs.error" :op-result="opResult?.kind === 'doc' ? opResult : null" :read-only="readOnly" :query="docsQuery" :query-mode="docsMode" :default-operator="docsOperator" :fields="docsFields"
-      :can-prev="docsHistory.length > 0" :has-next="docsHasNext"
-      @load="refreshDocs" @search="searchDocs" @open-dsl="openDslWith" @jump="jumpDoc" @next="docsNextPage" @prev="docsPrevPage" @op="sendDocOp" />
+      :can-prev="docsHistory.length > 0" :has-next="docsHasNext" :bulk-running="bulkRunning" :bulk-result="bulkResult"
+      @load="refreshDocs" @search="searchDocs" @open-dsl="openDslWith" @jump="jumpDoc" @next="docsNextPage" @prev="docsPrevPage" @op="sendDocOp" @bulk-delete="bulkDeleteDocs" />
     <DslTab v-show="tab === 'dsl'" :index="indexName" :running="dslRunning" :result="dslResult" :error="dslError" :saved="savedDsl" :seed="dslSeed" :can-load-more="dslHasMore"
       @run="runDsl" @save="saveDsl" @remove-saved="removeSavedDsl" @index-change="syncDslIndex" @load-more="loadMoreDsl" />
     <NodesTab v-show="tab === 'nodes'" :items="nodes" :error="nodesError" />

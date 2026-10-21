@@ -48,6 +48,10 @@ function makeView(opts: { readOnly?: boolean; handler?: (method: string, path: s
       requests.push({ method, path, body, query: q, opts: o });
       return opts.handler ? opts.handler(method, path, body, o) : ok(200, { acknowledged: true });
     }),
+    bulkDelete: vi.fn(async (_index: string, ids: string[]) => ok(200, {
+      errors: false,
+      items: ids.map((id) => ({ delete: { _id: id, status: 200 } })),
+    })),
     close: vi.fn(),
     isAlive: () => true,
   };
@@ -538,6 +542,35 @@ describe('ElasticsearchView S4', () => {
     const msg = posts(view).at(-1);
     expect(msg).toMatchObject({ type: 'esDslError', error: { type: 'parsing_exception', message: 'bad query' } });
     expect(msg.error.rootCause).toEqual(['unknown field [zzz]']);
+  });
+
+  it('esBulkDelete：去重后执行 _bulk，按 item 状态统计并审计', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    es.bulkDelete.mockResolvedValue(ok(200, {
+      errors: true,
+      items: [{ delete: { _id: '1', status: 200 } }, { delete: { _id: '2', status: 404 } }],
+    }));
+    await view.handleMessage({ type: 'esBulkDelete', id: 'b1', index: 'i', ids: ['1', '1', '2', ''] });
+    expect(es.bulkDelete).toHaveBeenCalledWith('i', ['1', '2']);
+    expect(posts(view).at(-1)).toMatchObject({ type: 'esBulkDeleteResult', id: 'b1', index: 'i', status: 200, deleted: 1, failed: 1 });
+    expect(h.audits.at(-1)?.sql).toBe('POST /i/_bulk (2 docs)');
+  });
+
+  it('esBulkDelete：只读连接拒绝且不发请求', async () => {
+    const { view, es } = makeView({ readOnly: true });
+    await mount(view);
+    await view.handleMessage({ type: 'esBulkDelete', id: 'b1', index: 'i', ids: ['1'] });
+    expect(es.bulkDelete).not.toHaveBeenCalled();
+    expect(posts(view).at(-1)).toMatchObject({ type: 'esBulkDeleteResult', status: 0, deleted: 0, failed: 1 });
+  });
+
+  it('esBulkDelete：空 ID 列表返回校验错误且不发请求', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    await view.handleMessage({ type: 'esBulkDelete', id: 'b1', index: 'i', ids: ['', ''] });
+    expect(es.bulkDelete).not.toHaveBeenCalled();
+    expect(posts(view).at(-1)).toMatchObject({ type: 'esBulkDeleteResult', status: 0, deleted: 0, failed: 0 });
   });
 
   it('esLoadNodes：解析 cat/nodes 并下发', async () => {

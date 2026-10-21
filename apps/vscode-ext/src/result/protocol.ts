@@ -447,6 +447,7 @@ export type EsDownMessage =
   | { type: 'esDocsError'; id: string; index: string; error: EsErrorInfo }
   | { type: 'esDslResult'; id: string; index: string; took: number | null; timedOut: boolean | null; total: number | null; hits: EsDocHit[]; aggregations: unknown; raw: unknown; truncated: boolean; searchAfter: unknown[] | null }
   | { type: 'esDslError'; id: string; index: string; error: EsErrorInfo }
+  | { type: 'esBulkDeleteResult'; id: string; index: string; status: number; tookMs: number; deleted: number; failed: number; body: unknown }
   | { type: 'esNodes'; items: EsNodeSummary[] }
   | { type: 'esNodesError'; error: EsErrorInfo }
   | { type: 'esSavedDsl'; items: SavedEsQueryView[] }
@@ -463,6 +464,7 @@ export type EsUpMessage =
   | { type: 'esLoadDocs'; id: string; index: string; searchAfter: unknown[] | null; size?: number; query?: string | null; queryMode?: 'text' | 'dsl'; defaultOperator?: 'OR' | 'AND' }
   | { type: 'esGetDoc'; id: string; index: string; docId: string }
   | { type: 'esRunDsl'; id: string; index: string; body: string; size?: number; searchAfter?: unknown[] | null }
+  | { type: 'esBulkDelete'; id: string; index: string; ids: string[] }
   | { type: 'esLoadNodes' }
   | { type: 'esLoadSavedDsl' }
   | { type: 'esSaveDsl'; name: string; index: string; body: string }
