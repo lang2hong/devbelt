@@ -14,6 +14,8 @@ describe('explorerMenu builder', () => {
   it('未登录：连接段 + 登录，无同步/账户项', () => {
     const v = values(false, false);
     expect(v).toContain('addGroup');
+    expect(v).toContain('refresh');
+    expect(v).toContain('searchConnections');
     expect(v).toContain('login');
     expect(v).not.toContain('syncEntry');
     expect(v).not.toContain('syncNow');
@@ -49,5 +51,7 @@ describe('explorerMenu builder', () => {
     expect(EXPLORER_MENU_COMMANDS.syncEntry).toBe('devbelt.syncEntry');
     expect(EXPLORER_MENU_COMMANDS.syncNow).toBe('devbelt.syncNow');
     expect(EXPLORER_MENU_COMMANDS.account).toBe('devbelt.account');
+    expect(EXPLORER_MENU_COMMANDS.refresh).toBe('devbelt.refresh');
+    expect(EXPLORER_MENU_COMMANDS.searchConnections).toBe('devbelt.searchConnections');
   });
 });

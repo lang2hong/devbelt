@@ -43,6 +43,36 @@ export interface Deps {
 export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;
 
 /**
+ * 树节点命令白名单：这些命令的 TreeItem.command 不再携带 arguments
+ * （VS Code 的 `<cmd> /N` 缓存会在整树刷新后失效）。无参调用时注入当前选中节点；
+ * 右键菜单/快捷入口仍显式传节点。
+ */
+export const TREE_COMMANDS: ReadonlySet<string> = new Set([
+  'devbelt.openConnection',
+  'devbelt.es.index',
+  'devbelt.es.cluster',
+  'devbelt.es.indices',
+  'devbelt.openQuery',
+  'devbelt.viewTrigger',
+  'devbelt.jumpToRefTable',
+  'devbelt.previewTable',
+  'devbelt.previewView',
+  'devbelt.openRoutine',
+  'devbelt.openEvent',
+  'devbelt.redis.keyBrowser',
+  'devbelt.redis.loadMoreKeys',
+  'devbelt.redis.loadMoreFolderKeys',
+  'devbelt.redis.loadAllKeys',
+]);
+
+let selectedTreeNodeProvider: (() => DbTreeNode | undefined) | undefined;
+
+/** extension 在创建 TreeView 后注入；命令注册早于视图创建。 */
+export function setTreeSelectionProvider(provider: () => DbTreeNode | undefined): void {
+  selectedTreeNodeProvider = provider;
+}
+
+/**
  * 命令注册统一入口。
  *
  * VS Code 不会处理命令处理器返回的 rejected promise：处理器里未捕获的异常只会变成
@@ -51,6 +81,10 @@ export type Sub = (cmd: string, handler: (...args: any[]) => any) => void;
  */
 export function makeSub(context: vscode.ExtensionContext): Sub {
   return (cmd, handler) => context.subscriptions.push(vscode.commands.registerCommand(cmd, async (...args: any[]) => {
+    if (args.length === 0 && TREE_COMMANDS.has(cmd)) {
+      const node = selectedTreeNodeProvider?.();
+      if (node) args = [node];
+    }
     try {
       return await handler(...args);
     } catch (err) {

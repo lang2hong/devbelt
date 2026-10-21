@@ -25,6 +25,8 @@ export interface ExplorerMenuInput {
 /** 菜单 value → 命令 id。 */
 export const EXPLORER_MENU_COMMANDS: Record<string, string> = {
   addGroup: 'devbelt.addGroup',
+  refresh: 'devbelt.refresh',
+  searchConnections: 'devbelt.searchConnections',
   showHistory: 'devbelt.showHistory',
   importConnections: 'devbelt.importConnections',
   exportConnections: 'devbelt.exportConnections',
@@ -41,6 +43,8 @@ export function buildExplorerMenu(input: ExplorerMenuInput): ExplorerMenuItem[] 
   const items: ExplorerMenuItem[] = [
     { label: l10n('explorer.section.connection'), separator: true },
     { label: l10n('cmd.groups'), value: 'addGroup' },
+    { label: l10n('explorer.refresh'), value: 'refresh' },
+    { label: l10n('explorer.searchConnections'), value: 'searchConnections' },
     { label: l10n('cmd.showHistory'), value: 'showHistory' },
     { label: l10n('account.action.importConnections'), value: 'importConnections' },
     { label: l10n('account.action.exportConnections'), value: 'exportConnections' },

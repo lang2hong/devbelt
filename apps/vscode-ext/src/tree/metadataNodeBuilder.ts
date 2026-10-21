@@ -68,7 +68,7 @@ export class MetadataNodeBuilder {
       node.id = this.idFor(parent, conn, database, 'tbl', t.name);
       if (schema) node.schema = schema;
       node.tooltip = formatTableTooltip(t);
-      node.command = { command: 'devbelt.previewTable', title: 'Preview', arguments: [node] };
+      node.command = { command: 'devbelt.previewTable', title: 'Preview' };
       return node;
     });
   }
@@ -88,7 +88,7 @@ export class MetadataNodeBuilder {
       );
       node.id = this.idFor(parent, conn, database, 'view', v.name);
       if (schema) node.schema = schema;
-      node.command = { command: 'devbelt.previewView', title: 'Preview', arguments: [node] };
+      node.command = { command: 'devbelt.previewView', title: 'Preview' };
       return node;
     });
   }
@@ -110,7 +110,7 @@ export class MetadataNodeBuilder {
       node.id = this.idFor(parent, conn, database, r.type === 'PROCEDURE' ? 'proc' : 'fn', r.name);
       if (schema) node.schema = schema;
       if (r.identityArgs !== undefined) node.routineArgs = r.identityArgs;
-      node.command = { command: 'devbelt.openRoutine', title: 'Open', arguments: [node] };
+      node.command = { command: 'devbelt.openRoutine', title: 'Open' };
       return node;
     });
   }
@@ -130,7 +130,7 @@ export class MetadataNodeBuilder {
       );
       node.id = this.idFor(parent, conn, database, 'evt', e.name);
       if (schema) node.schema = schema;
-      node.command = { command: 'devbelt.openEvent', title: 'Open', arguments: [node] };
+      node.command = { command: 'devbelt.openEvent', title: 'Open' };
       return node;
     });
   }

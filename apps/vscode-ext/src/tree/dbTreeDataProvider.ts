@@ -108,6 +108,20 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     return l10n('sync.needsPathConfig', { fields: issues.map((i) => i.field).join(', ') });
   }
 
+  /** 连接节点 tooltip：只展示定位信息，不包含密码/密钥。 */
+  private connectionTooltip(conn: SavedConnection, pathCheck?: PathValidationResult): string {
+    const lines = [
+      conn.name || conn.host,
+      `${conn.dbType} · ${conn.host}:${conn.port}`,
+    ];
+    if (conn.database) lines.push(`${l10n('tree.conn.database')}: ${conn.database}`);
+    if (conn.schema) lines.push(`${l10n('tree.conn.schema')}: ${conn.schema}`);
+    if (conn.environment) lines.push(`${l10n('tree.conn.environment')}: ${conn.environment}`);
+    if (conn.readOnly) lines.push(l10n('tree.conn.readOnly'));
+    if (pathCheck && !pathCheck.valid) lines.push('', this.pathTooltip(pathCheck.issues));
+    return lines.join('\n');
+  }
+
   /** 刷新单个节点（重新拉取其子节点） */
   refreshNode(node: DbTreeNode): void {
     this.onDidChangeTreeDataEmitter.fire(node);
@@ -250,7 +264,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         .join(' · ');
       const color = item.health === 'green' ? 'charts.green' : item.health === 'yellow' ? 'charts.yellow' : item.health === 'red' ? 'charts.red' : undefined;
       if (color) node.iconPath = new ThemeIcon('database', new ThemeColor(color));
-      node.command = { command: 'devbelt.es.index', title: l10n('tree.es.openIndex'), arguments: [node] };
+      node.command = { command: 'devbelt.es.index', title: l10n('tree.es.openIndex') };
       return node;
     });
   }
@@ -272,7 +286,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         element,
       );
       clusterNode.id = `${conn.id}:es:cluster`;
-      clusterNode.command = { command: 'devbelt.es.cluster', title: l10n('tree.es.openCluster'), arguments: [clusterNode] };
+      clusterNode.command = { command: 'devbelt.es.cluster', title: l10n('tree.es.openCluster') };
       const indexNode = new DbTreeNode(
         l10n('tree.es.indices'),
         TreeItemCollapsibleState.Collapsed,
@@ -282,7 +296,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         element,
       );
       indexNode.id = `${conn.id}:es:indices`;
-      indexNode.command = { command: 'devbelt.es.indices', title: l10n('tree.es.openIndices'), arguments: [indexNode] };
+      indexNode.command = { command: 'devbelt.es.indices', title: l10n('tree.es.openIndices') };
       return [clusterNode, indexNode];
     }
     // Redis（P7 S3）：子节点为逻辑库（INFO keyspace）；键在 webview 内分页加载。
@@ -525,7 +539,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             undefined,
             q.id,
           );
-          n.command = { command: 'devbelt.openQuery', title: 'Open', arguments: [n] };
+          n.command = { command: 'devbelt.openQuery', title: 'Open' };
           n.id = `${conn.id}:sqldb:${db}:q:${q.id}`;
           return n;
         },
@@ -581,7 +595,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       node.schema = schema;
       node.id = `${element.id}:trg:${t.name}`;
       node.description = [t.timing, t.event].filter(Boolean).join(' ');
-      node.command = { command: 'devbelt.viewTrigger', title: 'View', arguments: [node] };
+      node.command = { command: 'devbelt.viewTrigger', title: 'View' };
       return node;
     });
   }
@@ -615,7 +629,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.refColumn = f.refColumn;
         node.refSchema = f.refSchema;
         node.constraintName = f.constraintName;
-        node.command = { command: 'devbelt.jumpToRefTable', title: 'Open', arguments: [node] };
+        node.command = { command: 'devbelt.jumpToRefTable', title: 'Open' };
         return node;
       });
   }
@@ -639,7 +653,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           undefined,
           q.id,
         );
-        n.command = { command: 'devbelt.openQuery', title: 'Open', arguments: [n] };
+        n.command = { command: 'devbelt.openQuery', title: 'Open' };
         n.id = `${conn.id}:sqldb:${db}:q:${q.id}`;
         return n;
       },
@@ -703,7 +717,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const gNodes = topGroups.map(
       (g) => {
         const n = new DbTreeNode(g.name, TreeItemCollapsibleState.Collapsed, NodeKind.Group, undefined, g.id);
+        const count = data.connections.filter((c) => c.groupId === g.id).length;
         n.id = `group:${g.id}`; // 稳定 id：整树 refresh 后保住展开态
+        n.description = String(count);
+        n.tooltip = l10n('tree.group.count', { count });
         return n;
       },
     );
@@ -719,7 +736,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const gNodes = childGroups.map(
       (g) => {
         const n = new DbTreeNode(g.name, TreeItemCollapsibleState.Collapsed, NodeKind.Group, undefined, g.id);
+        const count = data.connections.filter((c) => c.groupId === g.id).length;
         n.id = `group:${g.id}`;
+        n.description = String(count);
+        n.tooltip = l10n('tree.group.count', { count });
         return n;
       },
     );
@@ -764,10 +784,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         command: 'devbelt.openConnection',
         title: 'Open',
       };
-      // 路径异常优先于类型图标（连接不可用是更重要的信号）；tooltip 说明原因。
+      node.tooltip = this.connectionTooltip(conn, pathCheck);
+      // 路径异常优先于类型图标（连接不可用是更重要的信号）。
       if (hasPathIssues) {
         node.iconPath = new ThemeIcon('warning', new ThemeColor('editorWarning.foreground'));
-        node.tooltip = this.pathTooltip(pathCheck.issues);
       } else {
         node.iconPath = logo;
       }
@@ -775,9 +795,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       node.id = conn.id;
       node.description = this.connVersions.get(conn.id) || '';
       node.iconPath = logo;
-      if (hasPathIssues) {
-        node.tooltip = this.pathTooltip(pathCheck.issues);
-      }
+      node.tooltip = this.connectionTooltip(conn, pathCheck);
     }
     this.connNodes.set(conn.id, node);
     return node;

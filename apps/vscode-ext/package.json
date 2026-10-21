@@ -2439,6 +2439,18 @@
         "id": "devbelt.databaseData",
         "label": "%submenu.databaseData%"
       }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "devbelt.explorer",
+        "contents": "%welcome.noConnections.loggedOut%",
+        "when": "!devbelt.hasConnections && !devbelt.loggedIn"
+      },
+      {
+        "view": "devbelt.explorer",
+        "contents": "%welcome.noConnections.loggedIn%",
+        "when": "!devbelt.hasConnections && devbelt.loggedIn"
+      }
     ]
   },
   "scripts": {

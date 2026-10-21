@@ -167,5 +167,7 @@
   "submenu.connectionTools": "Data & tools…",
   "submenu.tableStructure": "Structure…",
   "submenu.tableMore": "More…",
-  "submenu.databaseData": "Data & operations…"
+  "submenu.databaseData": "Data & operations…",
+  "welcome.noConnections.loggedOut": "No connections yet.\n[New Connection](command:devbelt.addConnection) · [Import](command:devbelt.importConnections) · [Sign In](command:devbelt.login)",
+  "welcome.noConnections.loggedIn": "No connections yet.\n[New Connection](command:devbelt.addConnection) · [Import](command:devbelt.importConnections)"
 }

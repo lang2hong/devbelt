@@ -151,6 +151,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       return;
     }
     treeProvider.markOpen(conn.id);
+    treeProvider.setConnVersion(conn.id, l10n('tree.connecting'));
     connCtx.setLast(conn);
     treeProvider.refresh();
     try {
@@ -165,6 +166,9 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       treeProvider.refresh();
       AuditLogger.tryLog({ action: 'connection_open', connName: conn.name || conn.host, database: conn.database });
     } catch (err) {
+      // 连接失败必须恢复为关闭态，否则节点会显示“已打开/可展开”但实际无会话。
+      treeProvider.markClosed(conn.id);
+      treeProvider.refresh();
       if (err instanceof ConnectionPathError) {
         const fields = err.result.issues.map((i) => i.field).join(', ');
         const picked = await vscode.window.showErrorMessage(
@@ -194,9 +198,13 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     vscode.window.showInformationMessage(l10n('conn.closed', { name: node.conn.name || node.conn.host }));
   });
 
-  sub('devbelt.refreshConnection', (node: DbTreeNode) => {
-    if (node?.conn) manager.disposeConn(node.conn.id);
+  sub('devbelt.refreshConnection', async (node: DbTreeNode) => {
+    if (!node?.conn) return;
+    manager.disposeConn(node.conn.id);
+    treeProvider.markClosed(node.conn.id);
     treeProvider.refresh();
+    // 刷新语义 = 关闭后立即重连，而不是留下一个没有会话的展开节点。
+    await vscode.commands.executeCommand('devbelt.openConnection', node);
   });
 
   sub('devbelt.refresh', () => treeProvider.refresh());

@@ -563,7 +563,7 @@ export class RedisKeyTreeState {
     n.redisDbIndex = parent.redisDbIndex;
     n.redisKey = key;
     n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:k:${key}`;
-    n.command = { command: 'devbelt.redis.keyBrowser', title: l10n('redis.tree.open'), arguments: [n] };
+    n.command = { command: 'devbelt.redis.keyBrowser', title: l10n('redis.tree.open') };
     return n;
   }
 
@@ -573,7 +573,7 @@ export class RedisKeyTreeState {
     n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:more`;
     // 已加载数量：即使本页 0 新增，数字变化也让用户知道确实点了/还能继续。
     n.description = l10n('redis.tree.loadedCount', { count: String(this.redisLoadedCount(parent)) });
-    n.command = { command: 'devbelt.redis.loadMoreKeys', title: l10n('redis.tree.loadMore'), arguments: [n] };
+    n.command = { command: 'devbelt.redis.loadMoreKeys', title: l10n('redis.tree.loadMore') };
     return n;
   }
 
@@ -594,7 +594,7 @@ export class RedisKeyTreeState {
     const base = `${prefix}${conn.keySeparator || ':'}`;
     const count = source.filter((k) => k.startsWith(base)).length;
     n.description = l10n('redis.tree.loadedCount', { count: String(count) });
-    n.command = { command: 'devbelt.redis.loadMoreFolderKeys', title: l10n('redis.tree.loadMore'), arguments: [n] };
+    n.command = { command: 'devbelt.redis.loadMoreFolderKeys', title: l10n('redis.tree.loadMore') };
     return n;
   }
 
@@ -625,7 +625,7 @@ export class RedisKeyTreeState {
     );
     n.redisDbIndex = parent.redisDbIndex;
     n.id = `${parent.conn!.id}:db${parent.redisDbIndex}:loadall`;
-    n.command = { command: 'devbelt.redis.loadAllKeys', title: l10n('redis.tree.loadAll'), arguments: [n] };
+    n.command = { command: 'devbelt.redis.loadAllKeys', title: l10n('redis.tree.loadAll') };
     return n;
   }
 

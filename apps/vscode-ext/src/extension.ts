@@ -41,6 +41,7 @@ import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
+import { setTreeSelectionProvider } from './commands/shared';
 import { SqlCompletionProvider } from './completion/sqlCompletionProvider';
 import { SqlCodeLensProvider } from './completion/sqlCodeLensProvider';
 import { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
@@ -82,6 +83,10 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const store = new ConnectionStore(context.globalState, context.secrets);
   context.subscriptions.push({ dispose: () => store.dispose() });
   await store.init();
+  const syncHasConnections = (): void => {
+    void vscode.commands.executeCommand('setContext', 'devbelt.hasConnections', store.list().length > 0);
+  };
+  syncHasConnections();
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   const history = new HistoryStore(context.globalState);
@@ -298,6 +303,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push(onAuthChange);
   // 同步可观测：本地用户改动（连接/分组/查询）后是否会自动排同步（取决于自动同步开关）。
   context.subscriptions.push(store.onChanged((source) => {
+    syncHasConnections();
     if (source !== 'user') return;
     diagInfo('sync trigger', { trigger: 'store-change', autoSync: isAutoSyncEnabled() });
   }));
@@ -446,6 +452,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     showCollapseAll: true,
   });
   treeViewRef = treeView;
+  setTreeSelectionProvider(() => treeView.selection[0]);
   context.subscriptions.push(treeView, treeProvider);
   // 当前选中的连接（选中其子节点时归属该连接）显示绿点。
   // 空选择（刷新/失焦引发的瞬时清空）不更新——否则绿点会一闪而过。
