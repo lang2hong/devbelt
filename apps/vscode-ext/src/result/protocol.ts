@@ -228,6 +228,7 @@ export type RedisDownMessage =
   | { type: 'commandLog'; entry: RedisCommandLogEntry }
   | { type: 'connectionEvent'; event: string; detail: string | null; at: number }
   | { type: 'streamGroupDetail'; key: string; group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] }; pendingEntries: RedisPendingEntry[]; pendingTruncated: boolean }
+  | { type: 'streamPendingResult'; key: string; group: string; entries: RedisPendingEntry[]; done: boolean }
   | { type: 'streamRangeResult'; key: string; entries: RedisStreamEntry[]; done: boolean }
   | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }
   | { type: 'confirmRequired'; id: string; command: string }
@@ -334,6 +335,7 @@ export type RedisUpMessage =
   | { type: 'streamGroupDestroy'; key: string; group: string; confirmed?: boolean }
   | { type: 'streamGroupDelConsumer'; key: string; group: string; consumer: string; confirmed?: boolean }
   | { type: 'streamGroupDetail'; key: string; group: string }
+  | { type: 'streamPending'; key: string; group: string; start: string }
   | { type: 'streamAck'; key: string; group: string; ids: string[] }
   | { type: 'streamClaim'; key: string; group: string; consumer: string; ids: string[] }
   | { type: 'streamRange'; key: string; start: string };

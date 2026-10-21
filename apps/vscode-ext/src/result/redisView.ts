@@ -378,6 +378,7 @@ export class RedisView extends BaseWebView {
     if (msg.type === 'streamGroupDestroy') { await this.streams.streamGroupDestroyOp(msg); return; }
     if (msg.type === 'streamGroupDelConsumer') { await this.streams.streamGroupDelConsumerOp(msg); return; }
     if (msg.type === 'streamGroupDetail') { await this.streams.streamGroupDetailOp(msg); return; }
+    if (msg.type === 'streamPending') { await this.streams.streamPendingOp(msg); return; }
     if (msg.type === 'streamAck') { await this.streams.streamAckOp(msg); return; }
     if (msg.type === 'streamClaim') { await this.streams.streamClaimOp(msg); return; }
     if (msg.type === 'streamRange') { await this.streams.streamRangeOp(msg); return; }

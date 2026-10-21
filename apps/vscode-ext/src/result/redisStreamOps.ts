@@ -164,6 +164,29 @@ export class RedisStreamOps {
     });
   }
 
+  async streamPendingOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    const start = String(msg.start ?? '-');
+    if (!key || !group || !start) return;
+    await this.host.enqueue(async () => {
+      try {
+        const session = await this.host.sessionForDb();
+        const page = await redisXPendingEntries(session.client, key, group, PENDING_PAGE + 1, start);
+        const entries = (start === '-' ? page : page.filter((e) => e.id !== start)).slice(0, PENDING_PAGE);
+        this.host.post({
+          type: 'streamPendingResult',
+          key,
+          group,
+          entries,
+          done: page.length < PENDING_PAGE + 1,
+        });
+      } catch (err) {
+        this.host.post({ type: 'error', message: (err as Error).message });
+      }
+    });
+  }
+
   async streamAckOp(msg: any): Promise<void> {
     const key = String(msg.key ?? '');
     const group = String(msg.group ?? '');

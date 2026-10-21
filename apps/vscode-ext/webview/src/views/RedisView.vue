@@ -73,6 +73,7 @@ function streamOps(): Record<string, (...a: any[]) => void> {
     groupDestroy: (key, group) => postOp({ type: 'streamGroupDestroy', key, group }),
     groupDelConsumer: (key, group, consumer) => postOp({ type: 'streamGroupDelConsumer', key, group, consumer }),
     groupDetail: (key, group) => post({ type: 'streamGroupDetail', key, group }),
+    pending: (key, group, start) => post({ type: 'streamPending', key, group, start }),
     ack: (key, group, ids) => post({ type: 'streamAck', key, group, ids }),
     claim: (key, group, consumer, ids) => post({ type: 'streamClaim', key, group, consumer, ids }),
     loadMore: (key, start) => post({ type: 'streamRange', key, start }),
@@ -156,6 +157,13 @@ onMounted(() => {
       pendingConfirm.value = { id: msg.id, command: msg.command };
     } else if (msg.type === 'streamGroupDetail') {
       streamDetail.value = msg;
+    } else if (msg.type === 'streamPendingResult') {
+      const d = streamDetail.value;
+      if (d && value.value?.data?.kind === 'stream' && d.key === msg.key && d.group === msg.group) {
+        const seen = new Set((d.pendingEntries ?? []).map((e: any) => e.id));
+        const merged = [...(d.pendingEntries ?? []), ...(msg.entries ?? []).filter((e: any) => !seen.has(e.id))];
+        streamDetail.value = { ...d, pendingEntries: merged, pendingTruncated: !msg.done };
+      }
     } else if (msg.type === 'streamRangeResult') {
       // 只把结果贴回它所属的 key（选中态可能已切到另一个 stream）。
       if (value.value?.data?.kind === 'stream' && value.value.key === msg.key) {
@@ -212,6 +220,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
         @group-destroy="streamOps().groupDestroy"
         @group-del-consumer="streamOps().groupDelConsumer"
         @group-detail="streamOps().groupDetail"
+        @pending-more="streamOps().pending"
         @ack="streamOps().ack"
         @claim="streamOps().claim"
         @load-more="streamOps().loadMore"

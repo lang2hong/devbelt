@@ -749,6 +749,29 @@ describe('RedisView S4 Stream 处理器', () => {
     expect(posts(view).filter((m) => m.type === 'streamGroupDetail').length).toBe(3);
   });
 
+  it('streamPending：续页过滤起始 ID 并判定 done', async () => {
+    const { view, sent } = makeView(async (n, a) => {
+      if (n === 'XPENDING') {
+        if (a.length === 2) return [2, '1-0', '2-0', [['c1', '1'], ['c2', '1']]];
+        return [['1-0', 'c1', 10, 1], ['2-0', 'c2', 20, 2]];
+      }
+      if (n === 'XINFO') return [['name', 'c1', 'pending', '2']];
+      if (n === 'XLEN') return 2;
+      if (n === 'TYPE') return 'stream';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return 128;
+      if (n === 'XRANGE') return [['1-0', ['f', 'v']]];
+      return 'OK';
+    }, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamPending', key: 's', group: 'g', start: '1-0' });
+    const result = posts(view).find((m) => m.type === 'streamPendingResult');
+    expect(result.entries).toEqual([{ id: '2-0', consumer: 'c2', idleMs: 20, deliveryCount: 2 }]);
+    expect(result.done).toBe(true);
+    expect(sent.find(([n]) => n === 'XPENDING')?.[1]).toEqual(['s', 'g', '1-0', '+', 101]);
+  });
+
   it('streamAdd：非法 ID 拒绝且不发包', async () => {
     const { view, sent } = makeView(handler, 0);
     await mount(view);

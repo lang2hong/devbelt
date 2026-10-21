@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'groupDestroy', key: string, group: string): void;
   (e: 'groupDelConsumer', key: string, group: string, consumer: string): void;
   (e: 'groupDetail', key: string, group: string): void;
+  (e: 'pendingMore', key: string, group: string, start: string): void;
   (e: 'ack', key: string, group: string, ids: string[]): void;
   (e: 'claim', key: string, group: string, consumer: string, ids: string[]): void;
   (e: 'loadMore', key: string, start: string): void;
@@ -44,6 +45,7 @@ const newGroupId = ref('$');
 
 const allSelected = computed(() => entries.value.length > 0 && entries.value.every((e) => selected.value.has(e.id)));
 const pendingEntries = computed(() => props.detail?.pendingEntries ?? []);
+const lastPendingId = computed(() => pendingEntries.value.at(-1)?.id ?? '');
 const allPendingSelected = computed(() => pendingEntries.value.length > 0 && pendingEntries.value.every((e) => pendingSelected.value.has(e.id)));
 const canClaim = computed(() => !props.readOnly && !!claimConsumer.value.trim() && pendingSelected.value.size > 0);
 
@@ -56,6 +58,10 @@ function toggleAllPending(event: Event): void {
   pendingSelected.value = (event.target as HTMLInputElement).checked
     ? new Set(pendingEntries.value.map((e) => e.id))
     : new Set();
+}
+function loadMorePending(): void {
+  if (!props.detail || !lastPendingId.value) return;
+  emit('pendingMore', key.value, props.detail.group, lastPendingId.value);
 }
 function ackSelected(): void {
   if (!props.detail || !pendingSelected.value.size) return;
@@ -304,6 +310,7 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+      <button v-if="detail.pendingTruncated" class="btn" @click="loadMorePending">{{ t('wv.redis.stream.pendingLoadMore') }}</button>
     </div>
   </div>
 </template>
