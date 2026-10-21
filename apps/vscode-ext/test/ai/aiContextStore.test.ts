@@ -6,6 +6,7 @@ import {
   AiContextStore,
   DOMAIN_CONTEXT_PREFIX,
   DEFAULT_DIRECTIVES_PREFIX,
+  BUSINESS_RULES_SCOPE,
   LAST_SCOPE_PREFIX,
   SCHEMA_NOTES_PREFIX,
   SELECTED_TABLES_PREFIX,
@@ -31,20 +32,22 @@ function makeMemento(): { memento: any; data: Map<string, unknown> } {
 }
 
 describe('AiContextStore（连接级域上下文/默认指令）', () => {
-  it('读写使用约定的两个 Memento 键；空值删除键', async () => {
+  it('业务规则写入保留 scope 的同步记录；空值墓碑并清理旧键', async () => {
     const { memento, data } = makeMemento();
     const store = new AiContextStore(memento);
 
     await store.setDomainContext('conn-1', 'GMV=已完成订单总额');
     await store.setDefaultDirectives('conn-1', '未说明时排除软删除');
-    expect(data.get(`${DOMAIN_CONTEXT_PREFIX}conn-1`)).toBe('GMV=已完成订单总额');
-    expect(data.get(`${DEFAULT_DIRECTIVES_PREFIX}conn-1`)).toBe('未说明时排除软删除');
+    expect(data.has(`${DOMAIN_CONTEXT_PREFIX}conn-1`)).toBe(false);
+    expect(data.has(`${DEFAULT_DIRECTIVES_PREFIX}conn-1`)).toBe(false);
+    const record = store.listSchemaNoteRecords().find((r) => r.connId === 'conn-1' && r.scope === BUSINESS_RULES_SCOPE)!;
+    expect(record.businessRules).toEqual({ domainContext: 'GMV=已完成订单总额', defaultDirectives: '未说明时排除软删除' });
     expect(store.getDomainContext('conn-1')).toBe('GMV=已完成订单总额');
     expect(store.getDefaultDirectives('conn-1')).toBe('未说明时排除软删除');
 
-    await store.setDomainContext('conn-1', '   ');
-    expect(data.has(`${DOMAIN_CONTEXT_PREFIX}conn-1`)).toBe(false);
+    await store.setBusinessRules('conn-1', { domainContext: '   ', defaultDirectives: '' });
     expect(store.getDomainContext('conn-1')).toBe('');
+    expect(store.listSchemaNoteRecords().find((r) => r.id === record.id)?.deleted).toBe(true);
   });
 
   it('超长文本截断到 2000 字符（Memento 是整键 JSON，需设界）', async () => {
@@ -54,14 +57,30 @@ describe('AiContextStore（连接级域上下文/默认指令）', () => {
     expect(store.getDomainContext('c')).toHaveLength(2000);
   });
 
-  it('clearForConnection 幂等清理两条键', async () => {
+  it('clearForConnection 幂等清理规则记录与旧键', async () => {
     const { memento, data } = makeMemento();
     const store = new AiContextStore(memento);
     await store.setDomainContext('c', 'a');
     await store.setDefaultDirectives('c', 'b');
     await store.clearForConnection('c');
-    expect(data.size).toBe(0);
+    expect(data.has(`${DOMAIN_CONTEXT_PREFIX}c`)).toBe(false);
+    expect(data.has(`${DEFAULT_DIRECTIVES_PREFIX}c`)).toBe(false);
+    expect(store.listSchemaNoteRecords().every((r) => r.deleted)).toBe(true);
     await store.clearForConnection('c');
+  });
+
+  it('旧 Memento 键可读；首次保存后迁移到记录并清理旧键', async () => {
+    const { memento, data } = makeMemento();
+    data.set(`${DOMAIN_CONTEXT_PREFIX}c-old`, '旧术语');
+    data.set(`${DEFAULT_DIRECTIVES_PREFIX}c-old`, '旧规则');
+    const store = new AiContextStore(memento);
+    expect(store.getDomainContext('c-old')).toBe('旧术语');
+    expect(store.getDefaultDirectives('c-old')).toBe('旧规则');
+    await store.setBusinessRules('c-old', { domainContext: '新术语', defaultDirectives: '旧规则' });
+    expect(data.has(`${DOMAIN_CONTEXT_PREFIX}c-old`)).toBe(false);
+    expect(data.has(`${DEFAULT_DIRECTIVES_PREFIX}c-old`)).toBe(false);
+    expect(store.getDomainContext('c-old')).toBe('新术语');
+    expect(store.listSchemaNoteRecords().find((r) => r.connId === 'c-old')?.businessRules?.domainContext).toBe('新术语');
   });
 
   it('缺失键返回空串（不抛错）', () => {

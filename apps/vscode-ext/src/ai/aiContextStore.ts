@@ -1,5 +1,6 @@
 import type * as vscode from 'vscode';
 import { uniqueId } from '@devbelt/db-host/utils/id';
+import type { SyncBusinessRules } from '@devbelt/db-host/sync/e2e/schemaNotesTypes';
 
 /**
  * 连接级 AI 上下文存储（P9 S3）。
@@ -23,6 +24,8 @@ export const SCHEMA_NOTES_PREFIX = 'devbelt.ai.schemaNotes.';
  * 旧版按 `<connId>.<库>` 键控（SCHEMA_NOTES_PREFIX 直连）仍可读，保存时自动迁移。
  */
 export const SCHEMA_NOTES_RECORD_PREFIX = 'devbelt.ai.schemaNotes.rec.';
+/** 业务规则复用 schemaNotes 实体时的保留 scope（不会与真实库/索引名冲突）。 */
+export const BUSINESS_RULES_SCOPE = '__ai_business_rules__';
 
 /** 表/列临时说明与样例（S7e）。 */
 export interface ColumnNote {
@@ -51,6 +54,8 @@ export interface SchemaNotesRecord {
   connId: string;
   scope: string;
   tables: Record<string, TableNote>;
+  /** 保留 scope 记录上的连接级业务规则（复用 schemaNotes 同步实体）。 */
+  businessRules?: SyncBusinessRules;
   updateTime: number;
   deleted?: boolean;
 }
@@ -122,23 +127,63 @@ function normalize(raw: string | undefined | null): string {
   return trimmed.length > MAX_TEXT_CHARS ? trimmed.slice(0, MAX_TEXT_CHARS) : trimmed;
 }
 
+function normalizeBusinessRules(raw: unknown): SyncBusinessRules | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.domainContext !== 'string' || typeof o.defaultDirectives !== 'string') return undefined;
+  const domainContext = normalize(o.domainContext);
+  const defaultDirectives = normalize(o.defaultDirectives);
+  return domainContext || defaultDirectives ? { domainContext, defaultDirectives } : undefined;
+}
+
 export class AiContextStore {
   constructor(private readonly memento: vscode.Memento) {}
 
   getDomainContext(connId: string): string {
-    return normalize(this.memento.get<string>(`${DOMAIN_CONTEXT_PREFIX}${connId}`));
+    return this.getBusinessRules(connId).domainContext;
   }
 
   async setDomainContext(connId: string, text: string): Promise<void> {
-    await this.memento.update(`${DOMAIN_CONTEXT_PREFIX}${connId}`, normalize(text) || undefined);
+    const current = this.getBusinessRules(connId);
+    await this.setBusinessRules(connId, { ...current, domainContext: text });
   }
 
   getDefaultDirectives(connId: string): string {
-    return normalize(this.memento.get<string>(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`));
+    return this.getBusinessRules(connId).defaultDirectives;
   }
 
   async setDefaultDirectives(connId: string, text: string): Promise<void> {
-    await this.memento.update(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`, normalize(text) || undefined);
+    const current = this.getBusinessRules(connId);
+    await this.setBusinessRules(connId, { ...current, defaultDirectives: text });
+  }
+
+  /** 连接级业务规则：记录式优先，旧 Memento 键懒迁移读取。 */
+  getBusinessRules(connId: string): SyncBusinessRules {
+    const record = this.findSchemaNoteRecord(connId, BUSINESS_RULES_SCOPE);
+    if (record?.businessRules) return record.businessRules;
+    return {
+      domainContext: normalize(this.memento.get<string>(`${DOMAIN_CONTEXT_PREFIX}${connId}`)),
+      defaultDirectives: normalize(this.memento.get<string>(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`)),
+    };
+  }
+
+  /** 一次写入两段业务规则（空则墓碑），并清理旧键。 */
+  async setBusinessRules(connId: string, rules: SyncBusinessRules): Promise<void> {
+    const normalized = normalizeBusinessRules(rules);
+    const existing = this.findSchemaNoteRecord(connId, BUSINESS_RULES_SCOPE);
+    if (normalized) {
+      await this.writeSchemaNoteRecord({
+        id: existing?.id ?? uniqueId('sn'),
+        connId,
+        scope: BUSINESS_RULES_SCOPE,
+        tables: existing?.tables ?? {},
+        businessRules: normalized,
+      });
+    } else if (existing) {
+      await this.removeSchemaNoteRecord(existing.id);
+    }
+    await this.memento.update(`${DOMAIN_CONTEXT_PREFIX}${connId}`, undefined);
+    await this.memento.update(`${DEFAULT_DIRECTIVES_PREFIX}${connId}`, undefined);
   }
 
   getLastScope(connId: string): AiScopeRef | undefined {
@@ -227,8 +272,14 @@ export class AiContextStore {
   }
 
   /** 写入记录（同步应用/本地保存共用；updateTime 由存储层打点）。 */
-  async saveSchemaNoteRecord(id: string, value: { connId: string; scope: string; tables: Record<string, unknown> }): Promise<void> {
-    await this.writeSchemaNoteRecord({ id, connId: value.connId, scope: value.scope, tables: normalizeTables(value.tables) });
+  async saveSchemaNoteRecord(id: string, value: { connId: string; scope: string; tables: Record<string, unknown>; businessRules?: SyncBusinessRules }): Promise<void> {
+    await this.writeSchemaNoteRecord({
+      id,
+      connId: value.connId,
+      scope: value.scope,
+      tables: normalizeTables(value.tables),
+      ...(value.businessRules ? { businessRules: value.businessRules } : {}),
+    });
   }
 
   /** 墓碑（跨设备删除传播；保留 connId/scope 供同步识别）。 */
@@ -251,6 +302,7 @@ export class AiContextStore {
       connId: o.connId,
       scope: o.scope,
       tables: normalizeTables(o.tables),
+      ...(o.businessRules !== undefined ? { ...(normalizeBusinessRules(o.businessRules) ? { businessRules: normalizeBusinessRules(o.businessRules) } : {}) } : {}),
       updateTime: typeof o.updateTime === 'number' && Number.isFinite(o.updateTime) ? o.updateTime : 0,
       ...(o.deleted === true ? { deleted: true } : {}),
     };
@@ -261,6 +313,7 @@ export class AiContextStore {
       connId: record.connId,
       scope: record.scope,
       tables: record.tables,
+      ...(record.businessRules ? { businessRules: record.businessRules } : {}),
       updateTime: Date.now(),
       ...(record.deleted ? { deleted: true } : {}),
     });

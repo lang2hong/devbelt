@@ -12,6 +12,14 @@
  * - `updateTime`：本地同步修订（写入时由存储层打点，与连接实体同口径）。
  */
 export const SCHEMA_NOTES_MAX_BYTES = 128 * 1024;
+export const BUSINESS_RULES_MAX_CHARS = 2000;
+export const BUSINESS_RULES_MAX_BYTES = 8 * 1024;
+
+/** 连接级 AI 业务规则（复用 schemaNotes 实体，scope 为保留值）。 */
+export interface SyncBusinessRules {
+  domainContext: string;
+  defaultDirectives: string;
+}
 
 export interface SyncSchemaNotesValue {
   id: string;
@@ -19,8 +27,24 @@ export interface SyncSchemaNotesValue {
   connId: string;
   scope: string;
   tables: Record<string, unknown>;
+  /** 可选：业务规则复用同一实体；旧客户端忽略该字段。 */
+  businessRules?: SyncBusinessRules;
   updateTime: number;
   deleted?: boolean;
+}
+
+export function assertBusinessRules(raw: unknown): SyncBusinessRules {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('businessRules must be an object');
+  const o = raw as Record<string, unknown>;
+  if (typeof o.domainContext !== 'string' || typeof o.defaultDirectives !== 'string') {
+    throw new Error('businessRules fields must be strings');
+  }
+  if (o.domainContext.length > BUSINESS_RULES_MAX_CHARS || o.defaultDirectives.length > BUSINESS_RULES_MAX_CHARS) {
+    throw new Error(`businessRules fields must be <= ${BUSINESS_RULES_MAX_CHARS} chars`);
+  }
+  const bytes = Buffer.byteLength(o.domainContext, 'utf8') + Buffer.byteLength(o.defaultDirectives, 'utf8');
+  if (bytes > BUSINESS_RULES_MAX_BYTES) throw new Error('businessRules exceeds 8 KiB limit');
+  return { domainContext: o.domainContext, defaultDirectives: o.defaultDirectives };
 }
 
 export function assertSchemaNotesTables(tables: unknown): Record<string, unknown> {

@@ -83,8 +83,11 @@ async function editConnectionText(
     ignoreFocusOut: true,
   });
   if (value === undefined) return;
-  if (kind === 'domain') await deps.contextStore.setDomainContext(target.id, value);
-  else await deps.contextStore.setDefaultDirectives(target.id, value);
+  const currentRules = deps.contextStore.getBusinessRules(target.id);
+  await deps.contextStore.setBusinessRules(target.id, {
+    ...currentRules,
+    ...(kind === 'domain' ? { domainContext: value } : { defaultDirectives: value }),
+  });
   void vscode.window.showInformationMessage(l10n('ai.context.saved'));
 }
 

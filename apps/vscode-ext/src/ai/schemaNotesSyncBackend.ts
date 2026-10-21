@@ -30,6 +30,7 @@ export class SchemaNotesSyncBackend implements EntityBackend {
       connId: record.connId,
       scope: record.scope,
       tables: record.tables as Record<string, unknown>,
+      ...(record.businessRules ? { businessRules: record.businessRules } : {}),
       updateTime: record.updateTime,
       ...(record.deleted ? { deleted: true } : {}),
     };
@@ -42,6 +43,7 @@ export class SchemaNotesSyncBackend implements EntityBackend {
       connId: value.connId,
       scope: value.scope,
       tables: value.tables,
+      ...(value.businessRules ? { businessRules: value.businessRules } : {}),
     });
   }
 

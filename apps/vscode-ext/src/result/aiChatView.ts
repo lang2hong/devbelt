@@ -260,8 +260,7 @@ export class AiChatView extends BaseWebView {
         const conn = this.selectedConnection();
         const payload = parseBusinessRulesPayload(msg);
         if (!conn || !payload) return;
-        await this.deps.contextStore.setDomainContext(conn.id, payload.domainContext);
-        await this.deps.contextStore.setDefaultDirectives(conn.id, payload.defaultDirectives);
+        await this.deps.contextStore.setBusinessRules(conn.id, payload);
         this.pushBusinessRules(true);
         return;
       }

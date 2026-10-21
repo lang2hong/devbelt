@@ -15,7 +15,7 @@ import {
   type AuthenticatorAlgorithm, type AuthenticatorTagColor,
   type SyncAuthenticatorEntryValue, type SyncAuthenticatorGroup, type SyncAuthenticatorTag,
 } from './authenticatorTypes.js';
-import { assertSchemaNotesScope, assertSchemaNotesTables, type SyncSchemaNotesValue } from './schemaNotesTypes.js';
+import { assertBusinessRules, assertSchemaNotesScope, assertSchemaNotesTables, type SyncBusinessRules, type SyncSchemaNotesValue } from './schemaNotesTypes.js';
 import { assertAiModelAccessPayload, type AiModelAccessPayload, type SyncAiModelAccessValue } from './aiModelAccessTypes.js';
 
 /**
@@ -245,6 +245,7 @@ export function encodeSchemaNotesPayload(entity: SyncSchemaNotesValue, resolveRe
     type: 'schemaNotes',
     scope: assertSchemaNotesScope(entity.scope),
     tables: assertSchemaNotesTables(entity.tables),
+    ...(entity.businessRules ? { businessRules: assertBusinessRules(entity.businessRules) } : {}),
   };
   const connRecordId = resolveRef('connection', entity.connId);
   if (connRecordId !== undefined) out.connId = connRecordId;
@@ -256,6 +257,7 @@ export interface DecodedSchemaNotesPayload {
   connId?: string;
   scope: string;
   tables: Record<string, unknown>;
+  businessRules?: SyncBusinessRules;
 }
 
 export function decodeSchemaNotesPayload(p: Record<string, unknown>): DecodedSchemaNotesPayload {
@@ -265,6 +267,7 @@ export function decodeSchemaNotesPayload(p: Record<string, unknown>): DecodedSch
     ...(typeof connId === 'string' && connId ? { connId } : {}),
     scope: assertSchemaNotesScope(p.scope),
     tables: assertSchemaNotesTables(p.tables),
+    ...(p.businessRules !== undefined ? { businessRules: assertBusinessRules(p.businessRules) } : {}),
   };
 }
 

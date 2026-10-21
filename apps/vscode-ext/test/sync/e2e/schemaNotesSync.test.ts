@@ -83,6 +83,17 @@ describe('S7f codec：schemaNotes 实体', () => {
     expect(decoded.type).toBe('schemaNotes');
     expect(() => decodeEntityPayload({ type: 'schemaNotes', scope: 'app', tables: [1] })).toThrowError(/tables/);
   });
+
+  it('业务规则：编码/解码可选字段；旧 payload 缺失时保持兼容', () => {
+    const rules = { domainContext: 'GMV=已完成订单', defaultDirectives: '排除软删除' };
+    const encoded = encodeEntityPayload({ type: 'schemaNotes', entity: { ...value, businessRules: rules } }, () => CONN_REC);
+    expect(encoded.businessRules).toEqual(rules);
+    const decoded = decodeEntityPayload(encoded);
+    expect(decoded).toMatchObject({ type: 'schemaNotes', data: { businessRules: rules } });
+    const legacy = decodeEntityPayload({ type: 'schemaNotes', connId: CONN_REC, scope: 'app', tables: {} });
+    expect(legacy.type).toBe('schemaNotes');
+    if (legacy.type === 'schemaNotes') expect(legacy.data.businessRules).toBeUndefined();
+  });
 });
 
 describe('S7f apply：schemaNotes 实体（connId 引用/未决/墓碑）', () => {
@@ -97,6 +108,21 @@ describe('S7f apply：schemaNotes 实体（connId 引用/未决/墓碑）', () =
     expect(result.disposition).toBe('created');
     expect(s.store.getSchemaNotes('c-1', 'app').tables['orders']?.note).toBe('x');
     expect(s.mapStore.getByRecordId(nRec)?.type).toBe('schemaNotes');
+  });
+
+  it('业务规则随 schemaNotes payload 落地并可读', async () => {
+    const s = setup();
+    await s.mapStore.put(CONN_REC, { type: 'connection', localId: 'c-1', recordVersion: '1', revision: 1, status: 'confirmed' });
+    const nRec = RID('B');
+    await applyRecord(
+      { recordId: nRec, version: '1', tombstone: false, payload: {
+        type: 'schemaNotes', connId: CONN_REC, scope: '__ai_business_rules__', tables: {},
+        businessRules: { domainContext: 'GMV=已完成订单', defaultDirectives: '排除软删除' },
+      } },
+      s,
+    );
+    expect(s.store.getDomainContext('c-1')).toBe('GMV=已完成订单');
+    expect(s.store.getDefaultDirectives('c-1')).toBe('排除软删除');
   });
 
   it('connId 未映射 → unresolved；连接到达后 reconcile 收敛到本地 id', async () => {
@@ -160,8 +186,8 @@ describe('S7f 本地存储：记录式 + 旧格式迁移 + 同步面', () => {
 
   it('EntityStore.listForSync 聚合 schemaNotes（含墓碑与 updateTime）', async () => {
     const s = setup();
-    await s.entities.save({ type: 'schemaNotes', localId: 'sn-1' }, { id: 'sn-1', connId: 'c-1', scope: 'app', tables: { t: { note: 'n' } }, updateTime: 0 } as never, 'sync');
-    expect(s.entities.get({ type: 'schemaNotes', localId: 'sn-1' })).toMatchObject({ connId: 'c-1', scope: 'app' });
+    await s.entities.save({ type: 'schemaNotes', localId: 'sn-1' }, { id: 'sn-1', connId: 'c-1', scope: 'app', tables: { t: { note: 'n' } }, businessRules: { domainContext: 'd', defaultDirectives: 'r' }, updateTime: 0 } as never, 'sync');
+    expect(s.entities.get({ type: 'schemaNotes', localId: 'sn-1' })).toMatchObject({ connId: 'c-1', scope: 'app', businessRules: { domainContext: 'd', defaultDirectives: 'r' } });
     const listed: EntitySyncRecord[] = s.entities.listForSync().filter((r) => r.ref.type === 'schemaNotes');
     expect(listed).toHaveLength(1);
     expect(listed[0].deleted).toBe(false);

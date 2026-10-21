@@ -399,7 +399,14 @@ function buildSchemaNotesFromPayload(
   id: string,
   connId: string | undefined,
 ): SyncSchemaNotesValue {
-  return { id, connId: connId ?? '', scope: p.scope, tables: p.tables, updateTime: 0 };
+  return {
+    id,
+    connId: connId ?? '',
+    scope: p.scope,
+    tables: p.tables,
+    ...(p.businessRules ? { businessRules: p.businessRules } : {}),
+    updateTime: 0,
+  };
 }
 
 function buildAuthenticatorGroupFromPayload(p: Extract<DecodedEntityPayload, { type: 'authenticatorGroup' }>['data'], id: string): SyncAuthenticatorGroup {
