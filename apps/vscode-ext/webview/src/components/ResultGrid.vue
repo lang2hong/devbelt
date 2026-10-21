@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
+import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import { FILTER_OP } from '../../../src/utils/filterOps';
@@ -76,8 +76,11 @@ const toast = ref('');
 let toastTimer: any;
 const showCopy = ref(false);
 const activeCell = ref<{ row: Row; field: Field } | null>(null);
+const activeCellPos = ref<{ rowIdx: number; fieldIdx: number } | null>(null);
 const cellMenu = ref<{ x: number; y: number; row: Row; field: Field } | null>(null);
 const detailCell = ref<{ column: string; value: unknown } | null>(null);
+const search = ref('');
+const gridWrap = ref<HTMLElement | null>(null);
 
 const canModifyRows = computed(() => props.hasTable && props.canEdit !== false);
 // 行选择用于复制（只读结果也需要）；删除仍只对可编辑表开放。
@@ -88,6 +91,15 @@ const fieldByName = computed(() => new Map(props.fields.map((field) => [field.na
 const visibleFields = computed(() => displayedOrder.value
   .map((name) => fieldByName.value.get(name))
   .filter((field): field is Field => !!field && !hiddenSet.value.has(field.name)));
+
+const filteredRows = computed(() => {
+  if (props.hasTable) return props.rows;
+  const q = search.value.trim().toLowerCase();
+  if (!q) return props.rows;
+  return props.rows.filter((row) => visibleFields.value.some((f) => clipboardCellText(row[f.name]).toLowerCase().includes(q)));
+});
+
+const allRowsSelected = computed(() => filteredRows.value.length > 0 && selectedRows.value.length === filteredRows.value.length);
 
 function normalizedOrder(order = props.columnOrder || []): string[] {
   const known = new Set(props.fields.map((field) => field.name));
@@ -208,7 +220,10 @@ let editingField: Field | null = null;
  * 编辑态（看起来像"改一个全都改了"）。行下标在当前结果集内天然唯一。
  */
 function startEdit(row: Row, field: Field, index: number) {
-  if (!canModifyRows.value) return;
+  if (!canModifyRows.value) {
+    detailCell.value = { column: field.name, value: row[field.name] };
+    return;
+  }
   const pk = getPk(row);
   // 无定位列时双击过去毫无反应，用户无从知晓原因
   if (!pk) return showToast(t('wv.grid.cannotEditNoPk'));
@@ -275,7 +290,12 @@ function onDocMouseDown(e: MouseEvent) {
 
 // 刷新/翻页/重跑后 props.rows 整体替换：旧的行对象已不在结果集中，
 // 若继续保留 selectedRows，会出现「勾选态全空但 Delete (N) 仍可点」→ 误删上一页的行。
-watch(() => props.rows, () => { selectedRows.value = []; });
+watch(() => props.rows, () => {
+  selectedRows.value = [];
+  activeCell.value = null;
+  activeCellPos.value = null;
+});
+watch(search, () => { selectedRows.value = []; });
 
 function onDocClickForMenus(e: MouseEvent): void {
   const target = e.target as HTMLElement | null;
@@ -601,7 +621,7 @@ function saveInsert() {
 function copyAsInsert() {
   if (!props.tableName) return showToast(t('wv.grid.copyNeedsTable'));
   if (!props.rows.length) return showToast(t('wv.grid.nothingToCopy'));
-  const targets = selectedRows.value.length ? selectedRows.value : props.rows;
+  const targets = selectedRows.value.length ? selectedRows.value : (props.hasTable ? props.rows : filteredRows.value);
   const cols = visibleFields.value.map((f) => f.name);
   const sql = buildInsertStatement(props.tableName, props.dbName, cols, targets, props.dbType, props.schemaName);
   void copyText(sql, t('wv.grid.copiedInserts', { count: targets.length }));
@@ -612,7 +632,9 @@ async function copyText(text: string, okMessage: string): Promise<void> {
     await navigator.clipboard.writeText(text);
     showToast(okMessage);
   } catch {
-    showToast(t('wv.grid.copyFailed'));
+    // Webview 剪贴板被策略拦截时，回退到宿主 clipboard。
+    post({ type: 'copyText', text });
+    showToast(okMessage);
   }
 }
 
@@ -630,7 +652,7 @@ function copyColumnName(field: Field): void {
 
 function copyGrid(format: CopyFormat): void {
   showCopy.value = false;
-  const targets = selectedRows.value.length ? selectedRows.value : props.rows;
+  const targets = selectedRows.value.length ? selectedRows.value : (props.hasTable ? props.rows : filteredRows.value);
   if (!targets.length) return showToast(t('wv.grid.nothingToCopy'));
   void copyText(
     clipboardRowsText(visibleFields.value.map((f) => f.name), targets, format),
@@ -638,9 +660,15 @@ function copyGrid(format: CopyFormat): void {
   );
 }
 
-function selectCell(row: Row, field: Field): void {
+function selectCell(row: Row, field: Field, rowIdx: number, fieldIdx: number): void {
   activeCell.value = { row, field };
+  activeCellPos.value = { rowIdx, fieldIdx };
   cellMenu.value = null;
+  gridWrap.value?.focus();
+}
+
+function toggleAll(event: Event): void {
+  selectedRows.value = (event.target as HTMLInputElement).checked ? [...filteredRows.value] : [];
 }
 
 function openCellMenu(event: MouseEvent, row: Row, field: Field): void {
@@ -676,18 +704,65 @@ function viewCellDetail(): void {
   cellMenu.value = null;
 }
 
+/** 详情文本：BLOB 显示前 4KB 十六进制，JSON 缩进，其余使用普通格式化。 */
+function formatDetail(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const v = value as { type?: string; data?: unknown };
+    if (v.type === 'Buffer' && Array.isArray(v.data)) {
+      const bytes = v.data.slice(0, 4096).map((b) => Number(b).toString(16).padStart(2, '0'));
+      const suffix = v.data.length > 4096 ? `\n… (${v.data.length} bytes total)` : '';
+      return bytes.join(' ') + suffix;
+    }
+    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+  }
+  return value === null || value === undefined ? 'NULL' : String(value);
+}
+
 function onGridKeydown(event: KeyboardEvent): void {
-  if (!((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c')) return;
   const target = event.target as HTMLElement | null;
   if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
-  const selectedText = window.getSelection()?.toString();
-  if (selectedText) return;
-  event.preventDefault();
-  if (activeCell.value) {
-    copyCell(activeCell.value.row[activeCell.value.field.name]);
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+    const selectedText = window.getSelection()?.toString();
+    if (selectedText) return;
+    event.preventDefault();
+    if (activeCell.value) copyCell(activeCell.value.row[activeCell.value.field.name]);
+    else copyGrid('tsv');
     return;
   }
-  copyGrid('tsv');
+  if (event.key === 'Escape') {
+    cancelEdit();
+    cellMenu.value = null;
+    detailCell.value = null;
+    return;
+  }
+  const rows = filteredRows.value;
+  const fields = visibleFields.value;
+  if (!rows.length || !fields.length) return;
+  if (event.key === 'Enter' || event.key === 'F2') {
+    if (!activeCellPos.value) return;
+    const { rowIdx, fieldIdx } = activeCellPos.value;
+    const row = rows[rowIdx];
+    const field = fields[fieldIdx];
+    if (!row || !field) return;
+    event.preventDefault();
+    startEdit(row, field, rowIdx);
+    return;
+  }
+  const dir: Record<string, [number, number]> = {
+    ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1],
+  };
+  const delta = dir[event.key];
+  if (!delta) return;
+  event.preventDefault();
+  const cur = activeCellPos.value ?? { rowIdx: 0, fieldIdx: 0 };
+  const rowIdx = Math.min(rows.length - 1, Math.max(0, cur.rowIdx + delta[0]));
+  const fieldIdx = Math.min(fields.length - 1, Math.max(0, cur.fieldIdx + delta[1]));
+  const row = rows[rowIdx]!;
+  const field = fields[fieldIdx]!;
+  selectCell(row, field, rowIdx, fieldIdx);
+  void nextTick(() => {
+    gridWrap.value?.querySelector<HTMLElement>(`[data-cell="${rowIdx}:${fieldIdx}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
 }
 
 function showToast(msg: string) {
@@ -725,6 +800,8 @@ watch(() => props.filterConditions, (conds) => {
     <button v-if="canModifyRows && selectedRows.length" class="btn danger" @click="deleteSelected">
       {{ t('wv.grid.deleteSelected', { count: selectedRows.length }) }}
     </button>
+    <span v-if="selectedRows.length" class="selected-count">{{ t('wv.grid.selectedRows', { count: selectedRows.length }) }}</span>
+    <input v-if="!hasTable && fields.length" v-model="search" class="input search-input" :placeholder="t('wv.grid.searchInResults')" />
     <template v-if="hasTable">
       <div class="filter-wrap">
         <button class="btn" @click="toggleFilterPanel">{{ t('wv.grid.filter') }}</button>
@@ -813,7 +890,9 @@ watch(() => props.filterConditions, (conds) => {
     <table>
       <thead>
         <tr>
-          <th v-if="canSelectRows" style="width: 30px"></th>
+          <th v-if="canSelectRows" style="width: 30px">
+            <input type="checkbox" :checked="allRowsSelected" :aria-label="t('wv.grid.selectAll')" @change="toggleAll" />
+          </th>
           <th class="row-num">#</th>
           <th v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
             :draggable="hasTable"
@@ -851,12 +930,12 @@ watch(() => props.filterConditions, (conds) => {
             <small class="insert-hint">{{ t('wv.grid.insertHint') }}</small>
           </td>
         </tr>
-        <tr v-if="!inserting && rows.length === 0">
+        <tr v-if="!inserting && filteredRows.length === 0">
           <td :colspan="visibleFields.length + (canSelectRows ? 1 : 0) + 1" class="empty-row">
             {{ t('wv.grid.noRows') }}
           </td>
         </tr>
-        <tr v-for="(row, idx) in rows" :key="idx" :class="{ 'row-selected': isRowSelected(row) }">
+        <tr v-for="(row, idx) in filteredRows" :key="idx" :class="{ 'row-selected': isRowSelected(row) }">
           <td v-if="canSelectRows">
             <input type="checkbox"
               :checked="isRowSelected(row)"
@@ -864,8 +943,10 @@ watch(() => props.filterConditions, (conds) => {
               @change="e => toggleRow(row, (e.target as HTMLInputElement).checked)" />
           </td>
           <td class="row-num">{{ idx + 1 }}</td>
-          <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
-            @click="selectCell(row, f)"
+          <td v-for="(f, fieldIdx) in visibleFields" :key="f.name" :style="columnStyle(f.name)"
+            :data-cell="`${idx}:${fieldIdx}`"
+            :class="{ 'cell-active': activeCellPos?.rowIdx === idx && activeCellPos?.fieldIdx === fieldIdx }"
+            @click="selectCell(row, f, idx, fieldIdx)"
             @contextmenu="openCellMenu($event, row, f)"
             @dblclick="startEdit(row, f, idx)"
             :title="cellTitle(row, f)">
@@ -912,7 +993,7 @@ watch(() => props.filterConditions, (conds) => {
   <div v-if="detailCell" class="cell-detail-mask" @click.self="detailCell = null">
     <div class="cell-detail" role="dialog" aria-modal="true">
       <h3>{{ detailCell.column }}</h3>
-      <pre>{{ formatCell(detailCell.value) }}</pre>
+      <pre>{{ formatDetail(detailCell.value) }}</pre>
       <div class="cell-detail-actions">
         <button class="btn" @click="copyCell(detailCell.value)">{{ t('wv.grid.copyValue') }}</button>
         <button class="btn primary" @click="detailCell = null">{{ t('wv.common.close') }}</button>
@@ -943,6 +1024,8 @@ watch(() => props.filterConditions, (conds) => {
 .input { font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
 .grid-wrap { flex: 1; overflow: auto; outline: none; }
+.search-input { width: 180px; max-width: 40vw; }
+.selected-count { font-size: 11px; color: var(--vscode-descriptionForeground, #808080); }
 .row-num { width: 48px; min-width: 48px; text-align: right; color: var(--vscode-descriptionForeground, #808080); font-variant-numeric: tabular-nums; }
 .cell-null { color: var(--vscode-descriptionForeground, #808080); font-style: italic; opacity: .8; }
 table { border-collapse: collapse; font-size: 13px; }
@@ -952,6 +1035,7 @@ th:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 th.sort-asc::after { content: " ▲"; }
 th.sort-desc::after { content: " ▼"; }
 td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
+td.cell-active { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: -2px; }
 .row-selected, .row-selected td { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }
 .cell-edit { outline: 2px solid var(--vscode-focusBorder, #007fd4); background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: none; font-size: 13px; padding: 2px 4px; }
@@ -963,10 +1047,10 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .col-menu-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .col-menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
 .filter-wrap, .export-wrap, .copy-wrap { position: relative; }
-.filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: 540px; max-width: 640px;
+.filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: min(540px, calc(100vw - 24px)); max-width: min(640px, calc(100vw - 24px));
   background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 4px; padding: 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
-.filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .filter-row .col-select { flex: 0 0 150px; }
 .filter-row .op-select { flex: 0 0 100px; }
 .filter-row .input { flex: 1; min-width: 0; }

@@ -488,7 +488,7 @@ function onKeydown(e: KeyboardEvent) {
       <button v-if="viewKind !== 'structure'" class="btn primary" :disabled="running" @click="run">{{ t('wv.query.run') }}</button>
       <button v-if="viewKind !== 'structure' && isExplorable" class="btn" :disabled="running" @click="explain">{{ t('wv.query.explain') }}</button>
       <button v-if="running" class="btn" @click="cancel">{{ t('wv.query.cancel') }}</button>
-      <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
+      <span v-if="transactionState" class="txn-badge" :class="transactionState">{{ t('wv.query.tx') }}: {{ t(`wv.query.tx.${transactionState}`) }}</span>
       <div class="spacer"></div>
       <span v-if="meta" class="page-info">{{ meta }}</span>
     </div>

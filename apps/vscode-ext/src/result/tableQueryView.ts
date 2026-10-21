@@ -391,6 +391,9 @@ export class TableQueryView extends BaseWebView {
       case 'exportData':
         await this.exporter?.exportData(msg.format, msg.columns || [], msg.rows || []);
         break;
+      case 'copyText':
+        await vscode.env.clipboard.writeText(String(msg.text ?? ''));
+        break;
       case 'completion':
         await this.completionService.handle(String(msg.before || ''), String(msg.text || ''));
         break;
