@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { useI18n } from '../composables/useI18n';
 import ClusterOverview from '../components/elasticsearch/ClusterOverview.vue';
@@ -11,7 +11,7 @@ import DslTab from '../components/elasticsearch/DslTab.vue';
 import NodesTab from '../components/elasticsearch/NodesTab.vue';
 import LogPanel from '../components/elasticsearch/LogPanel.vue';
 import type { EsClusterSnapshot, EsConfirmRequest, EsDocHit, EsErrorInfo, EsFieldInfo, EsIndexSummary, EsLogEntryView, EsNodeSummary, EsPanelTab, SavedEsQueryView } from '../components/elasticsearch/types';
-import { shouldAutoLoad } from '../components/elasticsearch/types';
+import { createLatestRequestTracker, shouldAutoLoad } from '../components/elasticsearch/types';
 
 const { post, onMessage } = useVsCode();
 const { t } = useI18n();
@@ -35,9 +35,11 @@ const indicesError = ref('');
 const indexName = ref('');
 const indexData = ref<{ mapping: unknown; settings: unknown; aliases: unknown; stats: unknown; truncated: { mapping: boolean; settings: boolean; aliases: boolean; stats: boolean } } | null>(null);
 const indexError = ref('');
-const opResult = ref<{ status: number; tookMs: number; body: unknown } | null>(null);
-/** 索引/文档操作请求 id（ix*）→ method；结果单独展示而非 REST 控制台（仅写请求使用）。 */
-const opPending = new Map<string, string>();
+type OpKind = 'index' | 'doc';
+const opResult = ref<{ kind: OpKind; status: number; tookMs: number; body: unknown } | null>(null);
+/** 索引/文档操作请求 id（ix*）→ 操作类别；结果按类别隔离展示。 */
+const opPending = new Map<string, OpKind>();
+const indexSummary = computed(() => indices.value?.find((i) => i.name === indexName.value) ?? null);
 let seq = 0;
 function nextOpId(): string { seq += 1; return `ix${seq}`; }
 
@@ -53,7 +55,12 @@ const dslSeed = ref<{ body: string; index: string; at: number } | null>(null);
 /** 分页游标栈（当前页 cursor 在 docsCursor；prev 时弹栈）。 */
 let docsCursor: unknown[] | null = null;
 let docsNext: unknown[] | null = null;
-const docsHistory: (unknown[] | null)[] = [];
+const docsHistory = ref<(unknown[] | null)[]>([]);
+const docsHasNext = ref(false);
+/** 三个异步通道各自只接受最新请求的响应，避免旧页覆盖新状态。 */
+const docsRequest = createLatestRequestTracker();
+const indexRequest = createLatestRequestTracker();
+const dslRequest = createLatestRequestTracker();
 
 // ── S4：DSL ──
 const dslResult = ref<{ took: number | null; timedOut: boolean | null; total: number | null; hits: EsDocHit[]; aggregations: unknown; raw: unknown; truncated: boolean } | null>(null);
@@ -96,31 +103,44 @@ function requestIndex(): void {
   if (!indexName.value) return;
   indexData.value = null;
   indexError.value = '';
-  post({ type: 'esLoadIndex', id: nextOpId(), name: indexName.value });
+  const id = nextOpId();
+  indexRequest.begin(id);
+  post({ type: 'esLoadIndex', id, name: indexName.value });
 }
 function openIndex(name: string): void {
   indexName.value = name;
   tab.value = 'index';
 }
 /** 索引详情操作（open/close/flush/aliases…）：复用 REST 管线（危险/只读确认与审计）。 */
-function sendIndexOp(payload: { method: string; path: string; body: string | null }): void {
+function queueOp(payload: { method: string; path: string; body: string | null }, kind: OpKind): void {
   opResult.value = null;
   const id = nextOpId();
-  opPending.set(id, payload.method.toUpperCase());
+  opPending.set(id, kind);
   post({ type: 'esRest', id, ...payload });
+}
+function sendIndexOp(payload: { method: string; path: string; body: string | null }): void {
+  queueOp(payload, 'index');
+}
+function sendDocOp(payload: { method: string; path: string; body: string | null }): void {
+  queueOp(payload, 'doc');
 }
 
 // ── S4 请求方法 ──
 function requestDocs(searchAfter: unknown[] | null): void {
   if (!indexName.value) {
     docs.value = { hits: [], total: null, truncated: false, error: null };
+    docsHasNext.value = false;
+    docsRequest.clear();
     return;
   }
   docs.value = { ...docs.value, hits: null, error: null };
   docsCursor = searchAfter;
+  docsHasNext.value = false;
+  const id = nextOpId();
+  docsRequest.begin(id);
   post({
     type: 'esLoadDocs',
-    id: nextOpId(),
+    id,
     index: indexName.value,
     searchAfter,
     query: docsQuery.value.trim() || null,
@@ -128,14 +148,19 @@ function requestDocs(searchAfter: unknown[] | null): void {
     defaultOperator: docsOperator.value,
   });
 }
+/** 刷新/新搜索/清空：丢弃游标栈并回到第一页。 */
+function refreshDocs(): void {
+  docsHistory.value = [];
+  docsNext = null;
+  docsHasNext.value = false;
+  requestDocs(null);
+}
 /** 新搜索/清空：重置游标栈并回到第一页。 */
 function searchDocs(payload: { mode: 'text' | 'dsl'; query: string; operator: 'OR' | 'AND' }): void {
   docsMode.value = payload.mode;
   docsQuery.value = payload.query;
   docsOperator.value = payload.operator;
-  docsHistory.length = 0;
-  docsNext = null;
-  requestDocs(null);
+  refreshDocs();
 }
 /** 「在 DSL 打开」：预填 DSL tab 的 index+body 并切换过去。 */
 function openDslWith(payload: { body: string }): void {
@@ -145,16 +170,24 @@ function openDslWith(payload: { body: string }): void {
 /** N1：按 _id 跳转走专用链路（host esGetDoc → esDoc 单命中渲染）。 */
 function jumpDoc(payload: { docId: string }): void {
   if (!indexName.value) return;
-  post({ type: 'esGetDoc', id: nextOpId(), index: indexName.value, docId: payload.docId });
+  const id = nextOpId();
+  docsRequest.begin(id);
+  post({ type: 'esGetDoc', id, index: indexName.value, docId: payload.docId });
 }
 function docsNextPage(): void {
   if (!docsNext) return;
-  docsHistory.push(docsCursor);
+  docsHistory.value = [...docsHistory.value, docsCursor];
   requestDocs(docsNext);
 }
 function docsPrevPage(): void {
-  if (!docsHistory.length) return;
-  requestDocs(docsHistory.pop()!);
+  const history = docsHistory.value;
+  if (!history.length) return;
+  const prev = history[history.length - 1] ?? null;
+  docsHistory.value = history.slice(0, -1);
+  requestDocs(prev);
+}
+function syncDslIndex(name: string): void {
+  if (name && name !== indexName.value) indexName.value = name;
 }
 function requestNodes(): void { nodes.value = null; nodesError.value = null; post({ type: 'esLoadNodes' }); }
 function requestSaved(): void { post({ type: 'esLoadSavedDsl' }); }
@@ -163,7 +196,9 @@ function runDsl(payload: { index: string; body: string }): void {
   dslResult.value = null;
   dslError.value = null;
   dslSeq += 1;
-  post({ type: 'esRunDsl', id: `dx${dslSeq}`, index: payload.index, body: payload.body });
+  const id = `dx${dslSeq}`;
+  dslRequest.begin(id);
+  post({ type: 'esRunDsl', id, index: payload.index, body: payload.body });
 }
 function saveDsl(payload: { name: string; index: string; body: string }): void {
   post({ type: 'esSaveDsl', ...payload });
@@ -194,10 +229,13 @@ function resetIndexState(): void {
   docsMode.value = 'text';
   docsOperator.value = 'OR';
   docsFields.value = [];
-  docsHistory.length = 0;
+  docsHistory.value = [];
+  docsHasNext.value = false;
   docsNext = null;
   docsCursor = null;
   docs.value = { hits: null, total: null, truncated: false, error: null };
+  docsRequest.clear();
+  indexRequest.clear();
   opResult.value = null;
 }
 
@@ -257,30 +295,39 @@ onMounted(() => {
       indices.value = msg.items ?? [];
       indicesError.value = '';
     } else if (msg.type === 'esIndexData') {
+      if (!indexRequest.isCurrent(msg.id)) return;
       indexName.value = msg.name ?? indexName.value;
       indexData.value = { mapping: msg.mapping, settings: msg.settings, aliases: msg.aliases, stats: msg.stats, truncated: msg.truncated ?? { mapping: false, settings: false, aliases: false, stats: false } };
       indexError.value = '';
     } else if (msg.type === 'esIndexError') {
       if (msg.id === 'indices') indicesError.value = msg.message ?? '';
-      else indexError.value = msg.message ?? '';
+      else if (indexRequest.isCurrent(msg.id)) indexError.value = msg.message ?? '';
     } else if (msg.type === 'esDocs') {
+      if (!docsRequest.isCurrent(msg.id) || msg.index !== indexName.value) return;
       docs.value = { hits: msg.hits ?? [], total: msg.total ?? null, truncated: !!msg.truncated, error: null };
       docsNext = msg.searchAfter ?? null;
+      docsHasNext.value = !!msg.searchAfter;
       docsFields.value = msg.fields ?? [];
     } else if (msg.type === 'esDoc') {
-      docsHistory.length = 0;
+      if (!docsRequest.isCurrent(msg.id) || msg.index !== indexName.value) return;
+      docsHistory.value = [];
       docsCursor = null;
       docsNext = null;
+      docsHasNext.value = false;
       docs.value = msg.found
         ? { hits: [{ index: msg.index, id: msg.docId, score: null, source: msg.source, sort: null, seqNo: msg.seqNo ?? null, primaryTerm: msg.primaryTerm ?? null }], total: 1, truncated: false, error: null }
         : { hits: [], total: null, truncated: false, error: { message: t('wv.es.docs.notFound', { id: msg.docId }), type: 'not_found', reason: null, rootCause: [] } };
     } else if (msg.type === 'esDocsError') {
+      if (!docsRequest.isCurrent(msg.id) || msg.index !== indexName.value) return;
       docs.value = { ...docs.value, hits: [], error: msg.error };
+      docsHasNext.value = false;
     } else if (msg.type === 'esDslResult') {
+      if (!dslRequest.isCurrent(msg.id)) return;
       dslRunning.value = false;
       dslError.value = null;
       dslResult.value = { took: msg.took ?? null, timedOut: msg.timedOut ?? null, total: msg.total ?? null, hits: msg.hits ?? [], aggregations: msg.aggregations, raw: msg.raw, truncated: !!msg.truncated };
     } else if (msg.type === 'esDslError') {
+      if (!dslRequest.isCurrent(msg.id)) return;
       dslRunning.value = false;
       dslError.value = msg.error;
     } else if (msg.type === 'esNodes') {
@@ -295,13 +342,14 @@ onMounted(() => {
     } else if (msg.type === 'esLogEntry') {
       logEntries.value = [...logEntries.value, msg.entry].slice(-500);
     } else if (msg.type === 'esRestResult') {
-      if (opPending.has(msg.id)) {
+      const kind = opPending.get(msg.id);
+      if (kind) {
         opPending.delete(msg.id);
-        opResult.value = { status: msg.status, tookMs: msg.tookMs, body: msg.body };
-        // op 通道现仅承载写请求（跳转已改走 esGetDoc）：成功 → 按当前 tab 定向刷新。
+        opResult.value = { kind, status: msg.status, tookMs: msg.tookMs, body: msg.body };
+        // op 通道现仅承载写请求（跳转已改走 esGetDoc）：成功 → 按操作类别定向刷新。
         if (msg.status < 300) {
-          if (tab.value === 'index') requestIndex();
-          else if (tab.value === 'documents') requestDocs(docsCursor);
+          if (kind === 'index') requestIndex();
+          else requestDocs(docsCursor);
         }
       } else {
         running.value = false;
@@ -349,14 +397,15 @@ function confirmKeydown(e: KeyboardEvent): void {
     <div class="es-body">
     <ClusterOverview v-show="tab === 'cluster'" :snapshot="snapshot" />
     <IndicesTable v-show="tab === 'indices'" :items="indices" :error="indicesError" @refresh="requestIndices" @open="openIndex" />
-    <IndexDetail v-show="tab === 'index'" :name="indexName" :mapping="indexData?.mapping" :settings="indexData?.settings" :aliases="indexData?.aliases" :stats="indexData?.stats"
+    <IndexDetail v-show="tab === 'index'" :name="indexName" :summary="indexSummary" :mapping="indexData?.mapping" :settings="indexData?.settings" :aliases="indexData?.aliases" :stats="indexData?.stats"
       :truncated="indexData?.truncated ?? { mapping: false, settings: false, aliases: false, stats: false }" :error="indexError" :read-only="readOnly"
-      :op-result="opResult" @reload="requestIndex" @op="sendIndexOp" />
+      :op-result="opResult?.kind === 'index' ? opResult : null" @reload="requestIndex" @op="sendIndexOp" />
     <DocumentsTab v-show="tab === 'documents'" :index="indexName" :hits="docs.hits" :total="docs.total" :truncated="docs.truncated"
-      :error="docs.error" :op-result="opResult" :read-only="readOnly" :query="docsQuery" :query-mode="docsMode" :default-operator="docsOperator" :fields="docsFields"
-      @load="requestDocs" @search="searchDocs" @open-dsl="openDslWith" @jump="jumpDoc" @next="docsNextPage" @prev="docsPrevPage" @op="sendIndexOp" />
+      :error="docs.error" :op-result="opResult?.kind === 'doc' ? opResult : null" :read-only="readOnly" :query="docsQuery" :query-mode="docsMode" :default-operator="docsOperator" :fields="docsFields"
+      :can-prev="docsHistory.length > 0" :has-next="docsHasNext"
+      @load="refreshDocs" @search="searchDocs" @open-dsl="openDslWith" @jump="jumpDoc" @next="docsNextPage" @prev="docsPrevPage" @op="sendDocOp" />
     <DslTab v-show="tab === 'dsl'" :index="indexName" :running="dslRunning" :result="dslResult" :error="dslError" :saved="savedDsl" :seed="dslSeed"
-      @run="runDsl" @save="saveDsl" @remove-saved="removeSavedDsl" />
+      @run="runDsl" @save="saveDsl" @remove-saved="removeSavedDsl" @index-change="syncDslIndex" />
     <NodesTab v-show="tab === 'nodes'" :items="nodes" :error="nodesError" />
     <LogPanel v-show="tab === 'log'" :items="logEntries" />
     <RestConsole v-show="tab === 'rest'" :read-only="readOnly" :running="running" :result="result" @send="send" />
@@ -387,13 +436,13 @@ function confirmKeydown(e: KeyboardEvent): void {
 <style scoped>
 .es-view { display: flex; flex-direction: column; height: 100vh; }
 .es-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.es-header { display: flex; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; }
-.es-conn { font-weight: 600; }
+.es-header { display: flex; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); font-size: 12px; flex-wrap: wrap; }
+.es-conn { font-weight: 600; flex: none; }
 .es-color-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
-.es-endpoint { opacity: .7; }
-.es-ro-badge { color: var(--vscode-editorWarning-foreground, #d29922); }
-.es-tabs { display: flex; gap: 4px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border); }
-.es-tab { background: none; border: none; padding: 4px 10px; cursor: pointer; color: var(--vscode-foreground); border-radius: 3px; }
+.es-endpoint { opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-ro-badge { color: var(--vscode-editorWarning-foreground, #d29922); flex: none; }
+.es-tabs { display: flex; gap: 4px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border); flex-wrap: wrap; row-gap: 2px; }
+.es-tab { background: none; border: none; padding: 4px 10px; cursor: pointer; color: var(--vscode-foreground); border-radius: 3px; white-space: nowrap; }
 .es-tab.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .es-spacer { flex: 1; }
 .es-refresh { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; }

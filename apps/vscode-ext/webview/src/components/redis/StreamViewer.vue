@@ -71,6 +71,10 @@ function displayFields(e: { fields: [string, string][]; fieldBytes?: [string, st
 
 <template>
   <div class="stream">
+    <div class="key-line">
+      <span class="key-name" :title="key">{{ key }}</span>
+      <span v-if="info.keyBinary" class="key-meta warn">{{ t('wv.redis.value.binaryKey') }}</span>
+    </div>
     <div class="toolbar">
       <span class="meta">{{ t('wv.redis.stream.len', { count: data?.len ?? 0 }) }}</span>
       <input v-model="maxlen" class="num" :title="t('wv.redis.stream.maxlen')" />
@@ -150,8 +154,12 @@ function displayFields(e: { fields: [string, string][]; fieldBytes?: [string, st
 
 <style scoped>
 .stream { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.key-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.key-name { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; word-break: break-all; user-select: text; }
 .toolbar { display: flex; gap: 6px; align-items: center; }
 .meta { color: var(--vscode-descriptionForeground); }
+.key-meta { color: var(--vscode-descriptionForeground); font-size: 11px; }
+.key-meta.warn { color: var(--vscode-editorWarning-foreground, #cca700); }
 .add { display: flex; flex-direction: column; gap: 4px; }
 .pair { display: flex; gap: 6px; }
 .add-actions { display: flex; gap: 6px; }

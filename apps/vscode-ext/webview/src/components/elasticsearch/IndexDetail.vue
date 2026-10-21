@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 import JsonTree from './JsonTree.vue';
 import { aliasNames, esErrorReason, needsConfirm } from './types';
+import type { EsIndexSummary } from './types';
 
 export interface EsIndexOpResult {
   status: number;
@@ -12,6 +13,7 @@ export interface EsIndexOpResult {
 
 const props = defineProps<{
   name: string;
+  summary: EsIndexSummary | null;
   mapping: unknown;
   settings: unknown;
   aliases: unknown;
@@ -41,6 +43,17 @@ const ACTIONS = [
   { key: 'forcemerge', method: 'POST', suffix: '_forcemerge', body: null },
   { key: 'delete', method: 'DELETE', suffix: '', body: null },
 ] as const;
+
+const closed = computed(() => props.summary?.status === 'close');
+function actionDisabled(actionKey: string): boolean {
+  if (!props.summary) return false;
+  if (actionKey === 'open') return !closed.value;
+  if (actionKey === 'close' || actionKey === 'refresh' || actionKey === 'flush' || actionKey === 'forcemerge') return closed.value;
+  return false;
+}
+function healthClass(h: string | null): string {
+  return h === 'green' ? 'ok' : h === 'yellow' ? 'warn' : h === 'red' ? 'bad' : 'unknown';
+}
 
 function ask(actionKey: string): void {
   const a = ACTIONS.find((x) => x.key === actionKey);
@@ -111,6 +124,13 @@ watch(() => props.name, () => { tab.value = 'overview'; pendingAction.value = nu
   <div v-else class="es-index">
     <div class="es-index-head">
       <span class="es-index-name">{{ name }}</span>
+      <span v-if="summary?.health" class="es-health" :class="healthClass(summary.health)">{{ summary.health }}</span>
+      <span v-if="summary?.status" class="es-index-status">{{ summary.status }}</span>
+      <span v-if="summary?.docsCount != null" class="es-index-meta">{{ t('wv.es.indices.docs') }} {{ summary.docsCount }}</span>
+      <span v-if="summary?.storeSize" class="es-index-meta">{{ t('wv.es.indices.store') }} {{ summary.storeSize }}</span>
+      <span v-if="summary?.primaryShards != null" class="es-index-meta" :title="t('wv.es.index.shards')">
+        P{{ summary.primaryShards }} / R{{ summary.replicas ?? '—' }}
+      </span>
       <span v-if="readOnly" class="es-ro">{{ t('wv.es.readOnly') }}</span>
       <button class="es-link" @click="emit('reload')">{{ t('wv.es.refresh') }}</button>
     </div>
@@ -138,7 +158,10 @@ watch(() => props.name, () => { tab.value = 'overview'; pendingAction.value = nu
         </div>
         <p v-if="truncated.stats" class="es-warn">{{ t('wv.es.response.truncated') }}</p>
         <div class="es-actions">
-          <button v-for="a in ACTIONS" :key="a.key" class="es-action" :class="{ danger: a.key === 'delete', ro: readOnly }" :title="readOnly ? t('wv.es.roAction') : undefined" @click="ask(a.key)">
+          <button v-for="a in ACTIONS" :key="a.key" class="es-action" :class="{ danger: a.key === 'delete', ro: readOnly }"
+            :disabled="actionDisabled(a.key)"
+            :title="readOnly ? t('wv.es.roAction') : actionDisabled(a.key) ? t('wv.es.index.actionUnavailable') : undefined"
+            @click="ask(a.key)">
             {{ t(`wv.es.index.action.${a.key}`) }}
           </button>
         </div>
@@ -183,10 +206,15 @@ watch(() => props.name, () => { tab.value = 'overview'; pendingAction.value = nu
 
 <style scoped>
 .es-index { padding: 8px 12px; }
-.es-index-head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
-.es-index-name { font-weight: 600; font-family: var(--vscode-editor-font-family, monospace); }
+.es-index-head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.es-index-name { font-weight: 600; font-family: var(--vscode-editor-font-family, monospace); word-break: break-all; }
+.es-health.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
+.es-health.warn { color: var(--vscode-editorWarning-foreground, #d29922); }
+.es-health.bad { color: var(--vscode-errorForeground, #f85149); }
+.es-index-status { font-family: var(--vscode-editor-font-family, monospace); opacity: .8; }
+.es-index-meta { font-size: 11px; color: var(--vscode-descriptionForeground); }
 .es-ro { color: var(--vscode-editorWarning-foreground, #d29922); font-size: 12px; }
-.es-subtabs { display: flex; gap: 4px; margin-bottom: 6px; }
+.es-subtabs { display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
 .es-subtab { background: none; border: none; padding: 3px 8px; cursor: pointer; color: var(--vscode-foreground); border-radius: 3px; }
 .es-subtab.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .es-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
@@ -196,6 +224,7 @@ watch(() => props.name, () => { tab.value = 'overview'; pendingAction.value = nu
 .es-stats-label { opacity: .7; }
 .es-stats-value { font-weight: 600; }
 .es-action { padding: 3px 10px; cursor: pointer; }
+.es-action:disabled { opacity: .4; cursor: default; }
 .es-action.danger { color: var(--vscode-errorForeground, #f85149); }
 .es-action.ro { border-color: var(--vscode-editorWarning-foreground, #d29922); }
 .es-op-result { margin: 6px 0; font-size: 12px; }

@@ -36,7 +36,16 @@ const opsSeries = computed(() => props.samples.map((s) => s.instantaneousOpsPerS
 const clientsSeries = computed(() => props.samples.map((s) => s.connectedClients));
 const netInSeries = computed(() => props.samples.map((s) => s.instantaneousInputKbps));
 const netOutSeries = computed(() => props.samples.map((s) => s.instantaneousOutputKbps));
-const hitRateSeries = computed(() => props.samples.map((s) => (s.hitRate === null ? 0 : s.hitRate * 100)));
+const hitRateSeries = computed<(number | null)[]>(() => props.samples.map((s) => (s.hitRate === null ? null : s.hitRate * 100)));
+const memoryPct = computed<number | null>(() => {
+  const v = m.value;
+  if (!v || v.maxmemory <= 0) return null;
+  return Math.min(100, (v.usedMemory / v.maxmemory) * 100);
+});
+const lastSampleText = computed(() => {
+  const ts = m.value?.ts ?? 0;
+  return ts > 0 ? new Date(ts).toLocaleTimeString() : '—';
+});
 
 function fmtBytes(n: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -69,13 +78,20 @@ function fmtRate(r: number | null): string {
         <option :value="2000">2s</option>
         <option :value="5000">5s</option>
       </select>
+      <span v-if="m" class="sample-time">{{ t('wv.redis.monitor.lastSample', { time: lastSampleText }) }}</span>
     </div>
     <div v-if="!m" class="empty">{{ t('wv.redis.monitor.empty') }}</div>
     <div v-else class="body">
       <div class="section-title">{{ t('wv.redis.monitor.trends') }}</div>
       <div class="trends">
         <div class="trend">
-          <div class="row"><span class="lbl">{{ t('wv.redis.monitor.memory') }}</span><span class="val">{{ fmtBytes(m.usedMemory) }}</span></div>
+          <div class="row">
+            <span class="lbl">{{ t('wv.redis.monitor.memory') }}</span>
+            <span class="val">{{ fmtBytes(m.usedMemory) }}<template v-if="memoryPct !== null"> · {{ memoryPct.toFixed(1) }}%</template></span>
+          </div>
+          <div v-if="memoryPct !== null" class="usage-bar" :title="t('wv.redis.monitor.memoryUsage')">
+            <div class="usage-fill" :style="{ width: `${memoryPct}%` }" />
+          </div>
           <Sparkline :points="memorySeries" />
         </div>
         <div class="trend">
@@ -115,6 +131,11 @@ function fmtRate(r: number | null): string {
       <template v-if="m.keyspace.length">
         <div class="section-title">{{ t('wv.redis.monitor.keyspace') }}</div>
         <div class="keyspace">
+          <div class="ks ks-head">
+            <span class="db">{{ t('wv.redis.monitor.db') }}</span>
+            <span>{{ t('wv.redis.monitor.keys') }}</span>
+            <span class="expires">{{ t('wv.redis.monitor.expires') }}</span>
+          </div>
           <div v-for="ks in m.keyspace" :key="ks.db" class="ks">
             <span class="db">{{ ks.db }}</span>
             <span>{{ fmtNum(ks.keys) }}</span>
@@ -128,7 +149,8 @@ function fmtRate(r: number | null): string {
 
 <style scoped>
 .monitor { display: flex; flex-direction: column; height: 100%; overflow-y: auto; }
-.toolbar { display: flex; gap: 6px; align-items: center; padding-bottom: 6px; }
+.toolbar { display: flex; gap: 6px; align-items: center; padding-bottom: 6px; flex-wrap: wrap; }
+.sample-time { color: var(--vscode-descriptionForeground); font-size: 11px; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 select { padding: 3px 5px; font-size: 12px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); border-radius: 3px; }
 .empty { color: var(--vscode-descriptionForeground); padding: 16px; text-align: center; }
@@ -138,6 +160,8 @@ select { padding: 3px 5px; font-size: 12px; background: var(--vscode-input-backg
 .trend .row { display: flex; justify-content: space-between; font-size: 12px; }
 .trend .lbl { color: var(--vscode-descriptionForeground); }
 .trend .val { font-variant-numeric: tabular-nums; }
+.usage-bar { height: 4px; margin: 3px 0 2px; border-radius: 2px; overflow: hidden; background: var(--vscode-panel-border, rgba(128,128,128,0.25)); }
+.usage-fill { height: 100%; background: var(--vscode-charts-blue, #3794ff); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .card { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2)); border-radius: 4px; padding: 6px 8px; }
 .card .k { font-size: 11px; color: var(--vscode-descriptionForeground); }
@@ -146,4 +170,5 @@ select { padding: 3px 5px; font-size: 12px; background: var(--vscode-input-backg
 .ks { display: flex; gap: 10px; font-variant-numeric: tabular-nums; }
 .ks .db { color: var(--vscode-descriptionForeground); width: 48px; }
 .ks .expires { color: var(--vscode-descriptionForeground); }
+.ks-head { color: var(--vscode-descriptionForeground); font-size: 11px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2)); }
 </style>

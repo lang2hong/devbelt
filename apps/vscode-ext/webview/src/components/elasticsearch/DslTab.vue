@@ -2,8 +2,8 @@
 import { computed, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 import JsonTree from './JsonTree.vue';
-import { aggregationRows, validateRestBody } from './types';
-import type { EsDocHit, SavedEsQueryView } from './types';
+import { aggregationRows, pushDslHistory, validateRestBody } from './types';
+import type { EsDslHistoryItem, EsDocHit, SavedEsQueryView } from './types';
 
 export interface EsDslErrorView { message: string; type: string | null; reason: string | null; rootCause: string[] }
 
@@ -20,13 +20,14 @@ const emit = defineEmits<{
   (e: 'run', payload: { index: string; body: string }): void;
   (e: 'save', payload: { name: string; index: string; body: string }): void;
   (e: 'removeSaved', id: string): void;
+  (e: 'indexChange', index: string): void;
 }>();
 
 const { t } = useI18n();
 const index = ref(props.index);
 const body = ref('{\n  "query": { "match_all": {} }\n}');
 const localError = ref('');
-const history = ref<{ body: string; at: number }[]>([]);
+const history = ref<EsDslHistoryItem[]>([]);
 const showRaw = ref(false);
 const saveName = ref('');
 
@@ -46,8 +47,8 @@ function run(): void {
     return;
   }
   localError.value = '';
-  history.value.unshift({ body: body.value, at: Date.now() });
-  if (history.value.length > 10) history.value.pop();
+  history.value = pushDslHistory(history.value, { index: idx, body: body.value, at: Date.now() });
+  emit('indexChange', idx);
   emit('run', { index: idx, body: body.value });
 }
 function save(): void {
@@ -57,13 +58,19 @@ function save(): void {
   const checked = validateRestBody(body.value);
   if (!checked.ok) { localError.value = t('wv.es.invalidJson'); return; }
   saveName.value = '';
+  emit('indexChange', idx);
   emit('save', { name, index: idx, body: body.value });
 }
 function loadSaved(q: SavedEsQueryView): void {
   index.value = q.index;
   body.value = q.body;
+  emit('indexChange', q.index);
 }
-function useHistory(h: { body: string }): void { body.value = h.body; }
+function useHistory(h: EsDslHistoryItem): void {
+  if (h.index) index.value = h.index;
+  body.value = h.body;
+  emit('indexChange', h.index);
+}
 
 /** 聚合表格化（buckets 形态）；无法表格化时回退 JsonTree。 */
 const aggRows = computed(() => (props.result?.aggregations ? aggregationRows(props.result.aggregations) : null));
@@ -129,7 +136,7 @@ const aggRows = computed(() => (props.result?.aggregations ? aggregationRows(pro
       <div class="es-dsl-side">
         <div class="es-section-title">{{ t('wv.es.dsl.history') }}</div>
         <div v-if="!history.length" class="es-empty">{{ t('wv.es.history.empty') }}</div>
-        <div v-for="(h, i) in history" :key="h.at" class="es-side-item" @click="useHistory(h)">#{{ history.length - i }}</div>
+        <div v-for="(h, i) in history" :key="`${h.at}-${i}`" class="es-side-item" :title="h.index" @click="useHistory(h)">#{{ history.length - i }}</div>
         <div class="es-section-title">{{ t('wv.es.dsl.saved') }}</div>
         <div v-if="!saved.length" class="es-empty">{{ t('wv.es.dsl.savedEmpty') }}</div>
         <div v-for="q in saved" :key="q.id" class="es-side-item es-saved-row">

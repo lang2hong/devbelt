@@ -96,3 +96,61 @@ export function computeStreamDone(data: RedisValueData | null | undefined): bool
   if (data?.kind !== 'stream') return true;
   return data.entries.length >= data.len;
 }
+
+/** 命令历史：去掉空行与连续重复，按时间正序保留最近 limit 条。 */
+export function pushCommandHistory(history: readonly string[], command: string, limit = 50): string[] {
+  const line = command.trim();
+  if (!line) return [...history];
+  if (history[history.length - 1] === line) return [...history];
+  return [...history, line].slice(-Math.max(1, limit));
+}
+
+/** 滚动容器是否已接近底部（用于自动跟随；阈值避免像素抖动反复切换）。 */
+export function isNearBottom(metrics: { scrollTop: number; scrollHeight: number; clientHeight: number }, threshold = 24): boolean {
+  return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight <= threshold;
+}
+
+export interface CommandLogEntryLike {
+  command: string;
+  args: string[];
+  ok: boolean;
+  error: string | null;
+}
+
+/** 命令日志客户端过滤：命令/参数/错误文本，可只看失败。 */
+export function filterCommandLog<T extends CommandLogEntryLike>(entries: readonly T[], query: string, onlyFailed: boolean): T[] {
+  const q = query.trim().toLowerCase();
+  return entries.filter((e) => {
+    if (onlyFailed && e.ok) return false;
+    if (!q) return true;
+    return `${e.command} ${e.args.join(' ')} ${e.error ?? ''}`.toLowerCase().includes(q);
+  });
+}
+
+/**
+ * Sparkline 路径：空值处断线，避免把“无样本”画成 0。
+ * 坐标按原始下标计算，断点两侧仍保持真实时间间距。
+ */
+export function buildSparklinePath(points: readonly (number | null)[], width: number, height: number): string {
+  if (points.length < 2 || width <= 0 || height <= 0) return '';
+  const valid: number[] = [];
+  for (const v of points) if (v !== null && Number.isFinite(v)) valid.push(v);
+  if (valid.length < 2) return '';
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const span = max - min || 1;
+  const segments: string[] = [];
+  let current: string[] = [];
+  points.forEach((v, i) => {
+    if (v === null || !Number.isFinite(v)) {
+      if (current.length >= 2) segments.push(current.join(' '));
+      current = [];
+      return;
+    }
+    const x = (i / (points.length - 1)) * width;
+    const y = height - ((v - min) / span) * height;
+    current.push(`${current.length === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`);
+  });
+  if (current.length >= 2) segments.push(current.join(' '));
+  return segments.join(' ');
+}

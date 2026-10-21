@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '../../composables/useI18n';
+import { formatPercent } from './types';
 import type { EsNodeSummary } from './types';
 
 export interface EsErrorView { message: string; type: string | null; reason: string | null; rootCause: string[] }
@@ -13,7 +14,10 @@ const { t } = useI18n();
 
 <template>
   <div class="es-nodes">
-    <div v-if="error" class="es-error">{{ error.message }}</div>
+    <div v-if="error" class="es-error">
+      {{ error.message }}
+      <div v-if="error.type" class="es-error-detail">{{ error.type }}<template v-if="error.rootCause.length"> · {{ error.rootCause.join(' · ') }}</template></div>
+    </div>
     <div v-else-if="items === null" class="es-empty">{{ t('wv.es.indices.loading') }}</div>
     <div v-else-if="!items.length" class="es-empty">{{ t('wv.es.nodes.empty') }}</div>
     <table v-else class="es-nodes-table">
@@ -32,9 +36,9 @@ const { t } = useI18n();
         <tr v-for="n in items" :key="n.name">
           <td class="es-node-name"><span v-if="n.master === '*'" class="es-master">★</span>{{ n.name }}</td>
           <td>{{ n.ip ?? '—' }}</td>
-          <td>{{ n.heapPercent ?? '—' }}%</td>
-          <td>{{ n.ramPercent ?? '—' }}%</td>
-          <td>{{ n.cpu ?? '—' }}%</td>
+          <td>{{ formatPercent(n.heapPercent) }}</td>
+          <td>{{ formatPercent(n.ramPercent) }}</td>
+          <td>{{ formatPercent(n.cpu) }}</td>
           <td>{{ n.load1m ?? '—' }}</td>
           <td class="es-node-role">{{ n.role ?? '—' }}</td>
         </tr>
@@ -52,5 +56,6 @@ const { t } = useI18n();
 .es-node-role { font-family: var(--vscode-editor-font-family, monospace); opacity: .85; }
 .es-master { color: var(--vscode-editorWarning-foreground, #d29922); margin-right: 4px; }
 .es-error { color: var(--vscode-errorForeground, #f85149); font-size: 12px; }
+.es-error-detail { opacity: .8; }
 .es-empty { opacity: .7; font-size: 12px; }
 </style>

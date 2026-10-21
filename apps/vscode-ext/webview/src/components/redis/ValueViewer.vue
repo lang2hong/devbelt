@@ -347,8 +347,14 @@ function copyValue(text: string): void {
   <div class="value-viewer">
     <div v-if="!info" class="empty">{{ t('wv.redis.value.none') }}</div>
     <template v-else>
-      <div class="toolbar">
+      <div class="key-line">
+        <span class="key-name" :title="key">{{ key }}</span>
         <span class="type">{{ info.keyType }}</span>
+        <span v-if="info.size !== null" class="key-meta">{{ t('wv.redis.value.size', { size: info.size }) }}</span>
+        <span v-if="info.keyBinary" class="key-meta warn">{{ t('wv.redis.value.binaryKey') }}</span>
+        <span v-if="truncated" class="key-meta warn">{{ t('wv.redis.value.previewOnly') }}</span>
+      </div>
+      <div class="toolbar">
         <span class="ttl">{{ t('wv.redis.value.ttl') }}: {{ ttlText }}</span>
         <button class="btn" @click="emit('refresh')">{{ t('wv.redis.value.refresh') }}</button>
         <button class="btn" :disabled="ro" @click="renameOpen = true">{{ t('wv.redis.value.rename') }}</button>
@@ -525,6 +531,10 @@ function copyValue(text: string): void {
 <style scoped>
 .value-viewer { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
 .empty { color: var(--vscode-descriptionForeground); padding: 16px; text-align: center; }
+.key-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-bottom: 4px; }
+.key-name { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; word-break: break-all; user-select: text; }
+.key-meta { color: var(--vscode-descriptionForeground); font-size: 11px; }
+.key-meta.warn { color: var(--vscode-editorWarning-foreground, #cca700); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-bottom: 6px; }
 .type { padding: 1px 6px; border-radius: 3px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .ttl { color: var(--vscode-descriptionForeground); }

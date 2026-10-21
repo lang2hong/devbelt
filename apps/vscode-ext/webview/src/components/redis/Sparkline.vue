@@ -1,29 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { buildSparklinePath } from './types';
 
-const props = defineProps<{ points: number[]; color?: string }>();
+const props = defineProps<{ points: readonly (number | null)[]; color?: string }>();
 
 const W = 100;
 const H = 28;
 
-const path = computed(() => {
-  const pts = props.points;
-  if (pts.length < 2) return '';
-  let min = Infinity;
-  let max = -Infinity;
-  for (const v of pts) {
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-  const span = max - min || 1;
-  return pts
-    .map((v, i) => {
-      const x = (i / (pts.length - 1)) * W;
-      const y = H - ((v - min) / span) * H;
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(' ');
-});
+const path = computed(() => buildSparklinePath(props.points, W, H));
 const stroke = computed(() => props.color ?? 'var(--vscode-charts-blue, #3794ff)');
 </script>
 

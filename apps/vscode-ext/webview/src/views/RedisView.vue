@@ -283,7 +283,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
 
     <div v-if="pendingDelete" class="mask">
       <div class="confirm">
-        <p>{{ t('wv.redis.confirm.deleteKey') }}</p>
+        <p>{{ t('wv.redis.confirm.deleteKeyNamed', { key: pendingDelete.join(', ') }) }}</p>
         <div class="actions">
           <button class="btn danger" @click="confirmDelete">{{ t('wv.redis.value.delete') }}</button>
           <button class="btn" @click="pendingDelete = null">{{ t('wv.redis.confirm.cancel') }}</button>
@@ -304,7 +304,8 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
 .single { flex: 1; min-height: 0; margin-top: 8px; }
 .empty-hint { display: flex; align-items: center; justify-content: center; color: var(--vscode-descriptionForeground); }
 .mask { position: absolute; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
-.confirm { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35)); border-radius: 6px; padding: 14px 16px; }
+.confirm { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35)); border-radius: 6px; padding: 14px 16px; max-width: min(520px, 90vw); }
+.confirm p { margin: 0 0 10px; word-break: break-all; }
 .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.danger { background: var(--vscode-inputValidation-errorBackground, #5a1d1d); color: var(--vscode-foreground); }

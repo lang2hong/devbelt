@@ -19,6 +19,8 @@ const props = defineProps<{
   queryMode: 'text' | 'dsl';
   defaultOperator: 'OR' | 'AND';
   fields: EsFieldInfo[];
+  canPrev: boolean;
+  hasNext: boolean;
 }>();
 const emit = defineEmits<{
   (e: 'load', searchAfter: unknown[] | null): void;
@@ -90,14 +92,14 @@ function openInDsl(): void {
   emit('openDsl', { body });
 }
 const jumpId = ref('');
-/** 编辑态：null=关闭；id=null 表示新建；seqNo/primaryTerm 用于保存时乐观并发（N2）。 */
-const editor = ref<{ id: string | null; text: string; seqNo: number | null; primaryTerm: number | null } | null>(null);
+/** 编辑态：null=关闭；id=null 表示新建；index 固定为打开时的索引，避免切换索引后误存。 */
+interface DocEditor { id: string | null; text: string; seqNo: number | null; primaryTerm: number | null; index: string }
+const editor = ref<DocEditor | null>(null);
 const editorError = ref('');
 const pendingDelete = ref<string | null>(null);
 
 watch(() => props.index, () => {
   expanded.value = null;
-  editor.value = null;
   jumpId.value = '';
   pendingDelete.value = null;
 });
@@ -109,12 +111,22 @@ watch(() => props.queryMode, (m) => { mode.value = m; });
 
 function toggle(id: string): void { expanded.value = expanded.value === id ? null : id; }
 function startEdit(hit: EsDocHit): void {
-  editor.value = { id: hit.id, text: JSON.stringify(hit.source ?? {}, null, 2), seqNo: hit.seqNo ?? null, primaryTerm: hit.primaryTerm ?? null };
+  editor.value = { id: hit.id, text: JSON.stringify(hit.source ?? {}, null, 2), seqNo: hit.seqNo ?? null, primaryTerm: hit.primaryTerm ?? null, index: props.index };
   editorError.value = '';
 }
 function startNew(): void {
-  editor.value = { id: null, text: '{\n  \n}', seqNo: null, primaryTerm: null };
+  editor.value = { id: null, text: '{\n  \n}', seqNo: null, primaryTerm: null, index: props.index };
   editorError.value = '';
+}
+function formatDoc(): void {
+  const e = editor.value;
+  if (!e) return;
+  try {
+    e.text = JSON.stringify(JSON.parse(e.text), null, 2);
+    editorError.value = '';
+  } catch {
+    editorError.value = t('wv.es.invalidJson');
+  }
 }
 function saveDoc(): void {
   const e = editor.value;
@@ -127,8 +139,8 @@ function saveDoc(): void {
   }
   editorError.value = '';
   const path = e.id
-    ? docSavePath(props.index, e.id, e.seqNo, e.primaryTerm)
-    : `/${encodeURIComponent(props.index)}/_doc`;
+    ? docSavePath(e.index, e.id, e.seqNo, e.primaryTerm)
+    : `/${encodeURIComponent(e.index)}/_doc`;
   emit('op', { method: e.id ? 'PUT' : 'POST', path, body: e.text });
   editor.value = null;
 }
@@ -156,8 +168,8 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
       <span class="es-docs-index">{{ index }}</span>
       <span v-if="total !== null" class="es-docs-total">{{ t('wv.es.docs.total') }}: {{ total }}</span>
       <span class="es-spacer" />
-      <button class="es-link" @click="emit('prev')">‹ {{ t('wv.es.docs.prev') }}</button>
-      <button class="es-link" @click="emit('next')">{{ t('wv.es.docs.next') }} ›</button>
+      <button class="es-link" :disabled="!canPrev" @click="emit('prev')">‹ {{ t('wv.es.docs.prev') }}</button>
+      <button class="es-link" :disabled="!hasNext" @click="emit('next')">{{ t('wv.es.docs.next') }} ›</button>
       <button class="es-link" @click="emit('load', null)">{{ t('wv.es.refresh') }}</button>
       <button class="es-link" :class="{ ro: readOnly }" :title="readOnly ? t('wv.es.roAction') : undefined" @click="startNew">+ {{ t('wv.es.docs.newDoc') }}</button>
       <input v-model="jumpId" class="es-docs-jump" :placeholder="t('wv.es.docs.jumpPlaceholder')" @keydown.enter="jump" />
@@ -204,12 +216,15 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
     <div v-if="editor" class="es-doc-editor">
       <div class="es-doc-editor-head">
         <span>{{ editor.id ? `${t('wv.es.docs.edit')} ${editor.id}` : t('wv.es.docs.newDoc') }}</span>
+        <span class="es-doc-editor-index" :class="{ stale: editor.index !== index }">{{ editor.index }}</span>
         <input v-if="!editor.id" class="es-doc-id" :placeholder="t('wv.es.docs.idPlaceholder')"
           @input="(ev: Event) => { if (editor) editor.id = (ev.target as HTMLInputElement).value.trim() || null }" />
       </div>
+      <div v-if="editor.index !== index" class="es-warn">{{ t('wv.es.docs.otherIndex', { index: editor.index }) }}</div>
       <textarea v-model="editor.text" class="es-doc-source" rows="8" />
       <div v-if="editorError" class="es-error">{{ editorError }}</div>
       <div class="es-doc-editor-actions">
+        <button @click="formatDoc">{{ t('wv.es.docs.format') }}</button>
         <button :class="{ ro: readOnly }" :title="readOnly ? t('wv.es.roAction') : undefined" @click="saveDoc">{{ t('wv.es.docs.save') }}</button>
         <button @click="editor = null">{{ t('wv.es.confirm.cancel') }}</button>
       </div>
@@ -249,14 +264,14 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
 
 <style scoped>
 .es-docs { padding: 8px 12px; }
-.es-docs-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; }
-.es-docs-index { font-weight: 600; font-family: var(--vscode-editor-font-family, monospace); }
+.es-docs-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; flex-wrap: wrap; }
+.es-docs-index { font-weight: 600; font-family: var(--vscode-editor-font-family, monospace); word-break: break-all; }
 .es-docs-total { opacity: .7; }
 .es-spacer { flex: 1; }
-.es-docs-jump { width: 140px; }
-.es-docs-search { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.es-docs-search-input { flex: 1; font-family: var(--vscode-editor-font-family, monospace); }
-.es-docs-search-dsl { flex: 1; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.es-docs-jump { width: 140px; max-width: 45vw; }
+.es-docs-search { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.es-docs-search-input { flex: 1; min-width: 160px; font-family: var(--vscode-editor-font-family, monospace); }
+.es-docs-search-dsl { flex: 1; min-width: 180px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
 .es-docs-fields { max-width: 220px; }
 .es-docs-operator { width: 70px; }
 .es-docs-mode { font-weight: 600; }
@@ -269,10 +284,12 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
 .es-doc-preview { max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
 .es-doc-actions { white-space: nowrap; }
 .es-doc-editor { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 8px; margin: 6px 0; }
-.es-doc-editor-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; font-size: 12px; }
-.es-doc-id { flex: 1; }
-.es-doc-source { width: 100%; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
-.es-doc-editor-actions { display: flex; gap: 6px; margin-top: 4px; }
+.es-doc-editor-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; font-size: 12px; flex-wrap: wrap; }
+.es-doc-editor-index { font-family: var(--vscode-editor-font-family, monospace); opacity: .7; word-break: break-all; }
+.es-doc-editor-index.stale { opacity: 1; color: var(--vscode-editorWarning-foreground, #d29922); }
+.es-doc-id { flex: 1; min-width: 140px; }
+.es-doc-source { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.es-doc-editor-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .es-error { color: var(--vscode-errorForeground, #f85149); font-size: 12px; }
 .es-error-detail { opacity: .8; }
 .es-op-result { font-size: 12px; margin: 4px 0; }
@@ -281,6 +298,7 @@ const opReason = computed(() => esErrorReason(props.opResult?.body));
 .es-warn { color: var(--vscode-editorWarning-foreground, #d29922); font-size: 12px; }
 .es-empty { opacity: .7; font-size: 12px; }
 .es-link { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; font-size: 12px; }
+.es-link:disabled { opacity: .4; cursor: default; }
 .es-link.danger { color: var(--vscode-errorForeground, #f85149); }
 .es-link.ro { color: var(--vscode-editorWarning-foreground, #d29922); }
 .es-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 60; }

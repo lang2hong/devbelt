@@ -13,6 +13,42 @@ export interface EsRestHistoryItem {
   at: number;
 }
 
+/**
+ * 单通道“最新请求”追踪器：异步响应回来时用它判断是否仍属于当前请求。
+ * 快速切换索引/连续搜索时，旧响应不得覆盖新状态。
+ */
+export interface LatestRequestTracker {
+  begin(id: string): void;
+  isCurrent(id: unknown): boolean;
+  clear(): void;
+}
+
+export function createLatestRequestTracker(): LatestRequestTracker {
+  let current: string | null = null;
+  return {
+    begin(id: string): void { current = id; },
+    isCurrent(id: unknown): boolean { return typeof id === 'string' && id === current; },
+    clear(): void { current = null; },
+  };
+}
+
+/** DSL 历史项：保存查询目标索引，避免点击历史后跑错索引。 */
+export interface EsDslHistoryItem {
+  index: string;
+  body: string;
+  at: number;
+}
+
+/** 新历史置顶并限制条数（纯函数便于单测）。 */
+export function pushDslHistory(history: readonly EsDslHistoryItem[], item: EsDslHistoryItem, limit = 10): EsDslHistoryItem[] {
+  return [item, ...history].slice(0, Math.max(1, limit));
+}
+
+/** 百分比展示：缺失值显示 —，避免出现 `—%`。 */
+export function formatPercent(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value) ? '—' : `${value}%`;
+}
+
 /** 危险/只读确认请求（host 下发）。 */
 export interface EsConfirmRequest {
   id: string;
