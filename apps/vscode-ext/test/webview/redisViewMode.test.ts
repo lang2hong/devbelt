@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendCollectionPage, computeStreamDone, isKeyBrowserPanel } from '../../webview/src/components/redis/types';
+import { appendCollectionPage, computeStreamDone, isKeyBrowserPanel, matchesTextFilter } from '../../webview/src/components/redis/types';
 
 describe('isKeyBrowserPanel（RedisView 键浏览器 vs 单栏面板）', () => {
   it('仅 keyBrowser → true', () => {
@@ -10,6 +10,16 @@ describe('isKeyBrowserPanel（RedisView 键浏览器 vs 单栏面板）', () => 
     for (const p of ['serverStatus', 'console', 'slowlog', 'commandLog'] as const) {
       expect(isKeyBrowserPanel(p)).toBe(false);
     }
+  });
+});
+
+describe('matchesTextFilter（集合本地过滤）', () => {
+  it('空查询匹配全部，大小写不敏感', () => {
+    expect(matchesTextFilter('Foo', '')).toBe(true);
+    expect(matchesTextFilter('Foo Bar', '  ')).toBe(true);
+    expect(matchesTextFilter('Foo Bar', 'foo')).toBe(true);
+    expect(matchesTextFilter('Foo Bar', 'BAR')).toBe(true);
+    expect(matchesTextFilter('Foo Bar', 'baz')).toBe(false);
   });
 });
 

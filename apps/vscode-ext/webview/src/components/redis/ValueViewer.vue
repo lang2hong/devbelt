@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 import { base64ToBytes, bytesToBase64, bytesToHex, decodeUtf8, encodeUtf8, hexToBytes, hexToBytesLimited } from './bytes';
 import HexEditor from './HexEditor.vue';
+import { matchesTextFilter } from './types';
 import type { ValueInfo } from './types';
 
 const { t } = useI18n();
@@ -43,6 +44,9 @@ const rawBytes = ref<Uint8Array>(new Uint8Array());
 const jsonError = ref('');
 const hexError = ref('');
 const hashFilter = ref('');
+/** list/set/zset 已加载项过滤（与 hash 的字段过滤分开，避免切换类型残留）。 */
+const collectionFilter = ref('');
+const pendingPop = ref<{ side: 'left' | 'right' } | null>(null);
 const newField = ref('');
 const newHashValue = ref('');
 const listValue = ref('');
@@ -100,6 +104,8 @@ watch(() => props.info, (info) => {
   ttlOpen.value = false;
   copied.value = false;
   hashFilter.value = '';
+  collectionFilter.value = '';
+  pendingPop.value = null;
   editing.value = null;
   if (info?.data?.kind === 'string') {
     stringText.value = info.data.text;
@@ -166,10 +172,24 @@ function copyKey(): void {
 function filteredHash(): { f: string; v: string; i: number }[] {
   const data = props.info?.data;
   if (data?.kind !== 'hash') return [];
-  const rows = data.entries.map(([f, v], i) => ({ f, v, i }));
-  const q = hashFilter.value.toLowerCase();
-  return q ? rows.filter(({ f }) => f.toLowerCase().includes(q)) : rows;
+  return data.entries.map(([f, v], i) => ({ f, v, i })).filter(({ f }) => matchesTextFilter(f, hashFilter.value));
 }
+const filteredList = computed(() => {
+  const data = props.info?.data;
+  if (data?.kind !== 'list') return [];
+  return data.items.map((item, i) => ({ item, i })).filter(({ item }) => matchesTextFilter(item, collectionFilter.value));
+});
+const filteredSet = computed(() => {
+  const data = props.info?.data;
+  if (data?.kind !== 'set') return [];
+  return data.members.map((member, i) => ({ member, i })).filter(({ member }) => matchesTextFilter(member, collectionFilter.value));
+});
+const filteredZset = computed(() => {
+  const data = props.info?.data;
+  if (data?.kind !== 'zset') return [];
+  return data.items.map(([member, score], i) => ({ member, score, i }))
+    .filter(({ member, score }) => matchesTextFilter(`${member} ${score}`, collectionFilter.value));
+});
 
 /** Stage B（3C-1）：有损文本（U+FFFD）配合并行 base64 展示/复制/删除原始字节。 */
 function isLossy(text: string): boolean {
@@ -255,6 +275,13 @@ function submitTtl(): void {
   // 与 host 校验一致：TTL 必须是正整数秒（0/负数无效）。
   if (Number.isInteger(seconds) && seconds > 0) emit('setTtl', key.value, seconds);
   ttlOpen.value = false;
+}
+const popSideLabel = computed(() => pendingPop.value?.side === 'left' ? t('wv.redis.list.popLeft') : t('wv.redis.list.popRight'));
+function confirmPop(): void {
+  const p = pendingPop.value;
+  if (!p) return;
+  pendingPop.value = null;
+  emit('listPop', key.value, p.side);
 }
 
 /** zset 新增：score 必须是有限数字（空串 Number('')===0，须显式排除）。 */
@@ -404,7 +431,10 @@ function copyValue(text: string): void {
 
       <div v-else-if="info.data?.kind === 'hash'" class="hash">
         <div class="meta">{{ t('wv.redis.hash.field') }} / {{ t('wv.redis.hash.value') }}</div>
-        <input v-model="hashFilter" :placeholder="t('wv.redis.hash.field')" />
+        <div class="collection-filter">
+          <input v-model="hashFilter" :placeholder="t('wv.redis.hash.field')" />
+          <span class="meta">{{ t('wv.redis.collection.matches', { shown: filteredHash().length, total: info.data.entries.length }) }}</span>
+        </div>
         <table>
           <tr v-for="row in filteredHash()" :key="row.i">
             <td class="f">
@@ -446,25 +476,29 @@ function copyValue(text: string): void {
             <option value="right">{{ t('wv.redis.list.pushRight') }}</option>
           </select>
           <button class="btn" :disabled="ro || !listValue" @click="emit('listPush', key, listSide, [listValue]); listValue=''">{{ t('wv.redis.list.push') }}</button>
-          <button class="btn" :disabled="ro" @click="emit('listPop', key, listSide)">{{ t('wv.redis.list.pop') }}</button>
+          <button class="btn" :disabled="ro" @click="pendingPop = { side: listSide }">{{ t('wv.redis.list.pop') }}</button>
+        </div>
+        <div class="collection-filter">
+          <input v-model="collectionFilter" :placeholder="t('wv.redis.collection.filter')" />
+          <span class="meta">{{ t('wv.redis.collection.matches', { shown: filteredList.length, total: info.data.items.length }) }}</span>
         </div>
         <table>
-          <tr v-for="(item, i) in info.data.items" :key="i">
-            <td class="idx">{{ i }}</td>
+          <tr v-for="row in filteredList" :key="row.i">
+            <td class="idx">{{ row.i }}</td>
             <td class="v">
-              <textarea v-if="isEditing('list', String(i)) && editing?.hex" v-model="draftHex" class="cell-input hex-area" @keydown.enter.prevent="saveEdit" @keydown.esc="editing = null" />
-              <input v-else-if="isEditing('list', String(i))" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ displayList(i, item) }}</template>
+              <textarea v-if="isEditing('list', String(row.i)) && editing?.hex" v-model="draftHex" class="cell-input hex-area" @keydown.enter.prevent="saveEdit" @keydown.esc="editing = null" />
+              <input v-else-if="isEditing('list', String(row.i))" v-model="draft" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ displayList(row.i, row.item) }}</template>
             </td>
             <td class="row-actions">
-              <template v-if="isEditing('list', String(i))">
+              <template v-if="isEditing('list', String(row.i))">
                 <button class="btn tiny" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(i), item, i)">✎</button>
-                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfList(i), item)">⧉</button>
-                <button class="btn tiny" :disabled="ro" @click="delList(i, item)">✕</button>
+                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('list', String(row.i), row.item, row.i)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfList(row.i), row.item)">⧉</button>
+                <button class="btn tiny" :disabled="ro" @click="delList(row.i, row.item)">✕</button>
               </template>
             </td>
           </tr>
@@ -478,12 +512,16 @@ function copyValue(text: string): void {
           <input v-model="setMember" :placeholder="t('wv.redis.set.member')" />
           <button class="btn" :disabled="ro || !setMember" @click="emit('setAdd', key, [setMember]); setMember=''">{{ t('wv.redis.set.add') }}</button>
         </div>
+        <div class="collection-filter">
+          <input v-model="collectionFilter" :placeholder="t('wv.redis.collection.filter')" />
+          <span class="meta">{{ t('wv.redis.collection.matches', { shown: filteredSet.length, total: info.data.members.length }) }}</span>
+        </div>
         <table>
-          <tr v-for="(m, i) in info.data.members" :key="i">
-            <td class="v">{{ displaySet(i, m) }}</td>
+          <tr v-for="row in filteredSet" :key="row.i">
+            <td class="v">{{ displaySet(row.i, row.member) }}</td>
             <td class="row-actions">
-              <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfSet(i), m)">⧉</button>
-              <button class="btn tiny" :disabled="ro" @click="delSet(i, m)">✕</button>
+              <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfSet(row.i), row.member)">⧉</button>
+              <button class="btn tiny" :disabled="ro" @click="delSet(row.i, row.member)">✕</button>
             </td>
           </tr>
         </table>
@@ -497,25 +535,29 @@ function copyValue(text: string): void {
           <input v-model="zsetMember" :placeholder="t('wv.redis.zset.member')" />
           <button class="btn" :disabled="ro || !canAddZset" @click="emit('zsetAdd', key, zsetScore, zsetMember); zsetMember=''">{{ t('wv.redis.zset.add') }}</button>
         </div>
+        <div class="collection-filter">
+          <input v-model="collectionFilter" :placeholder="t('wv.redis.collection.filter')" />
+          <span class="meta">{{ t('wv.redis.collection.matches', { shown: filteredZset.length, total: info.data.items.length }) }}</span>
+        </div>
         <table>
-          <tr v-for="([m, s], i) in info.data.items" :key="i">
+          <tr v-for="row in filteredZset" :key="row.i">
             <td class="v">
-              <input v-if="isEditing('zset', m) && !isLossy(m)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ displayZset(i, m) }}</template>
+              <input v-if="isEditing('zset', row.member) && !isLossy(row.member)" v-model="draftKey" class="cell-input" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ displayZset(row.i, row.member) }}</template>
             </td>
             <td class="idx">
-              <input v-if="isEditing('zset', m)" v-model="draft" class="cell-input score" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
-              <template v-else>{{ s }}</template>
+              <input v-if="isEditing('zset', row.member)" v-model="draft" class="cell-input score" @keydown.enter="saveEdit" @keydown.esc="editing = null" />
+              <template v-else>{{ row.score }}</template>
             </td>
             <td class="row-actions">
-              <template v-if="isEditing('zset', m)">
+              <template v-if="isEditing('zset', row.member)">
                 <button class="btn tiny" :disabled="!draftKey.trim()" @click="saveEdit">{{ t('wv.redis.value.save') }}</button>
                 <button class="btn tiny" @click="editing = null">{{ t('wv.redis.confirm.cancel') }}</button>
               </template>
               <template v-else>
-                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('zset', m, s, i)">✎</button>
-                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfZset(i), m)">⧉</button>
-                <button class="btn tiny" :disabled="ro" @click="delZset(i, m)">✕</button>
+                <button class="btn tiny" :disabled="ro" :title="t('wv.redis.value.edit')" @click="startEdit('zset', row.member, row.score, row.i)">✎</button>
+                <button class="btn tiny" :title="t('wv.redis.value.copy')" @click="copyItem(bytesOfZset(row.i), row.member)">⧉</button>
+                <button class="btn tiny" :disabled="ro" @click="delZset(row.i, row.member)">✕</button>
               </template>
             </td>
           </tr>
@@ -525,11 +567,21 @@ function copyValue(text: string): void {
 
       <div v-else class="empty">{{ t('wv.redis.value.none') }}</div>
     </template>
+
+    <div v-if="pendingPop" class="mask">
+      <div class="confirm">
+        <p>{{ t('wv.redis.list.popConfirm', { side: popSideLabel }) }}</p>
+        <div class="confirm-actions">
+          <button class="btn danger" :disabled="ro" @click="confirmPop">{{ t('wv.redis.list.pop') }}</button>
+          <button class="btn" @click="pendingPop = null">{{ t('wv.redis.confirm.cancel') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.value-viewer { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.value-viewer { display: flex; flex-direction: column; height: 100%; font-size: 12px; position: relative; }
 .empty { color: var(--vscode-descriptionForeground); padding: 16px; text-align: center; }
 .key-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-bottom: 4px; }
 .key-name { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; word-break: break-all; user-select: text; }
@@ -557,8 +609,14 @@ td.row-actions { white-space: nowrap; text-align: right; }
 /* Stage B（3C-2）：二进制项 hex 编辑（等宽、可换行）。 */
 .hex-area { font-family: var(--vscode-editor-font-family, monospace); min-height: 44px; white-space: pre-wrap; word-break: break-all; }
 .meta { color: var(--vscode-descriptionForeground); padding: 2px 0; }
+.collection-filter { display: flex; gap: 8px; align-items: center; padding: 2px 0 4px; flex-wrap: wrap; }
+.collection-filter input { flex: 1; min-width: 160px; }
 .error { color: var(--vscode-errorForeground); }
 .binary-warn { color: var(--vscode-editorWarning-foreground, #cca700); padding: 2px 0; }
+.mask { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; }
+.confirm { background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35)); border-radius: 6px; padding: 14px 16px; max-width: min(460px, 90vw); }
+.confirm p { margin: 0 0 10px; word-break: break-all; }
+.confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .too-large { display: flex; gap: 8px; align-items: center; padding: 12px; color: var(--vscode-descriptionForeground); }
 .btn { padding: 3px 8px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.tiny { padding: 1px 5px; }

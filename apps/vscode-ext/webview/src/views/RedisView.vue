@@ -211,6 +211,7 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
         @group-del-consumer="streamOps().groupDelConsumer"
         @group-detail="streamOps().groupDetail"
         @load-more="streamOps().loadMore"
+        @refresh="value && post({ type: 'selectKey', key: value.key })"
       />
       <ValueViewer
         v-else

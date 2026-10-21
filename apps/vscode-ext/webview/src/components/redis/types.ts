@@ -97,6 +97,12 @@ export function computeStreamDone(data: RedisValueData | null | undefined): bool
   return data.entries.length >= data.len;
 }
 
+/** 已加载集合项的本地过滤：空查询匹配全部，大小写不敏感。 */
+export function matchesTextFilter(text: string, filter: string): boolean {
+  const q = filter.trim().toLowerCase();
+  return !q || text.toLowerCase().includes(q);
+}
+
 /** 命令历史：去掉空行与连续重复，按时间正序保留最近 limit 条。 */
 export function pushCommandHistory(history: readonly string[], command: string, limit = 50): string[] {
   const line = command.trim();
