@@ -106,7 +106,9 @@ function describeResult(r: { rows: any[]; fields?: { name: string }[]; costTime:
     if (r.kind === 'dml') return `${r.affectedRows ?? 0} ${t('wv.query.rowsAffected')} · ${secs}s`;
     return `${t('wv.query.success')} · ${secs}s`;
   }
-  return `${r.rows.length} row(s) in ${secs}s${r.truncated ? ' (truncated)' : ''}`;
+  return r.truncated
+    ? t('wv.query.resultRowsTruncated', { rows: r.rows.length, seconds: secs })
+    : t('wv.query.resultRows', { rows: r.rows.length, seconds: secs });
 }
 
 /** 结果标签页文案：写语句显示受影响行数而不是 0。 */
@@ -213,9 +215,9 @@ onMounted(() => {
       total.value = undefined;
       meta.value = '';
     } else if (msg.type === 'cellUpdated') {
-      meta.value = 'Cell updated.';
+      meta.value = t('wv.query.cellUpdated');
     } else if (msg.type === 'rowsDeleted') {
-      meta.value = msg.count + ' row(s) deleted.';
+      meta.value = t('wv.query.rowsDeleted', { count: msg.count });
     } else if (msg.type === 'running') {
       running.value = true;
     } else if (msg.type === 'finished') {
@@ -489,20 +491,6 @@ function onKeydown(e: KeyboardEvent) {
       <span v-if="transactionState" class="txn-badge" :class="transactionState">TX: {{ transactionState }}</span>
       <div class="spacer"></div>
       <span v-if="meta" class="page-info">{{ meta }}</span>
-      <span v-if="hasTable && total !== undefined" class="page-info">
-        · Page {{ currentPage }} / {{ totalPages }} · {{ total }} row(s)
-      </span>
-      <span v-if="hasTable" class="page-info">{{ t('wv.query.limit') }}</span>
-      <input v-if="hasTable" type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit()" />
-      <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="firstPage" :title="t('wv.query.firstPage')"></button>
-      <button v-if="hasTable" class="btn" :disabled="currentPage <= 1" @click="prevPage">◀ Prev</button>
-      <template v-if="hasTable && total !== undefined">
-        <span class="page-info">{{ t('wv.query.gotoPage') }}</span>
-        <input type="number" v-model.number="pageInput" class="limit-input" min="1" :max="totalPages" @change="gotoPage" />
-        <span class="page-info">/ {{ totalPages }}</span>
-      </template>
-      <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="nextPage">Next ▶</button>
-      <button v-if="hasTable" class="btn" :disabled="currentPage >= totalPages" @click="lastPage" :title="t('wv.query.lastPage')"></button>
     </div>
     <!--
       结果标签页对表面板同样生效：表面板里执行写语句会走多结果分支，
@@ -572,6 +560,21 @@ function onKeydown(e: KeyboardEvent) {
     <table v-if="results.length > 0 && !error && fields.length === 0" class="result-info">
       <tbody><tr><td>{{ meta }}</td></tr></tbody>
     </table>
+    <div v-if="hasTable && total !== undefined" class="result-footer">
+      <span class="page-info">{{ t('wv.query.totalRows', { total }) }}</span>
+      <span class="spacer"></span>
+      <span class="page-info">{{ t('wv.query.pageOf', { page: currentPage, pages: totalPages }) }}</span>
+      <label class="page-info">{{ t('wv.query.limit') }}
+        <input type="number" v-model.number="limit" class="limit-input" min="1" @change="setLimit()" />
+      </label>
+      <button class="btn" :disabled="currentPage <= 1" @click="firstPage" :title="t('wv.query.firstPage')">«</button>
+      <button class="btn" :disabled="currentPage <= 1" @click="prevPage">{{ t('wv.query.prevPage') }}</button>
+      <label class="page-info">{{ t('wv.query.gotoPage') }}
+        <input type="number" v-model.number="pageInput" class="limit-input" min="1" :max="totalPages" @change="gotoPage" />
+      </label>
+      <button class="btn" :disabled="currentPage >= totalPages" @click="nextPage">{{ t('wv.query.nextPage') }}</button>
+      <button class="btn" :disabled="currentPage >= totalPages" @click="lastPage" :title="t('wv.query.lastPage')">»</button>
+    </div>
   </div>
 </template>
 
@@ -593,6 +596,8 @@ function onKeydown(e: KeyboardEvent) {
 .comp-item.kind-function { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
 .comp-item.kind-operator { color: var(--vscode-symbolIcon-operatorForeground, #d4d4d4); }
 .action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
+.result-footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 8px; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
+.result-footer .page-info { display: inline-flex; align-items: center; gap: 4px; }
   .spacer { flex: 1; }
   .page-info { font-size: 12px; color: var(--vscode-descriptionForeground, #808080); white-space: nowrap; }
   .limit-input { width: 64px; font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c);

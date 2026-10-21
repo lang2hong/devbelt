@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildInsertPayload,
   buildInsertStatement,
+  clipboardCellText,
+  clipboardRowsText,
   deleteRowsMessage,
   identifierQuote,
   isNumericText,
@@ -75,6 +77,22 @@ describe('gridOps 复制 INSERT', () => {
   it('无表或空行时返回空串', () => {
     expect(buildInsertStatement(undefined, 'd', ['a'], [{ a: 1 }], 'PG')).toBe('');
     expect(buildInsertStatement('t', 'd', ['a'], [], 'PG')).toBe('');
+  });
+});
+
+describe('gridOps 结果复制', () => {
+  it('单值：NULL/BLOB/对象/普通值', () => {
+    expect(clipboardCellText(null)).toBe('NULL');
+    expect(clipboardCellText({ type: 'Buffer', data: [1, 2, 3] })).toBe('[BLOB 3B]');
+    expect(clipboardCellText({ a: 1 })).toBe('{"a":1}');
+    expect(clipboardCellText(0)).toBe('0');
+  });
+
+  it('TSV/CSV 带表头，正确转义；JSON 输出对象数组', () => {
+    const rows = [{ id: 1, name: 'a\tb' }, { id: 2, name: 'x,y' }];
+    expect(clipboardRowsText(['id', 'name'], rows, 'tsv')).toBe('id\tname\n1\t"a\tb"\n2\tx,y');
+    expect(clipboardRowsText(['id', 'name'], rows, 'csv')).toContain('"x,y"');
+    expect(JSON.parse(clipboardRowsText(['id', 'name'], rows, 'json'))).toEqual(rows);
   });
 });
 

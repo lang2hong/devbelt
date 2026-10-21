@@ -92,3 +92,47 @@ export function updateCellMessage(pkColumns: string[], pkValues: unknown[], colu
 export function deleteRowsMessage(rows: { pkColumns: string[]; pkValues: unknown[] }[]): DeleteRowsMessage {
   return { type: 'deleteRows', rows };
 }
+
+/** 结果复制格式。 */
+export type CopyFormat = 'tsv' | 'csv' | 'json';
+
+/** 单值 → 剪贴板文本：NULL 明确显示，BLOB 不展开巨量字节，对象转 JSON。 */
+export function clipboardCellText(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL';
+  if (typeof value === 'object') {
+    const v = value as { type?: string; data?: unknown };
+    if (v.type === 'Buffer' && Array.isArray(v.data)) return `[BLOB ${v.data.length}B]`;
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+function escapeDelimited(text: string, delimiter: string): string {
+  if (text.includes('"') || text.includes('\n') || text.includes('\r') || text.includes(delimiter)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+/** 结果集 → TSV/CSV/JSON 文本（带表头；范围由调用方决定）。 */
+export function clipboardRowsText(
+  columns: readonly string[],
+  rows: ReadonlyArray<Record<string, unknown>>,
+  format: CopyFormat,
+): string {
+  if (format === 'json') {
+    const objects = rows.map((row) => Object.fromEntries(columns.map((c) => [c, row[c]])));
+    return JSON.stringify(objects, (_key, value) => {
+      const v = value as { type?: string; data?: unknown } | null;
+      if (v && typeof v === 'object' && v.type === 'Buffer' && Array.isArray(v.data)) return `[BLOB ${v.data.length}B]`;
+      return value;
+    }, 2);
+  }
+  const delimiter = format === 'csv' ? ',' : '\t';
+  const lineEnd = format === 'csv' ? '\r\n' : '\n';
+  const lines = [columns.map((c) => escapeDelimited(c, delimiter)).join(delimiter)];
+  for (const row of rows) {
+    lines.push(columns.map((c) => escapeDelimited(clipboardCellText(row[c]), delimiter)).join(delimiter));
+  }
+  return lines.join(lineEnd);
+}

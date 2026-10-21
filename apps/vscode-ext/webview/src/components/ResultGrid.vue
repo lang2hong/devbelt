@@ -8,7 +8,7 @@ import {
   toInputValue, toSqlValue,
   type TemporalKind,
 } from '../utils/temporal';
-import { buildInsertPayload, buildInsertStatement, isNumericText } from '../utils/gridOps';
+import { buildInsertPayload, buildInsertStatement, clipboardCellText, clipboardRowsText, isNumericText, type CopyFormat } from '../utils/gridOps';
 import ConfirmDialog from './ConfirmDialog.vue';
 
 interface Field { name: string; simpleType?: string; type?: string }
@@ -74,11 +74,16 @@ const suppressSort = ref(false);
 const pendingDelete = ref<{ pkColumns: string[]; pkValues: any[] }[]>([]);
 const toast = ref('');
 let toastTimer: any;
+const showCopy = ref(false);
+const activeCell = ref<{ row: Row; field: Field } | null>(null);
+const cellMenu = ref<{ x: number; y: number; row: Row; field: Field } | null>(null);
+const detailCell = ref<{ column: string; value: unknown } | null>(null);
 
 const canModifyRows = computed(() => props.hasTable && props.canEdit !== false);
-// 选择行的唯一用途是删除/复制，两者对只读结果都不可用
-const canSelectRows = computed(() => canModifyRows.value);
-const hiddenSet = computed(() => new Set(props.hiddenColumns || []));
+// 行选择用于复制（只读结果也需要）；删除仍只对可编辑表开放。
+const canSelectRows = computed(() => props.fields.length > 0);
+const localHidden = ref<string[]>([]);
+const hiddenSet = computed(() => new Set([...(props.hiddenColumns || []), ...localHidden.value]));
 const fieldByName = computed(() => new Map(props.fields.map((field) => [field.name, field])));
 const visibleFields = computed(() => displayedOrder.value
   .map((name) => fieldByName.value.get(name))
@@ -95,7 +100,15 @@ function isHidden(name: string): boolean {
 }
 
 function toggleColumnVisibility(name: string) {
-  emit('toggleColumn', name, !isHidden(name));
+  const hide = !isHidden(name);
+  if (props.hasTable) {
+    emit('toggleColumn', name, hide);
+    return;
+  }
+  // 任意查询结果没有宿主持久化；列隐藏仅作用于当前结果集。
+  localHidden.value = hide
+    ? [...localHidden.value, name]
+    : localHidden.value.filter((n) => n !== name);
 }
 
 function sortColumn(name: string) {
@@ -108,18 +121,29 @@ function sortColumn(name: string) {
 }
 
 function persistLayout() {
-  emit('saveLayout', [...displayedOrder.value], { ...localColumnWidths.value });
+  // 查询结果只做本地布局；只有表预览才把布局写回宿主。
+  if (props.hasTable) emit('saveLayout', [...displayedOrder.value], { ...localColumnWidths.value });
+}
+
+function resetGridLayout() {
+  if (props.hasTable) {
+    emit('resetProfile');
+    return;
+  }
+  displayedOrder.value = normalizedOrder([]);
+  localColumnWidths.value = {};
+  localHidden.value = [];
 }
 
 function startColumnDrag(name: string, event: DragEvent) {
-  if (!props.hasTable) return;
+  if (!props.fields.length) return;
   draggedColumn.value = name;
   event.dataTransfer?.setData('text/plain', name);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 }
 
 function dropColumn(target: string, event: DragEvent) {
-  if (!props.hasTable) return;
+  if (!props.fields.length) return;
   event.preventDefault();
   const source = draggedColumn.value || event.dataTransfer?.getData('text/plain');
   if (!source || source === target) return;
@@ -141,7 +165,7 @@ function columnStyle(name: string): Record<string, string> | undefined {
 }
 
 function startColumnResize(name: string, event: PointerEvent) {
-  if (!props.hasTable) return;
+  if (!props.fields.length) return;
   event.preventDefault();
   event.stopPropagation();
   const startX = event.clientX;
@@ -253,8 +277,24 @@ function onDocMouseDown(e: MouseEvent) {
 // 若继续保留 selectedRows，会出现「勾选态全空但 Delete (N) 仍可点」→ 误删上一页的行。
 watch(() => props.rows, () => { selectedRows.value = []; });
 
-onMounted(() => document.addEventListener('mousedown', onDocMouseDown));
-onUnmounted(() => document.removeEventListener('mousedown', onDocMouseDown));
+function onDocClickForMenus(e: MouseEvent): void {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  if (!target.closest('.cell-menu') && !target.closest('.copy-wrap') && !target.closest('.export-wrap') && !target.closest('.col-menu-wrap')) {
+    cellMenu.value = null;
+    showCopy.value = false;
+    showExport.value = false;
+    showColumnMenu.value = false;
+  }
+}
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMouseDown);
+  document.addEventListener('mousedown', onDocClickForMenus);
+});
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocMouseDown);
+  document.removeEventListener('mousedown', onDocClickForMenus);
+});
 
 function toggleRow(row: Row, checked: boolean) {
   if (checked) {
@@ -564,9 +604,88 @@ function copyAsInsert() {
   const targets = selectedRows.value.length ? selectedRows.value : props.rows;
   const cols = visibleFields.value.map((f) => f.name);
   const sql = buildInsertStatement(props.tableName, props.dbName, cols, targets, props.dbType, props.schemaName);
-  void navigator.clipboard.writeText(sql).then(() => {
-    showToast(t('wv.grid.copiedInserts', { count: targets.length }));
-  });
+  void copyText(sql, t('wv.grid.copiedInserts', { count: targets.length }));
+}
+
+async function copyText(text: string, okMessage: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(okMessage);
+  } catch {
+    showToast(t('wv.grid.copyFailed'));
+  }
+}
+
+function copyCell(value: unknown): void {
+  void copyText(clipboardCellText(value), t('wv.grid.copiedCell'));
+}
+
+function copyRow(row: Row): void {
+  void copyText(clipboardRowsText(visibleFields.value.map((f) => f.name), [row], 'tsv'), t('wv.grid.copiedRows', { count: 1 }));
+}
+
+function copyColumnName(field: Field): void {
+  void copyText(field.name, t('wv.grid.copiedColumn'));
+}
+
+function copyGrid(format: CopyFormat): void {
+  showCopy.value = false;
+  const targets = selectedRows.value.length ? selectedRows.value : props.rows;
+  if (!targets.length) return showToast(t('wv.grid.nothingToCopy'));
+  void copyText(
+    clipboardRowsText(visibleFields.value.map((f) => f.name), targets, format),
+    t('wv.grid.copiedRows', { count: targets.length }),
+  );
+}
+
+function selectCell(row: Row, field: Field): void {
+  activeCell.value = { row, field };
+  cellMenu.value = null;
+}
+
+function openCellMenu(event: MouseEvent, row: Row, field: Field): void {
+  event.preventDefault();
+  selectCell(row, field);
+  cellMenu.value = {
+    x: Math.min(event.clientX, Math.max(0, window.innerWidth - 220)),
+    y: Math.min(event.clientY, Math.max(0, window.innerHeight - 180)),
+    row,
+    field,
+  };
+}
+
+function closeCellMenu(): void {
+  cellMenu.value = null;
+}
+
+function cellTitle(row: Row, field: Field): string {
+  const value = clipboardCellText(row[field.name]);
+  const hint = canModifyRows.value && getPk(row) ? t('wv.grid.doubleClickToEdit') : '';
+  return hint ? `${value}
+${hint}` : value;
+}
+
+function isNullCell(value: unknown): boolean {
+  return value === null || value === undefined;
+}
+
+function viewCellDetail(): void {
+  const menu = cellMenu.value;
+  if (!menu) return;
+  detailCell.value = { column: menu.field.name, value: menu.row[menu.field.name] };
+  cellMenu.value = null;
+}
+
+function onGridKeydown(event: KeyboardEvent): void {
+  if (!((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c')) return;
+  const selectedText = window.getSelection()?.toString();
+  if (selectedText) return;
+  event.preventDefault();
+  if (activeCell.value) {
+    copyCell(activeCell.value.row[activeCell.value.field.name]);
+    return;
+  }
+  copyGrid('tsv');
 }
 
 function showToast(msg: string) {
@@ -586,6 +705,7 @@ function formatCell(v: any): string {
 
 watch([() => props.fields, () => props.columnOrder], () => {
   displayedOrder.value = normalizedOrder();
+  localHidden.value = [];
   selectedRows.value = [];
 }, { immediate: true });
 
@@ -600,8 +720,8 @@ watch(() => props.filterConditions, (conds) => {
 
 <template>
   <div class="toolbar">
-    <button v-if="canModifyRows" class="btn danger" :disabled="!selectedRows.length" @click="deleteSelected">
-      Delete ({{ selectedRows.length }})
+    <button v-if="canModifyRows && selectedRows.length" class="btn danger" @click="deleteSelected">
+      {{ t('wv.grid.deleteSelected', { count: selectedRows.length }) }}
     </button>
     <template v-if="hasTable">
       <div class="filter-wrap">
@@ -659,14 +779,22 @@ watch(() => props.filterConditions, (conds) => {
         </div>
       </div>
     </template>
-    <button v-if="hasTable" class="btn" @click="$emit('resetProfile')">{{ t('wv.grid.resetLayout') }}</button>
-    <div v-if="hasTable" class="col-menu-wrap">
+    <button v-if="fields.length" class="btn" @click="resetGridLayout">{{ t('wv.grid.resetLayout') }}</button>
+    <div v-if="fields.length" class="col-menu-wrap">
       <button class="btn" @click="showColumnMenu = !showColumnMenu">{{ t('wv.grid.columns') }}</button>
       <div v-if="showColumnMenu" class="col-menu">
         <label v-for="f in fields" :key="f.name" class="col-menu-item">
           <input type="checkbox" :checked="!isHidden(f.name)" @change="toggleColumnVisibility(f.name)" />
           {{ f.name }}
         </label>
+      </div>
+    </div>
+    <div v-if="allowExport !== false" class="copy-wrap">
+      <button class="btn" :disabled="!rows.length" @click="showCopy = !showCopy">⧉ {{ t('wv.grid.copy') }} ▾</button>
+      <div v-if="showCopy" class="copy-menu">
+        <button class="menu-item" @click="copyGrid('tsv')">{{ t('wv.grid.formatTsv') }}</button>
+        <button class="menu-item" @click="copyGrid('csv')">CSV</button>
+        <button class="menu-item" @click="copyGrid('json')">JSON</button>
       </div>
     </div>
     <div v-if="allowExport !== false" class="export-wrap">
@@ -679,11 +807,12 @@ watch(() => props.filterConditions, (conds) => {
     <button v-if="canModifyRows" class="btn" @click="startInsert">{{ t('wv.grid.insertRow') }}</button>
     <button v-if="canModifyRows" class="btn" :disabled="!rows.length" @click="copyAsInsert">{{ t('wv.grid.copyInsert') }}</button>
   </div>
-  <div class="grid-wrap">
+  <div class="grid-wrap" tabindex="0" @keydown="onGridKeydown">
     <table>
       <thead>
         <tr>
           <th v-if="canSelectRows" style="width: 30px"></th>
+          <th class="row-num">#</th>
           <th v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
             :draggable="hasTable"
             @click="sortColumn(f.name)"
@@ -699,6 +828,7 @@ watch(() => props.filterConditions, (conds) => {
       <tbody>
         <tr v-if="inserting" class="insert-row">
           <td v-if="canSelectRows"></td>
+          <td class="row-num"></td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)">
             <select v-if="isEnumColumn(f.name)" v-model="newRow[f.name]" class="cell-edit">
               <option value="">{{ t('wv.common.null') }}</option>
@@ -720,7 +850,7 @@ watch(() => props.filterConditions, (conds) => {
           </td>
         </tr>
         <tr v-if="!inserting && rows.length === 0">
-          <td :colspan="visibleFields.length + (canSelectRows ? 1 : 0)" class="empty-row">
+          <td :colspan="visibleFields.length + (canSelectRows ? 1 : 0) + 1" class="empty-row">
             {{ t('wv.grid.noRows') }}
           </td>
         </tr>
@@ -728,11 +858,15 @@ watch(() => props.filterConditions, (conds) => {
           <td v-if="canSelectRows">
             <input type="checkbox"
               :checked="isRowSelected(row)"
+              :aria-label="t('wv.grid.selectRow')"
               @change="e => toggleRow(row, (e.target as HTMLInputElement).checked)" />
           </td>
+          <td class="row-num">{{ idx + 1 }}</td>
           <td v-for="f in visibleFields" :key="f.name" :style="columnStyle(f.name)"
+            @click="selectCell(row, f)"
+            @contextmenu="openCellMenu($event, row, f)"
             @dblclick="startEdit(row, f, idx)"
-            :title="canModifyRows && getPk(row) ? t('wv.grid.doubleClickToEdit') : ''">
+            :title="cellTitle(row, f)">
             <template v-if="editingCell === `${idx}:${f.name}`">
               <div ref="editContainer" class="cell-edit-wrap">
                 <!--
@@ -758,13 +892,32 @@ watch(() => props.filterConditions, (conds) => {
               </div>
             </template>
             <template v-else>
-              {{ formatCell(row[f.name]) }}
+              <span v-if="isNullCell(row[f.name])" class="cell-null">{{ t('wv.common.null') }}</span>
+              <span v-else>{{ formatCell(row[f.name]) }}</span>
             </template>
           </td>
         </tr>
       </tbody>
     </table>
   </div>
+  <div v-if="cellMenu" class="cell-menu" :style="{ left: `${cellMenu.x}px`, top: `${cellMenu.y}px` }" @mousedown.stop>
+    <button class="menu-item" @click="copyCell(cellMenu.row[cellMenu.field.name]); closeCellMenu()">{{ t('wv.grid.copyValue') }}</button>
+    <button class="menu-item" @click="copyRow(cellMenu.row); closeCellMenu()">{{ t('wv.grid.copyRow') }}</button>
+    <button class="menu-item" @click="copyColumnName(cellMenu.field); closeCellMenu()">{{ t('wv.grid.copyColumnName') }}</button>
+    <button class="menu-item" @click="viewCellDetail">{{ t('wv.grid.viewFull') }}</button>
+  </div>
+
+  <div v-if="detailCell" class="cell-detail-mask" @click.self="detailCell = null">
+    <div class="cell-detail" role="dialog" aria-modal="true">
+      <h3>{{ detailCell.column }}</h3>
+      <pre>{{ formatCell(detailCell.value) }}</pre>
+      <div class="cell-detail-actions">
+        <button class="btn" @click="copyCell(detailCell.value)">{{ t('wv.grid.copyValue') }}</button>
+        <button class="btn primary" @click="detailCell = null">{{ t('wv.common.close') }}</button>
+      </div>
+    </div>
+  </div>
+
   <ConfirmDialog
     v-if="pendingDelete.length"
     :title="t('wv.grid.deleteRows')"
@@ -787,7 +940,9 @@ watch(() => props.filterConditions, (conds) => {
 .btn:disabled { opacity: 0.5; cursor: default; }
 .input { font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
-.grid-wrap { flex: 1; overflow: auto; }
+.grid-wrap { flex: 1; overflow: auto; outline: none; }
+.row-num { width: 48px; min-width: 48px; text-align: right; color: var(--vscode-descriptionForeground, #808080); font-variant-numeric: tabular-nums; }
+.cell-null { color: var(--vscode-descriptionForeground, #808080); font-style: italic; opacity: .8; }
 table { border-collapse: collapse; font-size: 13px; }
 th, td { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding: 4px 10px; text-align: left; white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--vscode-editor-background, #1e1e1e); cursor: pointer; user-select: none; }
@@ -805,7 +960,7 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
   background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 3px; padding: 4px; }
 .col-menu-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .col-menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
-.filter-wrap, .export-wrap { position: relative; }
+.filter-wrap, .export-wrap, .copy-wrap { position: relative; }
 .filter-panel { position: absolute; top: 100%; left: 0; z-index: 10; margin-top: 2px; min-width: 540px; max-width: 640px;
   background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 4px; padding: 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
@@ -817,8 +972,14 @@ td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 .filter-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .filter-summary { font-size: 11px; color: var(--vscode-descriptionForeground, #808080); cursor: pointer; max-width: 300px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.export-menu { position: absolute; top: 100%; right: 0; z-index: 10; margin-top: 2px; min-width: 120px;
+.export-menu, .copy-menu { position: absolute; top: 100%; right: 0; z-index: 10; margin-top: 2px; min-width: 120px;
   background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); border-radius: 3px; padding: 4px; }
+.cell-menu { position: fixed; z-index: 120; min-width: 170px; padding: 4px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.3)); border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.cell-detail-mask { position: fixed; inset: 0; z-index: 130; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.cell-detail { width: min(720px, 92vw); max-height: 82vh; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.3)); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.4); }
+.cell-detail h3 { margin: 0; font-size: 14px; }
+.cell-detail pre { margin: 0; padding: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.12)); border-radius: 4px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.cell-detail-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .menu-item { display: block; width: 100%; text-align: left; padding: 4px 8px; font-size: 12px; cursor: pointer;
   background: transparent; border: none; color: var(--vscode-foreground, #cccccc); }
 .menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
