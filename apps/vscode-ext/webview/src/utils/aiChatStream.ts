@@ -9,9 +9,15 @@
 export type AiMessageBlock =
   | { type: 'text'; content: string }
   | { type: 'code'; lang: string; content: string }
-  | { type: 'table'; header: string[]; rows: string[][]; summary?: string };
+  | { type: 'table'; header: string[]; rows: string[][]; summary?: string }
+  | { type: 'heading'; level: number; content: string }
+  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'quote'; content: string }
+  | { type: 'hr' };
 
-export type AiInlineSegment = { type: 'text' | 'code'; content: string };
+export type AiInlineSegment =
+  | { type: 'text' | 'code' | 'strong' | 'em'; content: string }
+  | { type: 'link'; content: string; href: string };
 
 /** 解析消息为块序列（围栏代码块 + 文本块）。未闭合围栏按代码块处理。 */
 /** 自动执行的 SQL 块上限（P9.1 后续：防一条回复多查询刷屏/轰炸数据库）。 */
@@ -149,13 +155,27 @@ function mergeTableSummaries(blocks: AiMessageBlock[]): AiMessageBlock[] {
 /** 文本块的行内 `code` 切分（不解析加粗/斜体等；S4 再扩展完整 Markdown）。 */
 export function parseInlineSegments(text: string): AiInlineSegment[] {
   const segments: AiInlineSegment[] = [];
-  const regex = /`([^`\n]+)`/g;
+  // 顺序很重要：先 code，再 bold，再 italic，最后 http/https 链接。
+  const regex = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(?<!\w)_([^_\n]+)_(?!\w)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text))) {
     if (match.index > lastIndex) segments.push({ type: 'text', content: text.slice(lastIndex, match.index) });
-    segments.push({ type: 'code', content: match[1] });
-    lastIndex = match.index + match[0].length;
+    const token = match[0];
+    if (match[1]) {
+      segments.push({ type: 'code', content: token.slice(1, -1) });
+    } else if (match[2]) {
+      segments.push({ type: 'strong', content: token.slice(2, -2) });
+    } else if (match[3]) {
+      segments.push({ type: 'em', content: token.slice(1, -1) });
+    } else if (match[4]) {
+      const m = /^\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)$/.exec(token);
+      if (m) segments.push({ type: 'link', content: m[1]!, href: m[2]! });
+      else segments.push({ type: 'text', content: token });
+    } else {
+      segments.push({ type: 'text', content: token });
+    }
+    lastIndex = match.index + token.length;
   }
   if (lastIndex < text.length) segments.push({ type: 'text', content: text.slice(lastIndex) });
   return segments.length > 0 ? segments : [{ type: 'text', content: text }];
@@ -180,7 +200,7 @@ function splitTables(content: string): AiMessageBlock[] {
   const flush = (): void => {
     const joined = trimBlankEdges(text).join('\n');
     text = [];
-    if (joined) out.push({ type: 'text', content: joined });
+    if (joined) out.push(...parseTextBlocks(joined));
   };
   let i = 0;
   while (i < lines.length) {
@@ -193,6 +213,65 @@ function splitTables(content: string): AiMessageBlock[] {
     }
     text.push(lines[i]);
     i += 1;
+  }
+  flush();
+  return out;
+}
+
+/** 文本块 → 标题 / 列表 / 引用 / 分割线 / 段落（段落保留原始换行）。 */
+function parseTextBlocks(content: string): AiMessageBlock[] {
+  const lines = content.split('\n');
+  const out: AiMessageBlock[] = [];
+  let paragraph: string[] = [];
+  const flush = (): void => {
+    if (paragraph.length > 0) {
+      out.push({ type: 'text', content: paragraph.join('\n') });
+      paragraph = [];
+    }
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (line.trim() === '') { flush(); continue; }
+    const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      flush();
+      out.push({ type: 'heading', level: heading[1]!.length, content: heading[2]! });
+      continue;
+    }
+    if (/^\s{0,3}(?:---+|\*\*\*+|___+)\s*$/.test(line)) {
+      flush();
+      out.push({ type: 'hr' });
+      continue;
+    }
+    const quote = /^\s{0,3}>\s?(.*)$/.exec(line);
+    if (quote) {
+      flush();
+      const parts = [quote[1] ?? ''];
+      while (i + 1 < lines.length) {
+        const next = /^\s{0,3}>\s?(.*)$/.exec(lines[i + 1]!);
+        if (!next) break;
+        parts.push(next[1] ?? '');
+        i += 1;
+      }
+      out.push({ type: 'quote', content: parts.join('\n') });
+      continue;
+    }
+    const item = /^\s{0,3}([-*+]|\d+[.)])\s+(.+)$/.exec(line);
+    if (item) {
+      flush();
+      const ordered = /^\d/.test(item[1]!);
+      const items = [item[2]!];
+      while (i + 1 < lines.length) {
+        const next = /^\s{0,3}([-*+]|\d+[.)])\s+(.+)$/.exec(lines[i + 1]!);
+        if (!next || /^\d/.test(next[1]!) !== ordered) break;
+        items.push(next[2]!);
+        i += 1;
+      }
+      out.push({ type: 'list', ordered, items });
+      continue;
+    }
+    paragraph.push(line);
   }
   flush();
   return out;

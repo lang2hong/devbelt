@@ -41,6 +41,43 @@ describe('parseMessageBlocks（围栏代码块 + 文本）', () => {
   });
 });
 
+describe('parseMessageBlocks（Markdown 块）', () => {
+  it('标题/列表/引用/分割线', () => {
+    const text = '# 标题\n\n- 第一项\n- 第二项\n\n1. one\n2. two\n\n> 引用\n> 第二行\n\n---';
+    expect(parseMessageBlocks(text)).toEqual([
+      { type: 'heading', level: 1, content: '标题' },
+      { type: 'list', ordered: false, items: ['第一项', '第二项'] },
+      { type: 'list', ordered: true, items: ['one', 'two'] },
+      { type: 'quote', content: '引用\n第二行' },
+      { type: 'hr' },
+    ]);
+  });
+
+  it('段落保留换行，代码块内的 Markdown 不解析', () => {
+    const blocks = parseMessageBlocks('第一行\n第二行\n```md\n# not heading\n- not list\n```');
+    expect(blocks[0]).toEqual({ type: 'text', content: '第一行\n第二行' });
+    expect(blocks[1]).toMatchObject({ type: 'code', lang: 'md' });
+  });
+});
+
+describe('parseInlineSegments（行内 Markdown）', () => {
+  it('粗体、斜体与链接', () => {
+    expect(parseInlineSegments('**粗体** 和 _斜体_ 以及 [文档](https://example.com/a)')).toEqual([
+      { type: 'strong', content: '粗体' },
+      { type: 'text', content: ' 和 ' },
+      { type: 'em', content: '斜体' },
+      { type: 'text', content: ' 以及 ' },
+      { type: 'link', content: '文档', href: 'https://example.com/a' },
+    ]);
+  });
+
+  it('非 http/https 链接保持纯文本', () => {
+    expect(parseInlineSegments('[x](javascript:alert(1))')).toEqual([
+      { type: 'text', content: '[x](javascript:alert(1))' },
+    ]);
+  });
+});
+
 describe('parseMessageBlocks（Markdown 表格）', () => {
   it('完整表格 → table 块（单元格去空白、\\| 还原、空单元格保留；单行标题合并为 summary）', () => {
     const text = '结果：\n| id | name |\n| --- | --- |\n| 1 | a\\|b |\n| 2 |  |\n完';
@@ -67,7 +104,9 @@ describe('parseMessageBlocks（Markdown 表格）', () => {
 
   it('非管道分隔行（纯横线/非管道）不误判为表格', () => {
     expect(parseMessageBlocks('| a | b |\n-----\n| 1 | 2 |')).toEqual([
-      { type: 'text', content: '| a | b |\n-----\n| 1 | 2 |' },
+      { type: 'text', content: '| a | b |' },
+      { type: 'hr' },
+      { type: 'text', content: '| 1 | 2 |' },
     ]);
     expect(parseMessageBlocks('| a |\nx---x\n| 1 |')).toEqual([{ type: 'text', content: '| a |\nx---x\n| 1 |' }]);
   });

@@ -9,6 +9,13 @@ const props = defineProps<{
   streaming: { content: string; reasoning: string } | null;
   /** 当前连接引擎（用于代码块按引擎决定是否显示运行按钮）。 */
   dbType?: string;
+  /** 空状态建议问题；点击只填入输入框。 */
+  suggestions?: string[];
+}>();
+
+const emit = defineEmits<{
+  (e: 'copy', text: string): void;
+  (e: 'suggest', text: string): void;
 }>();
 
 const { t } = useI18n();
@@ -23,6 +30,13 @@ function onScroll(): void {
   const el = scroller.value;
   if (!el) return;
   stick.value = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD_PX;
+}
+
+async function jumpToBottom(): Promise<void> {
+  stick.value = true;
+  await nextTick();
+  const el = scroller.value;
+  if (el) el.scrollTop = el.scrollHeight;
 }
 
 /** 仅在底部跟随：内容/思考过程增量与异步渲染高度变化都走这里。 */
@@ -49,24 +63,46 @@ onBeforeUnmount(() => observer?.disconnect());
 </script>
 
 <template>
-  <div ref="scroller" class="ai-messages" @scroll.passive="onScroll">
-    <div ref="content" class="ai-messages-inner">
-      <div v-if="messages.length === 0 && !streaming" class="ai-empty">
-        <span class="ai-empty-spark ai-gradient-text" aria-hidden="true">✦</span>
-        <p class="ai-empty-text ai-gradient-text">{{ t('wv.ai.empty') }}</p>
+  <div class="ai-messages-wrap">
+    <div ref="scroller" class="ai-messages" @scroll.passive="onScroll">
+      <div ref="content" class="ai-messages-inner">
+        <div v-if="messages.length === 0 && !streaming" class="ai-empty">
+          <span class="ai-empty-spark ai-gradient-text" aria-hidden="true">✦</span>
+          <p class="ai-empty-text ai-gradient-text">{{ t('wv.ai.empty') }}</p>
+          <div v-if="props.suggestions && props.suggestions.length" class="ai-suggestions">
+            <button v-for="s in props.suggestions" :key="s" class="ai-btn" @click="emit('suggest', s)">{{ s }}</button>
+          </div>
+        </div>
+        <MessageBubble
+          v-for="(message, index) in messages"
+          :key="index"
+          :message="message"
+          :db-type="props.dbType"
+          :msg-idx="index"
+          @copy="emit('copy', $event)"
+        />
+        <MessageBubble
+          v-if="streaming"
+          :message="{ role: 'assistant', content: streaming.content, reasoning: streaming.reasoning }"
+          :db-type="props.dbType"
+          streaming
+          @copy="emit('copy', $event)"
+        />
       </div>
-      <MessageBubble v-for="(message, index) in messages" :key="index" :message="message" :db-type="props.dbType" :msg-idx="index" />
-      <MessageBubble
-        v-if="streaming"
-        :message="{ role: 'assistant', content: streaming.content, reasoning: streaming.reasoning }"
-        :db-type="props.dbType"
-        streaming
-      />
     </div>
+    <button v-if="!stick" class="ai-jump" :title="t('wv.ai.jumpBottom')" @click="jumpToBottom">
+      ↓ {{ t('wv.ai.jumpBottom') }}
+    </button>
   </div>
 </template>
 
 <style scoped>
+.ai-messages-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
 .ai-messages {
   flex: 1;
   overflow-y: auto;
@@ -98,5 +134,33 @@ onBeforeUnmount(() => observer?.disconnect());
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+.ai-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 560px;
+  margin-top: 12px;
+}
+.ai-suggestions .ai-btn {
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.15));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+.ai-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+  background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  font-size: 12px;
 }
 </style>

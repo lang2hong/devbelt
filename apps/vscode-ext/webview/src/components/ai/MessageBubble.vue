@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import CodeBlock from './CodeBlock.vue';
+import MarkdownText from './MarkdownText.vue';
 import ToolResultInline from './ToolResultInline.vue';
 import ToolRunningInline from './ToolRunningInline.vue';
 import { useI18n } from '../../composables/useI18n';
-import { parseInlineSegments, parseMessageBlocks, type AiInlineSegment, type AiRunningPayload, type AiToolResultPayload } from '../../utils/aiChatStream';
+import { parseMessageBlocks, type AiRunningPayload, type AiToolResultPayload } from '../../utils/aiChatStream';
 
 const props = defineProps<{
   message: { role: 'user' | 'assistant'; content: string; reasoning?: string; error?: boolean; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> };
@@ -15,12 +16,16 @@ const props = defineProps<{
   msgIdx?: number;
 }>();
 
+const emit = defineEmits<{ (e: 'copy', text: string): void }>();
 const { t } = useI18n();
 
 const blocks = computed(() => parseMessageBlocks(props.message.content));
+const copied = ref(false);
 
-function segments(text: string): AiInlineSegment[] {
-  return parseInlineSegments(text);
+function copy(): void {
+  emit('copy', props.message.content);
+  copied.value = true;
+  window.setTimeout(() => { copied.value = false; }, 1500);
 }
 
 /** 表格折叠状态（按块下标；默认展开，记录已收起的块）。 */
@@ -78,52 +83,35 @@ watch(
             </table>
           </div>
         </div>
+        <component v-else-if="block.type === 'heading'" :is="`h${block.level}`" class="ai-md-heading">
+          <MarkdownText :text="block.content" />
+        </component>
+        <ul v-else-if="block.type === 'list' && !block.ordered" class="ai-md-list">
+          <li v-for="(item, itemIndex) in block.items" :key="itemIndex"><MarkdownText :text="item" /></li>
+        </ul>
+        <ol v-else-if="block.type === 'list'" class="ai-md-list">
+          <li v-for="(item, itemIndex) in block.items" :key="itemIndex"><MarkdownText :text="item" /></li>
+        </ol>
+        <blockquote v-else-if="block.type === 'quote'" class="ai-md-quote">
+          <MarkdownText :text="block.content" />
+        </blockquote>
+        <hr v-else-if="block.type === 'hr'" class="ai-md-hr" />
         <p v-else class="ai-text">
-          <template v-for="(seg, segIndex) in segments(block.content)" :key="segIndex">
-            <code v-if="seg.type === 'code'" class="ai-inline-code">{{ seg.content }}</code>
-            <span v-else>{{ seg.content }}</span>
-          </template>
+          <MarkdownText :text="block.content" />
         </p>
       </template>
       <span v-if="streaming && !message.content" class="ai-thinking">{{ t('wv.ai.thinking') }}</span>
       <span v-else-if="streaming" class="ai-cursor">▍</span>
     </template>
-    <p v-else class="ai-text">{{ message.content }}</p>
+    <p v-else class="ai-text">
+      <MarkdownText :text="message.content" />
+    </p>
+
+    <div v-if="!props.streaming" class="ai-msg-actions">
+      <button class="ai-btn" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
+    </div>
   </div>
 </template>
-
-.ai-reasoning {
-  margin: 2px 0 10px;
-  border: 1px solid var(--vscode-panel-border, rgba(127,127,127,.35));
-  border-radius: 6px;
-  padding: 6px 10px;
-  background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08));
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-.ai-reasoning summary {
-  cursor: pointer;
-  font-size: 12px;
-  opacity: .75;
-  user-select: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ai-reasoning-text {
-  margin: 6px 0 2px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  font-family: inherit;
-  font-size: 12.5px;
-  opacity: .8;
-  max-height: 240px;
-  max-width: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
 
 <style scoped>
 .ai-bubble {
@@ -143,9 +131,7 @@ watch(
   padding: 8px 14px;
   border-radius: 18px 18px 4px 18px;
 }
-.ai-bubble-assistant {
-  background: transparent;
-}
+.ai-bubble-assistant { background: transparent; }
 .ai-bubble-error {
   padding: 8px 14px;
   border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
@@ -155,18 +141,60 @@ watch(
   margin: 0;
   white-space: pre-wrap;
 }
-.ai-inline-code {
-  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
-  padding: 1px 5px;
-  border-radius: 5px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: var(--vscode-editor-font-size, 12px);
+.ai-md-heading {
+  margin: 12px 0 6px;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
-.ai-table-block {
-  margin: 4px 0;
-  min-width: 0;
+h1.ai-md-heading { font-size: 1.35em; }
+h2.ai-md-heading { font-size: 1.22em; }
+h3.ai-md-heading { font-size: 1.12em; }
+h4.ai-md-heading, h5.ai-md-heading, h6.ai-md-heading { font-size: 1em; }
+.ai-md-list { margin: 4px 0 8px; padding-left: 22px; }
+.ai-md-list li { margin: 2px 0; }
+.ai-md-quote {
+  margin: 6px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--vscode-textBlockQuote-border, var(--vscode-panel-border, #555));
+  background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.08));
+  color: var(--vscode-descriptionForeground);
+  white-space: pre-wrap;
+}
+.ai-md-hr { border: none; border-top: 1px solid var(--vscode-panel-border, #444); margin: 10px 0; }
+.ai-reasoning {
+  margin: 2px 0 10px;
+  border: 1px solid var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.08));
   max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
+.ai-reasoning summary {
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.75;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-reasoning-text {
+  margin: 6px 0 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 12.5px;
+  opacity: 0.8;
+  max-height: 240px;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.ai-table-block { margin: 4px 0; min-width: 0; max-width: 100%; }
 .ai-table-head {
   display: flex;
   align-items: center;
@@ -181,58 +209,18 @@ watch(
   cursor: pointer;
   text-align: left;
 }
-.ai-table-head:hover {
-  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
-}
-.ai-table-chevron {
-  width: 12px;
-  flex: 0 0 auto;
-  color: var(--vscode-descriptionForeground);
-}
-.ai-table-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ai-table-scroll {
-  margin: 2px 0 4px 16px;
-  max-width: calc(100% - 16px);
-  min-width: 0;
-  overflow-x: auto;
-}
-.ai-table {
-  border-collapse: collapse;
-  font-size: calc(var(--vscode-font-size, 13px) - 1px);
-}
-.ai-table th,
-.ai-table td {
-  border: 1px solid var(--vscode-panel-border);
-  padding: 2px 6px;
-  text-align: left;
-  white-space: nowrap;
-}
-.ai-table th {
-  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
-}
-.ai-thinking {
-  color: var(--vscode-descriptionForeground);
-  animation: ai-pulse 1.2s ease-in-out infinite;
-}
-@keyframes ai-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-.ai-cursor {
-  animation: ai-blink 1s steps(2, start) infinite;
-}
-@keyframes ai-blink {
-  to {
-    visibility: hidden;
-  }
-}
+.ai-table-head:hover { background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12)); }
+.ai-table-chevron { width: 12px; flex: 0 0 auto; color: var(--vscode-descriptionForeground); }
+.ai-table-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-table-scroll { margin: 2px 0 4px 16px; max-width: calc(100% - 16px); min-width: 0; overflow-x: auto; }
+.ai-table { border-collapse: collapse; font-size: calc(var(--vscode-font-size, 13px) - 1px); }
+.ai-table th, .ai-table td { border: 1px solid var(--vscode-panel-border); padding: 2px 6px; text-align: left; white-space: nowrap; }
+.ai-table th { background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12)); }
+.ai-thinking { color: var(--vscode-descriptionForeground); animation: ai-pulse 1.2s ease-in-out infinite; }
+@keyframes ai-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.ai-cursor { animation: ai-blink 1s steps(2, start) infinite; }
+@keyframes ai-blink { to { visibility: hidden; } }
+.ai-msg-actions { display: flex; gap: 4px; margin-top: 2px; opacity: 0; transition: opacity 0.12s; }
+.ai-bubble:hover .ai-msg-actions, .ai-bubble:focus-within .ai-msg-actions { opacity: 1; }
+@media (hover: none) { .ai-msg-actions { opacity: 1; } }
 </style>

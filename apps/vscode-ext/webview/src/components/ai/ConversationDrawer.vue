@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 export interface ConversationSummary {
@@ -25,6 +25,31 @@ const { t } = useI18n();
 const editingId = ref<string | undefined>(undefined);
 const editTitle = ref('');
 const confirmingId = ref<string | undefined>(undefined);
+const search = ref('');
+
+const filtered = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  return q ? props.sessions.filter((s) => s.title.toLowerCase().includes(q)) : props.sessions;
+});
+
+const groups = computed(() => {
+  const today = new Date();
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const day = 24 * 3600 * 1000;
+  const buckets = [
+    { key: 'today', label: t('wv.ai.history.today'), items: [] as ConversationSummary[] },
+    { key: 'yesterday', label: t('wv.ai.history.yesterday'), items: [] as ConversationSummary[] },
+    { key: 'week', label: t('wv.ai.history.week'), items: [] as ConversationSummary[] },
+    { key: 'older', label: t('wv.ai.history.older'), items: [] as ConversationSummary[] },
+  ];
+  for (const session of filtered.value) {
+    const ts = session.updatedAt;
+    const diff = startOfDay - new Date(ts).setHours(0, 0, 0, 0);
+    const bucket = diff <= 0 ? buckets[0]! : diff <= day ? buckets[1]! : diff <= day * 7 ? buckets[2]! : buckets[3]!;
+    bucket.items.push(session);
+  }
+  return buckets.filter((b) => b.items.length > 0);
+});
 
 function startRename(session: ConversationSummary): void {
   editingId.value = session.id;
@@ -50,36 +75,42 @@ function onDelete(session: ConversationSummary): void {
   <div class="ai-drawer-pane">
     <div class="ai-drawer-actions">
       <button class="ai-btn" @click="emit('newChat')">{{ t('wv.ai.newChat') }}</button>
+      <input v-model="search" class="ai-drawer-search" type="search" :placeholder="t('wv.ai.history.search')" />
     </div>
-    <ul class="ai-drawer-list">
-      <li
-        v-for="session in props.sessions"
-        :key="session.id"
-        class="ai-drawer-item"
-        :class="{ 'ai-drawer-item-active': session.id === props.activeSessionId }"
-      >
-        <template v-if="editingId === session.id">
-          <input
-            v-model="editTitle"
-            class="ai-drawer-rename"
-            @keydown.enter.prevent="commitRename"
-            @keydown.esc="editingId = undefined"
-            @blur="commitRename"
-          />
-        </template>
-        <template v-else>
-          <button class="ai-drawer-title" :title="session.title" @click="emit('load', session.id)">
-            {{ session.title }}
-          </button>
-          <div class="ai-drawer-ops">
-            <button class="ai-btn" :title="t('wv.ai.rename')" @click="startRename(session)">✎</button>
-            <button class="ai-btn" :title="t('wv.ai.delete')" @click="onDelete(session)">
-              {{ confirmingId === session.id ? t('wv.ai.deleteConfirm') : '🗑' }}
+    <div v-for="group in groups" :key="group.key" class="ai-history-group">
+      <div class="ai-history-label">{{ group.label }}</div>
+      <ul class="ai-drawer-list">
+        <li
+          v-for="session in group.items"
+          :key="session.id"
+          class="ai-drawer-item"
+          :class="{ 'ai-drawer-item-active': session.id === props.activeSessionId }"
+        >
+          <template v-if="editingId === session.id">
+            <input
+              v-model="editTitle"
+              class="ai-drawer-rename"
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc="editingId = undefined"
+              @blur="commitRename"
+            />
+          </template>
+          <template v-else>
+            <button class="ai-drawer-title" :title="session.title" @click="emit('load', session.id)">
+              {{ session.title }}
             </button>
-          </div>
-        </template>
-      </li>
-    </ul>
+            <span v-if="session.messageCount" class="ai-drawer-count">{{ session.messageCount }}</span>
+            <div class="ai-drawer-ops">
+              <button class="ai-btn" :title="t('wv.ai.rename')" @click="startRename(session)">✎</button>
+              <button class="ai-btn" :title="t('wv.ai.delete')" @click="onDelete(session)">
+                {{ confirmingId === session.id ? t('wv.ai.deleteConfirm') : '🗑' }}
+              </button>
+            </div>
+          </template>
+        </li>
+      </ul>
+    </div>
+    <p v-if="filtered.length === 0" class="ai-drawer-empty">{{ t('wv.ai.history.empty') }}</p>
   </div>
 </template>
 
@@ -92,13 +123,27 @@ function onDelete(session: ConversationSummary): void {
 }
 .ai-drawer-actions {
   display: flex;
+  align-items: center;
+  gap: 6px;
 }
+.ai-drawer-search {
+  flex: 1;
+  min-width: 0;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
+}
+.ai-history-group { margin-top: 6px; }
+.ai-history-label { padding: 4px 6px 2px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.ai-drawer-count { font-size: 10px; color: var(--vscode-descriptionForeground); }
+.ai-drawer-empty { color: var(--vscode-descriptionForeground); font-size: 12px; padding: 8px 6px; }
 .ai-drawer-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 320px;
-  overflow-y: auto;
 }
 .ai-drawer-item {
   display: flex;

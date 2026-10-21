@@ -148,7 +148,7 @@ function onSelect(event: Event): void {
   <div class="ai-context-bar">
     <div class="ai-context-row">
       <span class="ai-badge">{{ providerLabel }}</span>
-      <span v-if="provider?.model" class="ai-model">{{ provider.model }}</span>
+      <button v-if="provider?.model" class="ai-model ai-model-btn" :title="t('wv.ai.modelAccess')" @click="emit('openModelAccess')">{{ provider.model }}</button>
       <span v-if="providerHint" class="ai-hint">{{ providerHint }}</span>
     </div>
     <div class="ai-context-row">
@@ -215,6 +215,16 @@ function onSelect(event: Event): void {
 .ai-context-summary {
   color: var(--vscode-descriptionForeground);
 }
+.ai-model-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  text-decoration: underline dotted;
+}
+.ai-model-btn:hover { color: var(--vscode-foreground); }
 .ai-context-link {
   background: transparent;
   border: none;

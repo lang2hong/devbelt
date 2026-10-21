@@ -105,6 +105,12 @@ const streaming = ref<{ content: string; reasoning: string } | null>(null);
 const selectedConnId = ref<string | undefined>(undefined);
 const input = ref('');
 const includeColumnComments = ref(true);
+const suggestions = computed(() => [
+  t('wv.ai.suggest.explain'),
+  t('wv.ai.suggest.optimize'),
+  t('wv.ai.suggest.design'),
+  t('wv.ai.suggest.diagnose'),
+]);
 /**
  * 侧栏折叠视图组（VSCode 侧栏风格：上下堆叠、各自 ▸/▾，可同时展开）：
  * 注入的表（点表名打开说明弹层）/ 会话记录。
@@ -429,6 +435,14 @@ function stop(): void {
   post({ type: 'abort' });
 }
 
+function copyMessage(text: string): void {
+  post({ type: 'copyCode', text });
+}
+
+function useSuggestion(text: string): void {
+  input.value = text;
+}
+
 function newChat(): void {
   resetMessages([]);
   streaming.value = null;
@@ -597,8 +611,15 @@ function openContextDetail(): void {
         </div>
       </div>
       <div class="ai-main">
-        <MessageList :messages="messages" :streaming="streaming" :db-type="context?.dbType" />
-        <ChatInput v-model="input" :generating="generating" @send="send" />
+        <MessageList
+          :messages="messages"
+          :streaming="streaming"
+          :db-type="context?.dbType"
+          :suggestions="suggestions"
+          @copy="copyMessage"
+          @suggest="useSuggestion"
+        />
+        <ChatInput v-model="input" :generating="generating" @send="send" @stop="stop" />
       </div>
     </div>
     <TableNoteDialog

@@ -4,6 +4,7 @@ import { formatToolResultContent, parseMessageBlocks, type AiToolResultPayload }
 import { inferCharts, type ChartType } from '../../utils/chartInference';
 import { fmtChartValue } from './charts/chartShared';
 import { useI18n } from '../../composables/useI18n';
+import MarkdownText from './MarkdownText.vue';
 import { OPTIMIZE_SQL_KEY } from '../../utils/runInChat';
 import { formatElapsed, isSlowQuery } from '../../../../src/ai/slowQuery';
 import BarChart from './charts/BarChart.vue';
@@ -115,7 +116,18 @@ const chartHint = computed(() => {
         </div>
       </div>
       <pre v-else-if="block.type === 'code'" class="ai-inline-code"><code>{{ block.content }}</code></pre>
-      <p v-else class="ai-inline-text">{{ block.content }}</p>
+      <component v-else-if="block.type === 'heading'" :is="`h${block.level}`" class="ai-inline-heading">
+        <MarkdownText :text="block.content" />
+      </component>
+      <ul v-else-if="block.type === 'list' && !block.ordered" class="ai-inline-list">
+        <li v-for="(item, itemIndex) in block.items" :key="itemIndex"><MarkdownText :text="item" /></li>
+      </ul>
+      <ol v-else-if="block.type === 'list'" class="ai-inline-list">
+        <li v-for="(item, itemIndex) in block.items" :key="itemIndex"><MarkdownText :text="item" /></li>
+      </ol>
+      <blockquote v-else-if="block.type === 'quote'" class="ai-inline-quote"><MarkdownText :text="block.content" /></blockquote>
+      <hr v-else-if="block.type === 'hr'" class="ai-inline-hr" />
+      <p v-else class="ai-inline-text"><MarkdownText :text="block.content" /></p>
       </template>
     </template>
     <div v-if="slow" class="ai-slow-hint">
@@ -159,6 +171,10 @@ const chartHint = computed(() => {
 .ai-chart-area { padding: 4px 4px 0; }
 .ai-chart-hint { margin: 8px 0 0; font-size: 11px; color: var(--vscode-descriptionForeground, #888); }
 .ai-inline-text { margin: 2px 0; white-space: pre-wrap; word-break: break-word; }
+.ai-inline-heading { margin: 8px 0 4px; font-weight: 600; font-size: 1.05em; }
+.ai-inline-list { margin: 4px 0; padding-left: 20px; }
+.ai-inline-quote { margin: 4px 0; padding: 2px 8px; border-left: 3px solid var(--vscode-panel-border, #444); color: var(--vscode-descriptionForeground); }
+.ai-inline-hr { border: none; border-top: 1px solid var(--vscode-panel-border, #444); margin: 8px 0; }
 .ai-inline-code { margin: 2px 0; padding: 6px 8px; background: rgba(125, 125, 125, 0.12); border-radius: 4px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .ai-table-block { margin: 4px 0; }
 .ai-table-summary { margin: 2px 0 4px; font-weight: 600; font-size: 12px; color: var(--vscode-foreground, #ccc); }
