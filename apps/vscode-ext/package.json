@@ -1,7 +1,7 @@
 {
   "name": "devbelt-db-client",
   "displayName": "DevBelt DB Client",
-  "description": "DevBelt — developer toolkit for VS Code. Database client for MySQL, PostgreSQL and SQLite: query, edit data, design schemas, ER diagrams, import/export and SSH tunnels.",
+  "description": "DevBelt — database development inside VS Code. SQL for MySQL, PostgreSQL and SQLite, plus Redis, Elasticsearch, AI assistance, schema tools, SSH tunnels and end-to-end encrypted sync.",
   "version": "0.1.0",
   "publisher": "lang2hong",
   "license": "MIT",
@@ -18,8 +18,15 @@
     "sqlite",
     "database-client",
     "sql-client",
+    "database-gui",
     "query",
-    "er-diagram"
+    "schema",
+    "er-diagram",
+    "redis",
+    "elasticsearch",
+    "ai",
+    "ssh",
+    "sync"
   ],
   "galleryBanner": {
     "color": "#16324F",
