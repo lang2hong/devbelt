@@ -678,6 +678,8 @@ function viewCellDetail(): void {
 
 function onGridKeydown(event: KeyboardEvent): void {
   if (!((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c')) return;
+  const target = event.target as HTMLElement | null;
+  if (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable)) return;
   const selectedText = window.getSelection()?.toString();
   if (selectedText) return;
   event.preventDefault();
