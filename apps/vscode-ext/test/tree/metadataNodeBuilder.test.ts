@@ -19,6 +19,8 @@ vi.mock('vscode', () => ({
     }
   },
   ThemeColor: class {},
+  workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
+  env: { language: 'en' },
 }));
 
 const conn: any = { id: 'c1', database: 'test', dbType: 'MYSQL', host: 'h', name: 'n' };

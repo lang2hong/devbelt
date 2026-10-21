@@ -22,7 +22,6 @@ const TREE_COMMANDS = [
   'devbelt.openEvent',
   'devbelt.redis.keyBrowser',
   'devbelt.redis.loadMoreKeys',
-  'devbelt.redis.loadMoreFolderKeys',
   'devbelt.redis.loadAllKeys',
 ];
 

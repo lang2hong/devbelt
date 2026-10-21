@@ -1797,9 +1797,14 @@
           "group": "5_del"
         },
         {
+          "command": "devbelt.redis.loadMoreFolderKeys",
+          "when": "view == devbelt.explorer && (viewItem == redisKeyFolder.REDIS || viewItem == redisKeyFolder.REDIS.ro)",
+          "group": "1_view@1"
+        },
+        {
           "command": "devbelt.redis.loadAllFolderKeys",
           "when": "view == devbelt.explorer && (viewItem == redisKeyFolder.REDIS || viewItem == redisKeyFolder.REDIS.ro)",
-          "group": "1_view"
+          "group": "1_view@2"
         },
         {
           "command": "devbelt.redis.deleteByPattern",

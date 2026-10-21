@@ -530,25 +530,14 @@ export class RedisKeyTreeState {
       return out;
     }
     const full = this.redisFolderFull.get(this.redisFullFolderKey(conn.id, dbIndex, prefix));
-    const partKey = this.redisFolderPartKey(conn.id, dbIndex, prefix);
-    const partStarted = this.redisFolderCursors.has(partKey) || this.redisFolderClusterCursors.has(partKey);
-    // 文件夹首次展开自动补一页，避免每层都先显示「加载更多」；仍有剩余时保留唯一哨兵。
-    if (!full?.complete && !this.redisTreeDone(conn, dbIndex) && !this.redisFolderScanDone(conn, dbIndex, prefix) && !partStarted) {
-      const res = await this.loadMoreFolderKeys(parent, 1);
-      if (res.error) window.showErrorMessage(l10n('redis.tree.loadFailed'));
-    }
     // 仅完整快照优先；否则回退根扁平集（取消/错误不落快照，自然不会出现空文件夹视图）。
+    // 文件夹内不再挂「加载更多」哨兵；继续加载通过文件夹右键菜单显式触发。
     const keys = full?.complete ? full.keys : (this.redisKeys.get(this.redisRootKey(conn.id, dbIndex)) ?? []);
     const group = groupRedisKeyChildren(keys, prefix, sep);
-    const out = [
+    return [
       ...group.folders.map((f) => this.redisFolderNode(parent, f.name, f.prefix)),
       ...group.keys.map((k) => this.redisKeyNode(parent, k)),
     ];
-    // S5-2：根未扫完且本前缀未单独扫完时提供文件夹级增量入口（不触发全量）。
-    if (!full?.complete && !this.redisTreeDone(conn, dbIndex) && !this.redisFolderScanDone(conn, dbIndex, prefix)) {
-      out.push(this.redisFolderLoadMoreNode(parent, prefix, keys));
-    }
-    return out;
   }
 
   private redisFolderNode(parent: DbTreeNode, name: string, prefix: string): DbTreeNode {
@@ -587,21 +576,6 @@ export class RedisKeyTreeState {
   private redisLoadedCount(parent: DbTreeNode): number {
     if (!parent.conn || parent.redisDbIndex === undefined) return 0;
     return this.redisKeys.get(this.redisRootKey(parent.conn.id, parent.redisDbIndex))?.length ?? 0;
-  }
-
-  /** S5-2：文件夹级「加载更多」哨兵（按前缀独立游标；哨兵直接绑定 loadMoreFolderKeys）。 */
-  private redisFolderLoadMoreNode(parent: DbTreeNode, prefix: string, source: readonly string[]): DbTreeNode {
-    const conn = parent.conn!;
-    const dbIndex = parent.redisDbIndex!;
-    const n = new DbTreeNode(l10n('redis.tree.loadMore'), TreeItemCollapsibleState.None, NodeKind.RedisKeyLoadMore, conn, undefined, parent);
-    n.redisDbIndex = dbIndex;
-    n.redisKeyPrefix = prefix;
-    n.id = `${conn.id}:db${dbIndex}:fmore:${prefix}`;
-    const base = `${prefix}${conn.keySeparator || ':'}`;
-    const count = source.filter((k) => k.startsWith(base)).length;
-    n.description = l10n('redis.tree.loadedCount', { count: String(count) });
-    n.command = { command: 'devbelt.redis.loadMoreFolderKeys', title: l10n('redis.tree.loadMore') };
-    return n;
   }
 
   /** 软上限提示 + 「载入全部」入口（带确认/进度，命令侧处理）。 */

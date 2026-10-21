@@ -10,6 +10,22 @@ const emit = defineEmits<{ (e: 'refresh'): void }>();
 const query = ref('');
 const showRaw = ref(false);
 const copied = ref(false);
+const SECTION_KEYS: Record<string, string> = {
+  server: 'wv.redis.status.section.server',
+  clients: 'wv.redis.status.section.clients',
+  memory: 'wv.redis.status.section.memory',
+  persistence: 'wv.redis.status.section.persistence',
+  stats: 'wv.redis.status.section.stats',
+  replication: 'wv.redis.status.section.replication',
+  cpu: 'wv.redis.status.section.cpu',
+  commandstats: 'wv.redis.status.section.commandstats',
+  latencystats: 'wv.redis.status.section.latencystats',
+  errorstats: 'wv.redis.status.section.errorstats',
+  cluster: 'wv.redis.status.section.cluster',
+  keyspace: 'wv.redis.status.section.keyspace',
+  modules: 'wv.redis.status.section.modules',
+  keysizes: 'wv.redis.status.section.keysizes',
+};
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
 const sections = computed(() => parseRedisInfoSections(props.info));
@@ -39,6 +55,10 @@ const summary = computed<{ label: string; value: string }[]>(() => {
   return rows;
 });
 
+function sectionLabel(name: string): string {
+  const key = SECTION_KEYS[name.trim().toLowerCase()];
+  return key ? t(key) : name;
+}
 function formatUptime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '—';
   const d = Math.floor(seconds / 86400);
@@ -83,7 +103,7 @@ onUnmounted(() => {
       </div>
       <div v-if="!filteredSections.length" class="empty">{{ t('wv.redis.status.noMatch') }}</div>
       <details v-for="(s, i) in filteredSections" :key="`${s.name}-${i}`" class="section" :open="!!query || i < 3">
-        <summary>{{ s.name || t('wv.redis.status.general') }} <span class="section-count">{{ s.rows.length }}</span></summary>
+        <summary>{{ s.name ? sectionLabel(s.name) : t('wv.redis.status.general') }} <span class="section-count">{{ s.rows.length }}</span></summary>
         <table>
           <tbody>
             <tr v-for="([k, v], ri) in s.rows" :key="`${k}-${ri}`">

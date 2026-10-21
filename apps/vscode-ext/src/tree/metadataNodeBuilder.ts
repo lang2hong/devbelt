@@ -1,6 +1,7 @@
 import { TreeItemCollapsibleState } from 'vscode';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
+import { l10n } from '../i18n';
 
 /**
  * 元数据 → 树节点映射器。
@@ -68,7 +69,7 @@ export class MetadataNodeBuilder {
       node.id = this.idFor(parent, conn, database, 'tbl', t.name);
       if (schema) node.schema = schema;
       node.tooltip = formatTableTooltip(t);
-      node.command = { command: 'devbelt.previewTable', title: 'Preview' };
+      node.command = { command: 'devbelt.previewTable', title: l10n('tree.command.preview') };
       return node;
     });
   }
@@ -88,7 +89,7 @@ export class MetadataNodeBuilder {
       );
       node.id = this.idFor(parent, conn, database, 'view', v.name);
       if (schema) node.schema = schema;
-      node.command = { command: 'devbelt.previewView', title: 'Preview' };
+      node.command = { command: 'devbelt.previewView', title: l10n('tree.command.preview') };
       return node;
     });
   }
@@ -110,7 +111,7 @@ export class MetadataNodeBuilder {
       node.id = this.idFor(parent, conn, database, r.type === 'PROCEDURE' ? 'proc' : 'fn', r.name);
       if (schema) node.schema = schema;
       if (r.identityArgs !== undefined) node.routineArgs = r.identityArgs;
-      node.command = { command: 'devbelt.openRoutine', title: 'Open' };
+      node.command = { command: 'devbelt.openRoutine', title: l10n('tree.command.open') };
       return node;
     });
   }
@@ -130,7 +131,7 @@ export class MetadataNodeBuilder {
       );
       node.id = this.idFor(parent, conn, database, 'evt', e.name);
       if (schema) node.schema = schema;
-      node.command = { command: 'devbelt.openEvent', title: 'Open' };
+      node.command = { command: 'devbelt.openEvent', title: l10n('tree.command.open') };
       return node;
     });
   }

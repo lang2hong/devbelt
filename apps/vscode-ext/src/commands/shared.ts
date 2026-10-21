@@ -61,7 +61,6 @@ export const TREE_COMMANDS: ReadonlySet<string> = new Set([
   'devbelt.openEvent',
   'devbelt.redis.keyBrowser',
   'devbelt.redis.loadMoreKeys',
-  'devbelt.redis.loadMoreFolderKeys',
   'devbelt.redis.loadAllKeys',
 ]);
 
@@ -70,6 +69,11 @@ let selectedTreeNodeProvider: (() => DbTreeNode | undefined) | undefined;
 /** extension 在创建 TreeView 后注入；命令注册早于视图创建。 */
 export function setTreeSelectionProvider(provider: () => DbTreeNode | undefined): void {
   selectedTreeNodeProvider = provider;
+}
+
+/** 无参树命令的兜底节点（右键菜单/命令面板显式传参时不会使用）。 */
+export function getSelectedTreeNode(): DbTreeNode | undefined {
+  return selectedTreeNodeProvider?.();
 }
 
 /**

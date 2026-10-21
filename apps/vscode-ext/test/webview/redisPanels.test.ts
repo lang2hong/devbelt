@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { en, zh } from '../../src/i18n/catalog';
 import { buildSparklinePath, filterCommandLog, filterSlowlog, formatDurationMicros, isNearBottom, parseRedisInfoSections, pushCommandHistory, redisInfoValue } from '../../webview/src/components/redis/types';
 
 describe('pushCommandHistory（Console 命令历史）', () => {
@@ -96,5 +97,18 @@ describe('filterSlowlog / formatDurationMicros（SlowLog）', () => {
     expect(formatDurationMicros(1234)).toBe('1,234 µs (1.23 ms)');
     expect(formatDurationMicros(0)).toBe('0 µs (0.00 ms)');
     expect(formatDurationMicros(Number.NaN)).toBe('—');
+  });
+});
+describe('Redis 动态标签中英文完整性', () => {
+  const keys = [
+    'wv.redis.type.string', 'wv.redis.type.hash', 'wv.redis.type.list', 'wv.redis.type.set', 'wv.redis.type.zset', 'wv.redis.type.stream', 'wv.redis.type.none',
+    'wv.redis.status.section.server', 'wv.redis.status.section.clients', 'wv.redis.status.section.memory', 'wv.redis.status.section.persistence', 'wv.redis.status.section.keyspace',
+    'wv.redis.event.connect', 'wv.redis.event.ready', 'wv.redis.event.reconnecting', 'wv.redis.event.end', 'wv.redis.event.close', 'wv.redis.event.error',
+  ];
+  it('中英文 catalog 均有词条', () => {
+    for (const key of keys) {
+      expect(en[key], key).toBeTruthy();
+      expect(zh[key], key).toBeTruthy();
+    }
   });
 });

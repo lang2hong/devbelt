@@ -57,6 +57,9 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
     expect(menus.some((m) => m.command === 'devbelt.copyNodeName' && m.when?.includes('redisKey.REDIS'))).toBe(true);
     expect(viewCommands).toContain('devbelt.redis.loadMoreKeys');
     expect(viewCommands).toContain("manager, 'keyBrowser'");
+    // 树节点命令无 arguments：无参调用必须回退到当前选中节点。
+    expect(viewCommands).toContain('getSelectedTreeNode');
+    expect(viewCommands).toContain('node ?? getSelectedTreeNode()');
   });
 
   it('D* 键树：唯一 load more + 显式加载完整文件夹/载入全部（确认/进度/取消）', () => {
@@ -69,6 +72,7 @@ it('S5-3 树内只读键导航：键节点有打开菜单 + 懒加载注册点',
     expect(viewCommands).toContain('loadAllConfirm');
     // 菜单入口：文件夹「加载完整文件夹」、DB「载入全部」
     expect(menus.some((m) => m.command === 'devbelt.redis.loadAllFolderKeys' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
+    expect(menus.some((m) => m.command === 'devbelt.redis.loadMoreFolderKeys' && m.when?.includes('redisKeyFolder.REDIS'))).toBe(true);
     // 职责拆分：文件夹增量哨兵绑定独立命令；根层命令不再承担前缀分派。
     expect(viewCommands).toContain("registerCommand('devbelt.redis.loadMoreFolderKeys'");
     expect(viewCommands).toContain("registerCommand('devbelt.redis.loadAllFolderKeys'");

@@ -170,6 +170,7 @@ describe('树右键菜单 when 表达式', () => {
 
     const folder = new DbTreeNode('a', TreeItemCollapsibleState.Collapsed, NodeKind.RedisKeyFolder, ro);
     expect(viewItemMatcher(whenOf('devbelt.redis.deleteFolder', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(false);
+    expect(viewItemMatcher(whenOf('devbelt.redis.loadMoreFolderKeys', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(true);
     expect(viewItemMatcher(whenOf('devbelt.redis.loadAllFolderKeys', 'redisKeyFolder.REDIS'))!(folder.contextValue!)).toBe(true);
   });
 

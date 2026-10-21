@@ -25,6 +25,7 @@ import { configureBackupSchedule } from './backupWizard';
 import { confirmProductionWrite } from '../utils/sqlSafety';
 import { pgSchemaFor } from '../utils/sql';
 import { l10n } from '../i18n';
+import { getSelectedTreeNode } from './shared';
 
 /** H5：解码含替换符（非 UTF-8）的键名/前缀不可按文本操作。 */
 function isBinaryName(s?: string): boolean {
@@ -45,6 +46,9 @@ export interface ViewCommandDeps {
  */
 export function registerViewCommands(deps: ViewCommandDeps): void {
   const { context, manager, treeProvider, auth, backupScheduler, auditLogger } = deps;
+
+  /** 树节点命令不带 arguments 时回退到当前选中节点（右键菜单仍显式传参）。 */
+  const resolveNode = (node: any): any => node ?? getSelectedTreeNode();
 
   /** 在共享 session 上执行一段「SELECT 归一 + 命令」（互斥，cluster 跳过 SELECT）。 */
   const withRedis = async (
@@ -167,25 +171,32 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     // Server 状态面板
     vscode.commands.registerCommand('devbelt.es.cluster', (node: any) => {
-      if (node?.conn) ElasticsearchView.open(node.conn, manager, 'cluster');
+      const n = resolveNode(node);
+      if (n?.conn) ElasticsearchView.open(n.conn, manager, 'cluster');
     }),
     vscode.commands.registerCommand('devbelt.es.rest', (node: any) => {
-      if (node?.conn) ElasticsearchView.open(node.conn, manager, 'rest');
+      const n = resolveNode(node);
+      if (n?.conn) ElasticsearchView.open(n.conn, manager, 'rest');
     }),
     vscode.commands.registerCommand('devbelt.es.indices', (node: any) => {
-      if (node?.conn) ElasticsearchView.open(node.conn, manager, 'indices');
+      const n = resolveNode(node);
+      if (n?.conn) ElasticsearchView.open(n.conn, manager, 'indices');
     }),
     vscode.commands.registerCommand('devbelt.es.index', (node: any) => {
-      if (node?.conn && node?.esIndexName) ElasticsearchView.open(node.conn, manager, 'index', node.esIndexName);
+      const n = resolveNode(node);
+      if (n?.conn && n?.esIndexName) ElasticsearchView.open(n.conn, manager, 'index', n.esIndexName);
     }),
     vscode.commands.registerCommand('devbelt.es.documents', (node: any) => {
-      if (node?.conn) ElasticsearchView.open(node.conn, manager, 'documents', node.esIndexName);
+      const n = resolveNode(node);
+      if (n?.conn) ElasticsearchView.open(n.conn, manager, 'documents', n.esIndexName);
     }),
     vscode.commands.registerCommand('devbelt.es.dsl', (node: any) => {
-      if (node?.conn) ElasticsearchView.open(node.conn, manager, 'dsl', node.esIndexName);
+      const n = resolveNode(node);
+      if (n?.conn) ElasticsearchView.open(n.conn, manager, 'dsl', n.esIndexName);
     }),
     vscode.commands.registerCommand('devbelt.es.nodes', (node: any) => {
-      if (node?.conn) ElasticsearchView.open(node.conn, manager, 'nodes');
+      const n = resolveNode(node);
+      if (n?.conn) ElasticsearchView.open(n.conn, manager, 'nodes');
     }),
     vscode.commands.registerCommand('devbelt.serverStatus', (node: any) => {
       if (node?.conn) {
@@ -253,26 +264,33 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     // Redis 面板（P7 S2 / S5 拆分）：连接节点 → Status/Console/SlowLog/CommandLog；
     // DB 节点 → KeyBrowser（同连接复用实例，db 变化时切换）。
     vscode.commands.registerCommand('devbelt.redis.console', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'console', node.redisDbIndex);
+      const n = resolveNode(node);
+      if (n?.conn) RedisView.open(n.conn, manager, 'console', n.redisDbIndex);
     }),
     vscode.commands.registerCommand('devbelt.redis.keyBrowser', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'keyBrowser', node.redisDbIndex, node.redisKey);
+      const n = resolveNode(node);
+      if (n?.conn) RedisView.open(n.conn, manager, 'keyBrowser', n.redisDbIndex, n.redisKey);
     }),
     vscode.commands.registerCommand('devbelt.redis.serverStatus', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'serverStatus');
+      const n = resolveNode(node);
+      if (n?.conn) RedisView.open(n.conn, manager, 'serverStatus');
     }),
     vscode.commands.registerCommand('devbelt.redis.monitor', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'monitor');
+      const n = resolveNode(node);
+      if (n?.conn) RedisView.open(n.conn, manager, 'monitor');
     }),
     vscode.commands.registerCommand('devbelt.redis.slowlog', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'slowlog');
+      const n = resolveNode(node);
+      if (n?.conn) RedisView.open(n.conn, manager, 'slowlog');
     }),
     vscode.commands.registerCommand('devbelt.redis.commandLog', (node: any) => {
-      if (node?.conn) RedisView.open(node.conn, manager, 'commandLog');
+      const n = resolveNode(node);
+      if (n?.conn) RedisView.open(n.conn, manager, 'commandLog');
     }),
     // S5-3：键树根层/DB 续页哨兵（懒加载下一页 SCAN）。
     // 职责边界：本命令只负责根层；文件夹前缀增量走 loadMoreFolderKeys，全量走 loadAll*（见下）。
     vscode.commands.registerCommand('devbelt.redis.loadMoreKeys', async (node: any) => {
+      node = resolveNode(node);
       if (!node) return;
       const isSentinel = node.kind === 'redisKeyLoadMore';
       // 哨兵节点：就地 spinner；DB 节点右键：状态栏轻提示（勿覆盖库节点上的键数 description）。
@@ -290,14 +308,15 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
         vscode.window.showInformationMessage(l10n('redis.tree.loadedAll', { count: String(res.total) }));
       }
     }),
-    // S5-2：文件夹增量续页（每前缀独立游标；哨兵节点直接绑定本命令）。
+    // S5-2：文件夹增量续页（每前缀独立游标；由文件夹右键菜单显式触发，不再在树内挂哨兵）。
     vscode.commands.registerCommand('devbelt.redis.loadMoreFolderKeys', async (node: any) => {
-      if (!node?.redisKeyPrefix) return;
-      node.iconPath = new vscode.ThemeIcon('sync~spin');
-      node.description = l10n('redis.tree.loading');
-      treeProvider.refreshNode(node);
-      const res = await treeProvider.loadMoreFolderKeys(node);
-      treeProvider.refreshRedisDbNode(node);
+      const n = resolveNode(node);
+      if (!n?.redisKeyPrefix) return;
+      n.iconPath = new vscode.ThemeIcon('sync~spin');
+      n.description = l10n('redis.tree.loading');
+      treeProvider.refreshNode(n);
+      const res = await treeProvider.loadMoreFolderKeys(n);
+      treeProvider.refreshRedisDbNode(n);
       if (res.error) vscode.window.showErrorMessage(l10n('redis.tree.loadFailed'));
       else if (res.capped) {
         vscode.window.showInformationMessage(l10n('redis.tree.softCapReached', { max: String(REDIS_TREE_HARD_CAP) }));
@@ -307,9 +326,10 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     // D*：全量「载入完整文件夹」（按前缀独立 SCAN + 二次确认 + 进度/取消）。
     // 用户可见入口：redisKeyFolder 右键（命令 0.1.0 未发布，无旧 ID 快捷键包袱）。
-    vscode.commands.registerCommand('devbelt.redis.loadAllFolderKeys', loadFullFolder),
+    vscode.commands.registerCommand('devbelt.redis.loadAllFolderKeys', (node: any) => loadFullFolder(resolveNode(node))),
     // D*：根层「载入全部键」（modal 二次确认 + 进度 + 取消 + 硬上限）。
     vscode.commands.registerCommand('devbelt.redis.loadAllKeys', async (node: any) => {
+      node = resolveNode(node);
       if (!node?.conn) return;
       const pick = await vscode.window.showWarningMessage(
         l10n('redis.tree.loadAllConfirm', { max: String(REDIS_TREE_HARD_CAP) }),

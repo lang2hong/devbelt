@@ -64,6 +64,20 @@ interface EditState { kind: 'hash' | 'list' | 'zset'; id: string; draft: string;
 const editing = ref<EditState | null>(null);
 
 const key = computed(() => props.info?.key ?? '');
+const TYPE_KEYS: Record<string, string> = {
+  string: 'wv.redis.type.string',
+  hash: 'wv.redis.type.hash',
+  list: 'wv.redis.type.list',
+  set: 'wv.redis.type.set',
+  zset: 'wv.redis.type.zset',
+  stream: 'wv.redis.type.stream',
+  none: 'wv.redis.type.none',
+};
+const typeLabel = computed(() => {
+  const raw = props.info?.keyType ?? '';
+  const key = TYPE_KEYS[raw];
+  return key ? t(key) : raw;
+});
 const isBinaryString = computed(() => (props.info?.data?.kind === 'string' ? props.info.data.binary : false));
 /** H5：键名有损 → 整个值只读；单个字段/成员/元素有损 → 该项只读。 */
 const ro = computed(() => props.readOnly || !!props.info?.keyBinary);
@@ -376,7 +390,7 @@ function copyValue(text: string): void {
     <template v-else>
       <div class="key-line">
         <span class="key-name" :title="key">{{ key }}</span>
-        <span class="type">{{ info.keyType }}</span>
+        <span class="type">{{ typeLabel }}</span>
         <span v-if="info.size !== null" class="key-meta">{{ t('wv.redis.value.size', { size: info.size }) }}</span>
         <span v-if="info.keyBinary" class="key-meta warn">{{ t('wv.redis.value.binaryKey') }}</span>
         <span v-if="truncated" class="key-meta warn">{{ t('wv.redis.value.previewOnly') }}</span>

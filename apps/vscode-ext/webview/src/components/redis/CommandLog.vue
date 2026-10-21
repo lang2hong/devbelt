@@ -11,6 +11,18 @@ const props = defineProps<{
   events: ConnectionEvent[];
 }>();
 const { t } = useI18n();
+const EVENT_KEYS: Record<string, string> = {
+  connect: 'wv.redis.event.connect',
+  ready: 'wv.redis.event.ready',
+  reconnecting: 'wv.redis.event.reconnecting',
+  end: 'wv.redis.event.end',
+  close: 'wv.redis.event.close',
+  error: 'wv.redis.event.error',
+};
+function eventLabel(event: string): string {
+  const key = EVENT_KEYS[event];
+  return key ? t(key) : event;
+}
 
 const query = ref('');
 const onlyFailed = ref(false);
@@ -96,7 +108,7 @@ onMounted(() => {
         <strong>{{ t('wv.redis.events.title') }}</strong>
         <div v-if="!props.events.length" class="empty">{{ t('wv.redis.events.empty') }}</div>
         <div v-for="(e, i) in props.events" :key="'e' + i" class="ev">
-          {{ new Date(e.at).toLocaleTimeString() }} · {{ e.event }}{{ e.detail ? ' ' + e.detail : '' }}
+          {{ new Date(e.at).toLocaleTimeString() }} · {{ eventLabel(e.event) }}{{ e.detail ? ' ' + e.detail : '' }}
         </div>
       </div>
       <div v-if="!shownEntries.length" class="empty">{{ t('wv.redis.commandLog.empty') }}</div>

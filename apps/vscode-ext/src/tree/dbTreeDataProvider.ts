@@ -538,7 +538,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
             undefined,
             q.id,
           );
-          n.command = { command: 'devbelt.openQuery', title: 'Open' };
+          n.command = { command: 'devbelt.openQuery', title: l10n('tree.command.open') };
           n.id = `${conn.id}:sqldb:${db}:q:${q.id}`;
           return n;
         },
@@ -594,7 +594,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       node.schema = schema;
       node.id = `${element.id}:trg:${t.name}`;
       node.description = [t.timing, t.event].filter(Boolean).join(' ');
-      node.command = { command: 'devbelt.viewTrigger', title: 'View' };
+      node.command = { command: 'devbelt.viewTrigger', title: l10n('tree.command.view') };
       return node;
     });
   }
@@ -628,7 +628,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
         node.refColumn = f.refColumn;
         node.refSchema = f.refSchema;
         node.constraintName = f.constraintName;
-        node.command = { command: 'devbelt.jumpToRefTable', title: 'Open' };
+        node.command = { command: 'devbelt.jumpToRefTable', title: l10n('tree.command.open') };
         return node;
       });
   }
@@ -652,7 +652,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
           undefined,
           q.id,
         );
-        n.command = { command: 'devbelt.openQuery', title: 'Open' };
+        n.command = { command: 'devbelt.openQuery', title: l10n('tree.command.open') };
         n.id = `${conn.id}:sqldb:${db}:q:${q.id}`;
         return n;
       },
@@ -781,7 +781,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       // 命令侧从当前树选中节点解析连接。
       node.command = {
         command: 'devbelt.openConnection',
-        title: 'Open',
+        title: l10n('tree.command.open'),
       };
       node.tooltip = this.connectionTooltip(conn, pathCheck);
       // 路径异常优先于类型图标（连接不可用是更重要的信号）。
