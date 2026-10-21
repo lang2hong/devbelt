@@ -82,8 +82,27 @@ const customVendors = ref<CustomVendor[]>(props.customVendors.map((v) => ({ ...v
 const customModels = ref<Record<string, string[]>>(JSON.parse(JSON.stringify(props.customModels ?? {})));
 /** 表单已编辑 → 宿主快照刷新（保存回显/同步到达）不覆盖输入。 */
 let touched = false;
-const mark = () => { touched = true; };
-watch([mode, vendorId, baseUrl, model, apiKey, clearKey, prefs, vendorName], mark);
+let applyingSnapshot = false;
+const mark = () => { if (!applyingSnapshot) touched = true; };
+watch([mode, vendorId, baseUrl, model, apiKey, clearKey, vendorName], mark, { flush: 'sync' });
+watch(prefs, mark, { deep: true, flush: 'sync' });
+/** 弹层可能在 modelAccess 快照到达前打开；未编辑时接收异步快照。 */
+watch(
+  () => [props.mode, props.vendorId, props.baseUrl, props.model, props.customVendors, props.customModels, props.prefs] as const,
+  () => {
+    if (touched || applyingSnapshot) return;
+    applyingSnapshot = true;
+    mode.value = props.mode;
+    vendorId.value = props.vendorId;
+    baseUrl.value = props.baseUrl;
+    model.value = props.model;
+    customVendors.value = props.customVendors.map((v) => ({ ...v, models: [...v.models] }));
+    customModels.value = JSON.parse(JSON.stringify(props.customModels ?? {}));
+    prefs.value = { ...props.prefs };
+    applyingSnapshot = false;
+  },
+  { deep: true },
+);
 
 const NEW_VENDOR = '__new__';
 const CUSTOM_MODEL = '__custom__';

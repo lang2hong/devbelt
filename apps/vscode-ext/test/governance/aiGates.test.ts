@@ -30,6 +30,21 @@ interface Pkg {
 }
 
 describe('AI 机械门禁', () => {
+  it('连接打开/关闭会通知 AI Chat 刷新上下文', () => {
+    const view = read('result/aiChatView.ts');
+    const ext = read('extension.ts');
+    const conn = read('commands/connection.ts');
+    expect(view).toContain('static notifyConnectionState');
+    expect(ext).toContain('AiChatView.notifyConnectionState(connId)');
+    expect(conn).toContain('AiChatView.notifyConnectionState(conn.id)');
+  });
+
+  it('模型接入弹层在未编辑时接收异步快照（修复重开显示 server-proxy）', () => {
+    const dialog = readFileSync(join(__dirname, '../../webview/src/components/ai/ModelAccessDialog.vue'), 'utf8');
+    expect(dialog).toContain('applyingSnapshot');
+    expect(dialog).toContain('props.mode');
+    expect(dialog).toContain('if (touched || applyingSnapshot) return;');
+  });
   it('apiKey 只落 SecretStorage：AiKeyStore 无 Memento/globalState 读写调用（注释提及不算）', () => {
     const text = read('ai/aiKeyStore.ts');
     expect(text).not.toMatch(/\bmemento\.(get|update)|\bglobalState\.(get|update)/i);

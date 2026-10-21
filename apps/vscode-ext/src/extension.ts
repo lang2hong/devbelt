@@ -114,6 +114,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   manager.onConnectionClosed = (connId) => {
     unmappedReporters.delete(connId);
     clearEsRequestLog(connId); // M2：连接关闭后回收 ES 请求日志缓冲。
+    AiChatView.notifyConnectionState(connId);
   };
   const treeProvider = new DbTreeDataProvider(store, manager, overrideStore, context.extensionUri);
   // 连接节点装饰（环境/自定义色徽标）：图标已改用数据库类型 logo，颜色信号改由此承载。

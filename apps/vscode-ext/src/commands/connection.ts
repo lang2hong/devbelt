@@ -14,6 +14,7 @@ import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { RedisConnectionSession } from '../connection/connectionSession';
 import { esAuthMissingMessage, esAuthOf } from '../connection/esAuth';
+import { AiChatView } from '../result/aiChatView';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
@@ -148,6 +149,7 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
     try {
       const session = await manager.connect(conn);
       manager.markExplicit(conn.id);
+      AiChatView.notifyConnectionState(conn.id);
       const ver = session.kind === 'redis'
         ? await redisServerVersion(session)
         : session.kind === 'elasticsearch'

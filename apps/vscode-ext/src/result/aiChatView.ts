@@ -140,6 +140,12 @@ export class AiChatView extends BaseWebView {
     return AiChatView.current;
   }
 
+  /** 连接打开/关闭后通知面板重算 context（仅当前选中的连接）。 */
+  static notifyConnectionState(connId: string): void {
+    const view = AiChatView.current;
+    if (view?.selectedConnId === connId) void view.pushContext();
+  }
+
   /** 关闭面板（测试隔离/扩展停用）。 */
   static closeAll(): void {
     AiChatView.current?.dispose();
