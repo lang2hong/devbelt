@@ -10,6 +10,10 @@ import {
   redisXGroupCreate,
   redisXRange,
   parseXPending,
+  parseXPendingEntries,
+  redisXAck,
+  redisXClaim,
+  redisXPendingEntries,
   isValidStreamId,
   compareStreamId,
   type RedisCommandSource,
@@ -96,6 +100,32 @@ describe('redisOps Stream XPENDING / ID 校验（S4）', () => {
     });
     expect(parseXPending(null)).toEqual({ count: 0, minId: '', maxId: '', consumers: [] });
     expect(parseXPending([0, null, null, []])).toEqual({ count: 0, minId: '', maxId: '', consumers: [] });
+  });
+
+  it('parseXPendingEntries 明细归一化；空回复安全', () => {
+    expect(parseXPendingEntries([['1-0', 'c1', 1200, 3], ['2-0', 'c2', 0, 1]])).toEqual([
+      { id: '1-0', consumer: 'c1', idleMs: 1200, deliveryCount: 3 },
+      { id: '2-0', consumer: 'c2', idleMs: 0, deliveryCount: 1 },
+    ]);
+    expect(parseXPendingEntries(null)).toEqual([]);
+    expect(parseXPendingEntries([['bad']])).toEqual([]);
+  });
+
+  it('redisXPendingEntries / XACK / XCLAIM 参数', async () => {
+    const src = new FakeSrc();
+    src.reply = [['1-0', 'c1', 10, 1]];
+    expect(await redisXPendingEntries(src, 's', 'g', 100)).toEqual([{ id: '1-0', consumer: 'c1', idleMs: 10, deliveryCount: 1 }]);
+    expect(src.calls[0]).toEqual({ name: 'XPENDING', args: ['s', 'g', '-', '+', 100] });
+
+    src.reply = 2;
+    expect(await redisXAck(src, 's', 'g', ['1-0', '2-0'])).toBe(2);
+    expect(src.calls[1]).toEqual({ name: 'XACK', args: ['s', 'g', '1-0', '2-0'] });
+
+    src.reply = ['1-0', '2-0'];
+    expect(await redisXClaim(src, 's', 'g', 'c2', ['1-0', '2-0'])).toEqual(['1-0', '2-0']);
+    expect(src.calls[2]).toEqual({ name: 'XCLAIM', args: ['s', 'g', 'c2', 0, '1-0', '2-0', 'JUSTID'] });
+    expect(await redisXAck(src, 's', 'g', [])).toBe(0);
+    expect(await redisXClaim(src, 's', 'g', 'c2', [])).toEqual([]);
   });
 
   it('isValidStreamId：* 或 <ms>[-<seq>]', () => {

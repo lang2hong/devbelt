@@ -73,6 +73,8 @@ function streamOps(): Record<string, (...a: any[]) => void> {
     groupDestroy: (key, group) => postOp({ type: 'streamGroupDestroy', key, group }),
     groupDelConsumer: (key, group, consumer) => postOp({ type: 'streamGroupDelConsumer', key, group, consumer }),
     groupDetail: (key, group) => post({ type: 'streamGroupDetail', key, group }),
+    ack: (key, group, ids) => post({ type: 'streamAck', key, group, ids }),
+    claim: (key, group, consumer, ids) => post({ type: 'streamClaim', key, group, consumer, ids }),
     loadMore: (key, start) => post({ type: 'streamRange', key, start }),
   };
 }
@@ -210,6 +212,8 @@ onUnmounted(() => { off?.(); window.removeEventListener('keydown', onKeydown); }
         @group-destroy="streamOps().groupDestroy"
         @group-del-consumer="streamOps().groupDelConsumer"
         @group-detail="streamOps().groupDetail"
+        @ack="streamOps().ack"
+        @claim="streamOps().claim"
         @load-more="streamOps().loadMore"
         @refresh="value && post({ type: 'selectKey', key: value.key })"
       />

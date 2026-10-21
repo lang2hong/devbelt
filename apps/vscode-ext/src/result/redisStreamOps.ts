@@ -7,11 +7,14 @@
 import {
   redisXRevRange, redisXAdd, redisXDel, redisXTrimMaxlen,
   redisXInfoConsumers, redisXGroupCreate, redisXGroupDestroy, redisXGroupDelConsumer,
-  redisXPending, isValidStreamId, compareStreamId, redisXRange,
+  redisXPending, redisXPendingEntries, redisXAck, redisXClaim,
+  isValidStreamId, compareStreamId, redisXRange,
 } from '@devbelt/db-core';
 import { l10n } from '../i18n';
 import type { RedisOpsHost } from './redisViewSupport';
 import { STREAM_PAGE, pairsOf, strs } from './redisViewSupport';
+
+const PENDING_PAGE = 100;
 
 export class RedisStreamOps {
   constructor(private readonly host: RedisOpsHost) {}
@@ -154,14 +157,66 @@ export class RedisStreamOps {
     await this.host.enqueue(async () => {
       try {
         const session = await this.host.sessionForDb();
-        const [consumers, pending] = await Promise.all([
-          redisXInfoConsumers(session.client, key, group),
-          redisXPending(session.client, key, group),
-        ]);
-        this.host.post({ type: 'streamGroupDetail', key, group, consumers, pending });
+        await this.postGroupDetail(session.client, key, group);
       } catch (err) {
         this.host.post({ type: 'error', message: (err as Error).message });
       }
+    });
+  }
+
+  async streamAckOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    const ids = strs(msg.ids);
+    if (!key || !group || !ids.length) return;
+    await this.host.enqueue(async () => {
+      try {
+        const session = await this.host.sessionForDb();
+        const started = Date.now();
+        const acked = await redisXAck(session.client, key, group, ids);
+        this.host.audit('XACK', `${key} ${group}`, Date.now() - started);
+        this.host.post({ type: 'keyAction', action: 'XACK', ok: acked > 0, error: acked > 0 ? null : l10n('cmd.redis.pendingNoMatch') });
+        await this.postGroupDetail(session.client, key, group);
+      } catch (err) {
+        this.host.post({ type: 'keyAction', action: 'XACK', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  async streamClaimOp(msg: any): Promise<void> {
+    const key = String(msg.key ?? '');
+    const group = String(msg.group ?? '');
+    const consumer = String(msg.consumer ?? '').trim();
+    const ids = strs(msg.ids);
+    if (!key || !group || !consumer || !ids.length) return;
+    await this.host.enqueue(async () => {
+      try {
+        const session = await this.host.sessionForDb();
+        const started = Date.now();
+        await redisXClaim(session.client, key, group, consumer, ids);
+        this.host.audit('XCLAIM', `${key} ${group} ${consumer}`, Date.now() - started);
+        this.host.post({ type: 'keyAction', action: 'XCLAIM', ok: true, error: null });
+        await this.postGroupDetail(session.client, key, group);
+      } catch (err) {
+        this.host.post({ type: 'keyAction', action: 'XCLAIM', ok: false, error: (err as Error).message });
+      }
+    });
+  }
+
+  private async postGroupDetail(client: any, key: string, group: string): Promise<void> {
+    const [consumers, pending, pendingEntries] = await Promise.all([
+      redisXInfoConsumers(client, key, group),
+      redisXPending(client, key, group),
+      redisXPendingEntries(client, key, group, PENDING_PAGE),
+    ]);
+    this.host.post({
+      type: 'streamGroupDetail',
+      key,
+      group,
+      consumers,
+      pending,
+      pendingEntries,
+      pendingTruncated: pending.count > pendingEntries.length,
     });
   }
 

@@ -525,6 +525,53 @@ export async function redisXPending(src: RedisCommandSource, key: string, group:
   return parseXPending(await src.sendCommand('XPENDING', [key, group]));
 }
 
+export interface RedisPendingEntry {
+  id: string;
+  consumer: string;
+  idleMs: number;
+  deliveryCount: number;
+}
+
+/** XPENDING 明细：`[[id, consumer, idle, deliveryCount], …]`。 */
+export function parseXPendingEntries(reply: unknown): RedisPendingEntry[] {
+  if (!Array.isArray(reply)) return [];
+  return reply
+    .filter((e): e is unknown[] => Array.isArray(e) && e.length >= 4)
+    .map((e) => ({
+      id: asString(e[0]),
+      consumer: asString(e[1]),
+      idleMs: asNumber(e[2]),
+      deliveryCount: asNumber(e[3]),
+    }));
+}
+
+export async function redisXPendingEntries(
+  src: RedisCommandSource,
+  key: string,
+  group: string,
+  count = 100,
+  start = '-',
+  end = '+',
+  consumer?: string,
+): Promise<RedisPendingEntry[]> {
+  const args: (string | number)[] = [key, group, start, end, count];
+  if (consumer) args.push(consumer);
+  return parseXPendingEntries(await src.sendCommand('XPENDING', args));
+}
+
+/** XACK：确认 pending 条目；返回实际确认数量。 */
+export async function redisXAck(src: RedisCommandSource, key: string, group: string, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  return asNumber(await src.sendCommand('XACK', [key, group, ...ids]));
+}
+
+/** XCLAIM JUSTID：把 selected pending 条目转交给目标 consumer（不自动 ack）。 */
+export async function redisXClaim(src: RedisCommandSource, key: string, group: string, consumer: string, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const reply = await src.sendCommand('XCLAIM', [key, group, consumer, 0, ...ids, 'JUSTID']);
+  return Array.isArray(reply) ? reply.map(asString) : [];
+}
+
 /** 自填 XADD ID 合法性：`*` 或 `<ms>[-<seq>]`（纯数字）。 */
 export function isValidStreamId(id: string): boolean {
   return id === '*' || /^\d+(-\d+)?$/.test(id);

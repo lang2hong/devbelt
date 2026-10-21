@@ -715,6 +715,40 @@ describe('RedisView S4 Stream 处理器', () => {
     expect(v.data.groups.length).toBe(1);
   });
 
+  it('groupDetail 带 pending 明细；ack/claim 后重新拉取详情', async () => {
+    const { view, sent } = makeView(async (n, a) => {
+      if (n === 'XPENDING') {
+        return a.length === 2
+          ? [1, '1-0', '1-0', [['c1', '1']]]
+          : [['1-0', 'c1', 1200, 3]];
+      }
+      if (n === 'XACK') return 1;
+      if (n === 'XCLAIM') return ['1-0'];
+      if (n === 'XINFO') return [['name', 'c1', 'pending', '1']];
+      if (n === 'XLEN') return 1;
+      if (n === 'TYPE') return 'stream';
+      if (n === 'TTL') return -1;
+      if (n === 'MEMORY') return 128;
+      if (n === 'XRANGE') return [['1-0', ['f', 'v']]];
+      return 'OK';
+    }, 0);
+    await mount(view);
+    sent.length = 0;
+    await view.handleMessage({ type: 'streamGroupDetail', key: 's', group: 'g' });
+    const detail = posts(view).find((m) => m.type === 'streamGroupDetail');
+    expect(detail.pendingEntries).toEqual([{ id: '1-0', consumer: 'c1', idleMs: 1200, deliveryCount: 3 }]);
+    expect(detail.pendingTruncated).toBe(false);
+
+    await view.handleMessage({ type: 'streamAck', key: 's', group: 'g', ids: ['1-0'] });
+    expect(sent.some(([n]) => n === 'XACK')).toBe(true);
+    expect(posts(view).filter((m) => m.type === 'streamGroupDetail').length).toBe(2);
+
+    await view.handleMessage({ type: 'streamClaim', key: 's', group: 'g', consumer: 'c2', ids: ['1-0'] });
+    const claim = sent.find(([n]) => n === 'XCLAIM');
+    expect(claim?.[1]).toEqual(['s', 'g', 'c2', 0, '1-0', 'JUSTID']);
+    expect(posts(view).filter((m) => m.type === 'streamGroupDetail').length).toBe(3);
+  });
+
   it('streamAdd：非法 ID 拒绝且不发包', async () => {
     const { view, sent } = makeView(handler, 0);
     await mount(view);

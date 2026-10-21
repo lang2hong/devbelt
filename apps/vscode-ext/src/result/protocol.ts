@@ -227,7 +227,7 @@ export type RedisDownMessage =
   | { type: 'confirmOpRequired'; kind: string; detail: string }
   | { type: 'commandLog'; entry: RedisCommandLogEntry }
   | { type: 'connectionEvent'; event: string; detail: string | null; at: number }
-  | { type: 'streamGroupDetail'; key: string; group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] } }
+  | { type: 'streamGroupDetail'; key: string; group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] }; pendingEntries: RedisPendingEntry[]; pendingTruncated: boolean }
   | { type: 'streamRangeResult'; key: string; entries: RedisStreamEntry[]; done: boolean }
   | { type: 'commandResult'; id: string; command: string; ok: boolean; result: string; costMs: number; error: string | null }
   | { type: 'confirmRequired'; id: string; command: string }
@@ -253,6 +253,14 @@ export interface RedisStreamEntry {
   fields: [string, string][];
   /** Stage B：本页存在二进制 field/value 时的并行 base64（与 fields 同序同长）。 */
   fieldBytes?: [string, string][];
+}
+
+/** Stream 消费组 pending 条目（XPENDING 明细）。 */
+export interface RedisPendingEntry {
+  id: string;
+  consumer: string;
+  idleMs: number;
+  deliveryCount: number;
 }
 
 /** 监控面板单次采样（INFO 解析结果）。 */
@@ -326,6 +334,8 @@ export type RedisUpMessage =
   | { type: 'streamGroupDestroy'; key: string; group: string; confirmed?: boolean }
   | { type: 'streamGroupDelConsumer'; key: string; group: string; consumer: string; confirmed?: boolean }
   | { type: 'streamGroupDetail'; key: string; group: string }
+  | { type: 'streamAck'; key: string; group: string; ids: string[] }
+  | { type: 'streamClaim'; key: string; group: string; consumer: string; ids: string[] }
   | { type: 'streamRange'; key: string; start: string };
 
 // ────────────────────────── P8：Elasticsearch 协议（S2） ──────────────────────────

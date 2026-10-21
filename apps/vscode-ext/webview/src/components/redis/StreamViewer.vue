@@ -5,9 +5,11 @@ import { base64ToBytes, bytesToHex } from './bytes';
 import type { ValueInfo } from './types';
 
 const { t } = useI18n();
+interface PendingEntry { id: string; consumer: string; idleMs: number; deliveryCount: number }
+
 const props = defineProps<{
   info: ValueInfo;
-  detail: { group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] } } | null;
+  detail: { group: string; consumers: Record<string, string>[]; pending: { count: number; minId: string; maxId: string; consumers: [string, string][] }; pendingEntries?: PendingEntry[]; pendingTruncated?: boolean } | null;
   done: boolean;
   readOnly: boolean;
 }>();
@@ -19,6 +21,8 @@ const emit = defineEmits<{
   (e: 'groupDestroy', key: string, group: string): void;
   (e: 'groupDelConsumer', key: string, group: string, consumer: string): void;
   (e: 'groupDetail', key: string, group: string): void;
+  (e: 'ack', key: string, group: string, ids: string[]): void;
+  (e: 'claim', key: string, group: string, consumer: string, ids: string[]): void;
   (e: 'loadMore', key: string, start: string): void;
   (e: 'refresh'): void;
 }>();
@@ -27,6 +31,8 @@ const data = computed(() => (props.info.data?.kind === 'stream' ? props.info.dat
 const key = computed(() => props.info.key);
 const entries = computed(() => data.value?.entries ?? []);
 const selected = ref<Set<string>>(new Set());
+const pendingSelected = ref<Set<string>>(new Set());
+const claimConsumer = ref('');
 const expandedId = ref<string | null>(null);
 const copiedId = ref<string | null>(null);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -37,6 +43,35 @@ const newGroup = ref('');
 const newGroupId = ref('$');
 
 const allSelected = computed(() => entries.value.length > 0 && entries.value.every((e) => selected.value.has(e.id)));
+const pendingEntries = computed(() => props.detail?.pendingEntries ?? []);
+const allPendingSelected = computed(() => pendingEntries.value.length > 0 && pendingEntries.value.every((e) => pendingSelected.value.has(e.id)));
+const canClaim = computed(() => !props.readOnly && !!claimConsumer.value.trim() && pendingSelected.value.size > 0);
+
+function togglePending(id: string): void {
+  const s = new Set(pendingSelected.value);
+  if (s.has(id)) s.delete(id); else s.add(id);
+  pendingSelected.value = s;
+}
+function toggleAllPending(event: Event): void {
+  pendingSelected.value = (event.target as HTMLInputElement).checked
+    ? new Set(pendingEntries.value.map((e) => e.id))
+    : new Set();
+}
+function ackSelected(): void {
+  if (!props.detail || !pendingSelected.value.size) return;
+  emit('ack', key.value, props.detail.group, [...pendingSelected.value]);
+  pendingSelected.value = new Set();
+}
+function claimSelected(): void {
+  if (!props.detail || !canClaim.value) return;
+  emit('claim', key.value, props.detail.group, claimConsumer.value.trim(), [...pendingSelected.value]);
+  pendingSelected.value = new Set();
+}
+function idleText(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
 
 function addField(): void { fields.value = [...fields.value, ['', '']]; }
 function removeField(index: number): void {
@@ -114,7 +149,13 @@ async function copyEntry(e: { id: string; fields: [string, string][]; fieldBytes
 
 watch(() => props.info.key, () => {
   selected.value = new Set();
+  pendingSelected.value = new Set();
   expandedId.value = null;
+  claimConsumer.value = '';
+});
+watch(() => props.detail?.group, () => {
+  pendingSelected.value = new Set();
+  claimConsumer.value = '';
 });
 onUnmounted(() => {
   if (copiedTimer) clearTimeout(copiedTimer);
@@ -227,6 +268,42 @@ onUnmounted(() => {
           <td><button class="btn tiny danger" :disabled="readOnly" @click="emit('groupDelConsumer', key, detail!.group, c.name)">{{ t('wv.redis.stream.delConsumer') }}</button></td>
         </tr>
       </table>
+
+      <div class="pending-head">
+        <h5>{{ t('wv.redis.stream.pendingEntries') }}</h5>
+        <span class="meta">{{ t('wv.redis.stream.pendingLoaded', { shown: pendingEntries.length, total: detail.pending.count }) }}</span>
+      </div>
+      <p v-if="detail.pendingTruncated" class="warn">{{ t('wv.redis.stream.pendingTruncated') }}</p>
+      <div v-if="pendingEntries.length" class="pending-actions">
+        <input v-model="claimConsumer" :placeholder="t('wv.redis.stream.claimConsumer')" />
+        <button class="btn" :disabled="readOnly || !pendingSelected.size" @click="ackSelected">
+          {{ t('wv.redis.stream.ackSelected', { count: pendingSelected.size }) }}
+        </button>
+        <button class="btn" :disabled="!canClaim" @click="claimSelected">
+          {{ t('wv.redis.stream.claimSelected', { count: pendingSelected.size }) }}
+        </button>
+      </div>
+      <div v-if="!pendingEntries.length" class="empty">{{ t('wv.redis.stream.pendingEmpty') }}</div>
+      <table v-else class="pending">
+        <thead>
+          <tr>
+            <th class="check"><input type="checkbox" :checked="allPendingSelected" :aria-label="t('wv.redis.stream.selectAllPending')" @change="toggleAllPending" /></th>
+            <th>{{ t('wv.redis.stream.id') }}</th>
+            <th>{{ t('wv.redis.stream.consumer') }}</th>
+            <th>{{ t('wv.redis.stream.idle') }}</th>
+            <th>{{ t('wv.redis.stream.deliveries') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in pendingEntries" :key="p.id">
+            <td><input type="checkbox" :checked="pendingSelected.has(p.id)" @change="togglePending(p.id)" /></td>
+            <td class="mono">{{ p.id }}</td>
+            <td class="mono">{{ p.consumer }}</td>
+            <td>{{ idleText(p.idleMs) }}</td>
+            <td>{{ p.deliveryCount }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </template>
@@ -262,6 +339,10 @@ th.check { width: 28px; }
 .mono { font-family: var(--vscode-editor-font-family, monospace); word-break: break-all; }
 .empty { color: var(--vscode-descriptionForeground); padding: 8px; }
 .detail { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding-top: 6px; }
+.pending-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-top: 8px; }
+.pending-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+.pending-actions input { flex: 1; min-width: 140px; }
+.warn { color: var(--vscode-editorWarning-foreground, #d29922); font-size: 11px; margin: 2px 0; }
 h4, h5 { margin: 6px 0 2px; }
 .btn { padding: 2px 8px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 .btn.tiny { padding: 1px 5px; }
