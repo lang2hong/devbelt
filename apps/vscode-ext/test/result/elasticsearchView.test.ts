@@ -483,6 +483,42 @@ describe('ElasticsearchView S4', () => {
     expect(posts(view).at(-1).aggregations).toEqual({ by_type: { buckets: [] } });
   });
 
+  it('esRunDsl：未给 sort 时保留相关性排序并返回 searchAfter 游标', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    let seen: any;
+    es.request.mockImplementation(async (_m: string, _p: string, body: any) => {
+      seen = body;
+      return ok(200, { hits: { total: { value: 2 }, hits: [{ _id: '1', _source: { a: 1 }, sort: ['doc-1'] }] } });
+    });
+    await view.handleMessage({ type: 'esRunDsl', id: 'x1', index: 'i', body: '{"query":{"match_all":{}}}' });
+    expect(seen.sort).toEqual(['_score', '_doc']);
+    expect(posts(view).at(-1)).toMatchObject({ type: 'esDslResult', id: 'x1', searchAfter: ['doc-1'] });
+
+    es.request.mockImplementation(async () => ok(200, { hits: { total: { value: 0 }, hits: [] } }));
+    await view.handleMessage({ type: 'esRunDsl', id: 'x2', index: 'i', body: '{"query":{"match_all":{}}}' });
+    expect(posts(view).at(-1).searchAfter).toBeNull();
+  });
+
+  it('esRunDsl：续页覆盖 search_after、移除 from 并保留自定义 sort', async () => {
+    const { view, es } = makeView();
+    await mount(view);
+    let seen: any;
+    es.request.mockImplementation(async (_m: string, _p: string, body: any) => {
+      seen = body;
+      return ok(200, { hits: { total: { value: 5 }, hits: [{ _id: '2', sort: [2] }] } });
+    });
+    await view.handleMessage({
+      type: 'esRunDsl', id: 'x2', index: 'i',
+      body: '{"query":{"match_all":{}},"from":10,"search_after":[0],"sort":["created_at"]}',
+      searchAfter: [1],
+    });
+    expect(seen.sort).toEqual(['created_at']);
+    expect(seen.search_after).toEqual([1]);
+    expect(seen.from).toBeUndefined();
+    expect(posts(view).at(-1)).toMatchObject({ type: 'esDslResult', id: 'x2', searchAfter: [2] });
+  });
+
   it('esRunDsl：非法 JSON / 非对象 → validation', async () => {
     const { view } = makeView();
     await mount(view);

@@ -67,6 +67,10 @@ const dslResult = ref<{ took: number | null; timedOut: boolean | null; total: nu
 const dslError = ref<EsErrorInfo | null>(null);
 const dslRunning = ref(false);
 const savedDsl = ref<SavedEsQueryView[]>([]);
+const dslNext = ref<unknown[] | null>(null);
+const dslHasMore = computed(() => !!dslNext.value);
+let dslLast: { index: string; body: string } | null = null;
+let dslAppendId: string | null = null;
 let dslSeq = 0;
 
 // ── S4：节点 / 日志 ──
@@ -195,10 +199,24 @@ function runDsl(payload: { index: string; body: string }): void {
   dslRunning.value = true;
   dslResult.value = null;
   dslError.value = null;
+  dslNext.value = null;
+  dslLast = { index: payload.index, body: payload.body };
+  dslAppendId = null;
   dslSeq += 1;
   const id = `dx${dslSeq}`;
   dslRequest.begin(id);
-  post({ type: 'esRunDsl', id, index: payload.index, body: payload.body });
+  post({ type: 'esRunDsl', id, index: payload.index, body: payload.body, searchAfter: null });
+}
+/** 续页沿用最后一次实际执行的 index/body，而不是编辑器当前未执行的文本。 */
+function loadMoreDsl(): void {
+  if (!dslLast || !dslNext.value || dslRunning.value) return;
+  dslRunning.value = true;
+  dslError.value = null;
+  dslSeq += 1;
+  const id = `dx${dslSeq}`;
+  dslAppendId = id;
+  dslRequest.begin(id);
+  post({ type: 'esRunDsl', id, index: dslLast.index, body: dslLast.body, searchAfter: dslNext.value });
 }
 function saveDsl(payload: { name: string; index: string; body: string }): void {
   post({ type: 'esSaveDsl', ...payload });
@@ -323,11 +341,23 @@ onMounted(() => {
       docsHasNext.value = false;
     } else if (msg.type === 'esDslResult') {
       if (!dslRequest.isCurrent(msg.id)) return;
+      const append = msg.id === dslAppendId;
+      dslAppendId = null;
       dslRunning.value = false;
       dslError.value = null;
-      dslResult.value = { took: msg.took ?? null, timedOut: msg.timedOut ?? null, total: msg.total ?? null, hits: msg.hits ?? [], aggregations: msg.aggregations, raw: msg.raw, truncated: !!msg.truncated };
+      dslNext.value = Array.isArray(msg.searchAfter) ? msg.searchAfter : null;
+      const page = { took: msg.took ?? null, timedOut: msg.timedOut ?? null, total: msg.total ?? null, hits: msg.hits ?? [], aggregations: msg.aggregations, raw: msg.raw, truncated: !!msg.truncated };
+      if (append && dslResult.value) {
+        const prev = dslResult.value;
+        const seen = new Set(prev.hits.map((h) => `${h.index ?? ''}\u0000${h.id}`));
+        const hits = [...prev.hits, ...page.hits.filter((h) => !seen.has(`${h.index ?? ''}\u0000${h.id}`))];
+        dslResult.value = { ...prev, took: page.took, timedOut: page.timedOut, total: page.total, hits, aggregations: prev.aggregations ?? page.aggregations, raw: prev.raw ?? page.raw, truncated: prev.truncated || page.truncated };
+      } else {
+        dslResult.value = page;
+      }
     } else if (msg.type === 'esDslError') {
       if (!dslRequest.isCurrent(msg.id)) return;
+      dslAppendId = null;
       dslRunning.value = false;
       dslError.value = msg.error;
     } else if (msg.type === 'esNodes') {
@@ -404,8 +434,8 @@ function confirmKeydown(e: KeyboardEvent): void {
       :error="docs.error" :op-result="opResult?.kind === 'doc' ? opResult : null" :read-only="readOnly" :query="docsQuery" :query-mode="docsMode" :default-operator="docsOperator" :fields="docsFields"
       :can-prev="docsHistory.length > 0" :has-next="docsHasNext"
       @load="refreshDocs" @search="searchDocs" @open-dsl="openDslWith" @jump="jumpDoc" @next="docsNextPage" @prev="docsPrevPage" @op="sendDocOp" />
-    <DslTab v-show="tab === 'dsl'" :index="indexName" :running="dslRunning" :result="dslResult" :error="dslError" :saved="savedDsl" :seed="dslSeed"
-      @run="runDsl" @save="saveDsl" @remove-saved="removeSavedDsl" @index-change="syncDslIndex" />
+    <DslTab v-show="tab === 'dsl'" :index="indexName" :running="dslRunning" :result="dslResult" :error="dslError" :saved="savedDsl" :seed="dslSeed" :can-load-more="dslHasMore"
+      @run="runDsl" @save="saveDsl" @remove-saved="removeSavedDsl" @index-change="syncDslIndex" @load-more="loadMoreDsl" />
     <NodesTab v-show="tab === 'nodes'" :items="nodes" :error="nodesError" />
     <LogPanel v-show="tab === 'log'" :items="logEntries" />
     <RestConsole v-show="tab === 'rest'" :read-only="readOnly" :running="running" :result="result" @send="send" />

@@ -139,7 +139,7 @@ export class ElasticsearchView extends BaseWebView {
     if (msg?.type === 'esLoadIndex') { await this.pushIndex(msg.id, msg.name); return; }
     if (msg?.type === 'esLoadDocs') { await this.pushDocs(msg.id, msg.index, msg.searchAfter, msg.size, msg.query, msg.queryMode, msg.defaultOperator); return; }
     if (msg?.type === 'esGetDoc') { await this.pushDoc(msg.id, msg.index, msg.docId); return; }
-    if (msg?.type === 'esRunDsl') { await this.runDsl(msg.id, msg.index, msg.body, msg.size); return; }
+    if (msg?.type === 'esRunDsl') { await this.runDsl(msg.id, msg.index, msg.body, msg.size, msg.searchAfter); return; }
     if (msg?.type === 'esLoadNodes') { await this.pushNodes(); return; }
     if (msg?.type === 'esLoadSavedDsl') { await this.pushSavedDsl(); return; }
     if (msg?.type === 'esSaveDsl') { await this.saveDsl(msg.name, msg.index, msg.body); return; }
@@ -361,8 +361,8 @@ export class ElasticsearchView extends BaseWebView {
     }
   }
 
-  /** DSL 查询：body 语法校验 → `_search` → hits/aggregations/指标。 */
-  private async runDsl(id: string, index: string, body: string, size?: number): Promise<void> {
+  /** DSL 查询：body 语法校验 → `_search` → hits/aggregations/指标；支持 search_after 续页。 */
+  private async runDsl(id: string, index: string, body: string, size?: number, searchAfter?: unknown[] | null): Promise<void> {
     let parsed: unknown;
     try {
       parsed = body.trim() ? JSON.parse(body) : {};
@@ -377,7 +377,16 @@ export class ElasticsearchView extends BaseWebView {
     try {
       const session = await this.session();
       const n = size && size > 0 ? Math.min(size, 500) : DOCS_PAGE_SIZE;
-      const res = await session.es.request('POST', `/${encodeURIComponent(index)}/_search`, { ...(parsed as Record<string, unknown>), size: (parsed as Record<string, unknown>).size ?? n });
+      const req = { ...(parsed as Record<string, unknown>) };
+      // search_after 需要稳定排序；保留默认的相关性顺序，并用 _doc 打破同分。
+      // 用户显式给出 sort 时完全沿用。
+      if (!Array.isArray(req.sort)) req.sort = ['_score', '_doc'];
+      if (searchAfter && searchAfter.length) {
+        req.search_after = searchAfter;
+        // from 与 search_after 不能同时使用（ES 会拒绝或产生非预期页）。
+        delete req.from;
+      }
+      const res = await session.es.request('POST', `/${encodeURIComponent(index)}/_search`, { ...req, size: req.size ?? n });
       if (res.status >= 400) {
         this.post({ type: 'esDslError', id, index, error: errorInfo(undefined, res) });
         return;
@@ -385,6 +394,7 @@ export class ElasticsearchView extends BaseWebView {
       const s = parseSearchResponse(res.body);
       const capped = capHits(s.hits);
       const raw = truncateJson(res.body);
+      const next = nextSearchAfter(s.hits);
       this.post({
         type: 'esDslResult',
         id,
@@ -396,6 +406,7 @@ export class ElasticsearchView extends BaseWebView {
         aggregations: s.aggregations,
         raw: raw.value,
         truncated: capped.truncated || raw.truncated,
+        searchAfter: next && next.length ? next : null,
       });
     } catch (err) {
       this.post({ type: 'esDslError', id, index, error: errorInfo(err) });

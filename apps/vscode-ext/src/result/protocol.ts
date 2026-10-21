@@ -445,7 +445,7 @@ export type EsDownMessage =
   | { type: 'esDocs'; id: string; index: string; hits: EsDocHit[]; total: number | null; searchAfter: unknown[] | null; truncated: boolean; fields: EsFieldInfo[] }
   | { type: 'esDoc'; id: string; index: string; docId: string; found: boolean; source: unknown; seqNo: number | null; primaryTerm: number | null }
   | { type: 'esDocsError'; id: string; index: string; error: EsErrorInfo }
-  | { type: 'esDslResult'; id: string; index: string; took: number | null; timedOut: boolean | null; total: number | null; hits: EsDocHit[]; aggregations: unknown; raw: unknown; truncated: boolean }
+  | { type: 'esDslResult'; id: string; index: string; took: number | null; timedOut: boolean | null; total: number | null; hits: EsDocHit[]; aggregations: unknown; raw: unknown; truncated: boolean; searchAfter: unknown[] | null }
   | { type: 'esDslError'; id: string; index: string; error: EsErrorInfo }
   | { type: 'esNodes'; items: EsNodeSummary[] }
   | { type: 'esNodesError'; error: EsErrorInfo }
@@ -462,7 +462,7 @@ export type EsUpMessage =
   | { type: 'esLoadIndex'; id: string; name: string }
   | { type: 'esLoadDocs'; id: string; index: string; searchAfter: unknown[] | null; size?: number; query?: string | null; queryMode?: 'text' | 'dsl'; defaultOperator?: 'OR' | 'AND' }
   | { type: 'esGetDoc'; id: string; index: string; docId: string }
-  | { type: 'esRunDsl'; id: string; index: string; body: string; size?: number }
+  | { type: 'esRunDsl'; id: string; index: string; body: string; size?: number; searchAfter?: unknown[] | null }
   | { type: 'esLoadNodes' }
   | { type: 'esLoadSavedDsl' }
   | { type: 'esSaveDsl'; name: string; index: string; body: string }

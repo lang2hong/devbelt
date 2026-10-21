@@ -15,12 +15,15 @@ const props = defineProps<{
   saved: SavedEsQueryView[];
   /** 「在 DSL 打开」预填（body+index）；at 变化即应用。 */
   seed?: { body: string; index: string; at: number } | null;
+  /** 当前结果是否还有下一页 search_after 游标。 */
+  canLoadMore?: boolean;
 }>();
 const emit = defineEmits<{
   (e: 'run', payload: { index: string; body: string }): void;
   (e: 'save', payload: { name: string; index: string; body: string }): void;
   (e: 'removeSaved', id: string): void;
   (e: 'indexChange', index: string): void;
+  (e: 'loadMore'): void;
 }>();
 
 const { t } = useI18n();
@@ -113,6 +116,9 @@ const aggRows = computed(() => (props.result?.aggregations ? aggregationRows(pro
             </tbody>
           </table>
           <div v-else class="es-empty">{{ t('wv.es.docs.empty') }}</div>
+          <div v-if="canLoadMore" class="es-dsl-more">
+            <button class="es-link" :disabled="running" @click="emit('loadMore')">{{ t('wv.es.dsl.loadMore') }}</button>
+          </div>
           <div v-if="result.aggregations" class="es-dsl-agg">
             <div class="es-section-title">{{ t('wv.es.dsl.aggregations') }}</div>
             <table v-if="aggRows?.length" class="es-dsl-hits">
@@ -165,6 +171,8 @@ const aggRows = computed(() => (props.result?.aggregations ? aggregationRows(pro
 .es-dsl-hits td { padding: 3px 6px; border-bottom: 1px solid var(--vscode-panel-border, #3333); }
 .es-doc-id-cell { font-family: var(--vscode-editor-font-family, monospace); white-space: nowrap; }
 .es-doc-preview { max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+.es-dsl-more { margin-top: 6px; }
+.es-dsl-more .es-link:disabled { opacity: .5; cursor: default; }
 .es-dsl-agg { margin-top: 8px; }
 .es-agg-extra { opacity: .8; font-size: 11px; }
 .es-section-title { font-weight: 600; font-size: 12px; margin: 6px 0 3px; }

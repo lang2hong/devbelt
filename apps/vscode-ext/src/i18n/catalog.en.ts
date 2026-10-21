@@ -1374,6 +1374,7 @@ export const en: MessageCatalog = {
   'wv.es.dsl.metrics.timedOut': 'Timed out',
   'wv.es.dsl.metrics.total': 'Hits',
   'wv.es.dsl.hits': 'hits',
+  'wv.es.dsl.loadMore': 'Load more',
   'wv.es.dsl.aggregations': 'Aggregations',
   'wv.es.dsl.raw': 'Raw JSON',
   'wv.es.nodes.name': 'Name',

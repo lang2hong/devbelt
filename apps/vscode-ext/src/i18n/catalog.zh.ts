@@ -1352,6 +1352,7 @@ export const zh: MessageCatalog = {
   'wv.es.dsl.metrics.timedOut': '超时',
   'wv.es.dsl.metrics.total': '命中',
   'wv.es.dsl.hits': 'hits',
+  'wv.es.dsl.loadMore': '加载更多',
   'wv.es.dsl.aggregations': '聚合',
   'wv.es.dsl.raw': '原始 JSON',
   'wv.es.nodes.name': '名称',
