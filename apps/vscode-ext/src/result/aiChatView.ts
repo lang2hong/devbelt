@@ -15,6 +15,7 @@ import { BaseWebView } from './baseWebView.js';
 import { getAiChatHtml } from '../webview/html.js';
 import { AiService, readAiConfig, type AiMutableStream, type AiRequestMeta } from '../ai/aiService.js';
 import { AiSessionStore, type AiChatSession } from '../ai/aiSessionStore.js';
+import { dropTrailingAssistant, replaceUserMessage } from '../ai/chatEdit.js';
 import { AiContextStore, findColumnNote, findTableNote } from '../ai/aiContextStore.js';
 import { AiKeyStore } from '../ai/aiKeyStore.js';
 import { AiSchemaContextBuilder, type AiSchemaSnapshot } from '../ai/schemaContext.js';
@@ -158,6 +159,12 @@ export class AiChatView extends BaseWebView {
     switch (msg.type) {
       case 'send':
         await this.onSend(msg.sessionId, msg.text);
+        return;
+      case 'regenerate':
+        await this.onRegenerate(msg.sessionId);
+        return;
+      case 'editAndResend':
+        await this.onEditAndResend(msg.sessionId, msg.messageIndex, msg.text);
         return;
       case 'abort':
         this.abortStream();
@@ -375,7 +382,43 @@ export class AiChatView extends BaseWebView {
     session.messages.push({ role: 'user', content: trimmed });
     if (this.selectedConnId) session.connId = this.selectedConnId;
     this.saveSession(session);
+    await this.runChat(session);
+  }
 
+  /** 当前会话重新生成：丢弃尾部 assistant/error，用最后一条 user 重新流式。 */
+  private async onRegenerate(sessionId: string): Promise<void> {
+    const id = sessionId || this.activeSessionId || '';
+    const session = id ? this.deps.sessions.get(id) : undefined;
+    if (!session) return;
+    dropTrailingAssistant(session.messages);
+    if (!session.messages.some((m) => m.role === 'user')) return;
+    this.activeSessionId = session.id;
+    session.updatedAt = Date.now();
+    this.saveSession(session);
+    await this.runChat(session);
+  }
+
+  /** 编辑某条用户消息并从该点重发：截断其后的历史，替换文本。 */
+  private async onEditAndResend(sessionId: string, messageIndex: number, text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const id = sessionId || this.activeSessionId || '';
+    const session = id ? this.deps.sessions.get(id) : undefined;
+    if (!session) return;
+    const index = Math.floor(messageIndex);
+    const next = replaceUserMessage(session.messages, index, trimmed);
+    if (!next) return;
+    session.messages = next;
+    if (index === 0 || !session.title.trim()) session.title = AiSessionStore.titleFromFirstMessage(trimmed);
+    if (this.selectedConnId) session.connId = this.selectedConnId;
+    this.activeSessionId = session.id;
+    session.updatedAt = Date.now();
+    this.saveSession(session);
+    await this.runChat(session);
+  }
+
+  /** 用当前会话历史 + 上下文发起一次 chat 流。 */
+  private async runChat(session: AiChatSession): Promise<void> {
     const { schemaText } = await this.buildContext();
     const messages = this.composeMessages(session, schemaText);
     const conn = this.selectedConnection();
@@ -879,6 +922,7 @@ export class AiChatView extends BaseWebView {
       quota,
       isLoggedIn: this.deps.auth.isLoggedIn(),
       includeColumnComments: readAiConfig().includeColumnComments,
+      autoRunReadOnlySql: vscode.workspace.getConfiguration('devbelt').get<boolean>('ai.autoRunReadOnlySql', true),
       context,
       sessions: this.sessionSummaries(),
       connections: this.deps.connectionStore.list().map((conn) => ({ id: conn.id, name: conn.name })),

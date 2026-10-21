@@ -105,6 +105,8 @@ const streaming = ref<{ content: string; reasoning: string } | null>(null);
 const selectedConnId = ref<string | undefined>(undefined);
 const input = ref('');
 const includeColumnComments = ref(true);
+const autoRunReadOnlySql = ref(true);
+const editingIndex = ref<number | null>(null);
 const suggestions = computed(() => [
   t('wv.ai.suggest.explain'),
   t('wv.ai.suggest.optimize'),
@@ -212,8 +214,10 @@ onMounted(() => {
         connections.value = Array.isArray(msg.connections) ? msg.connections : [];
         sessions.value = Array.isArray(msg.sessions) ? msg.sessions : [];
         includeColumnComments.value = !!msg.includeColumnComments;
+        autoRunReadOnlySql.value = msg.autoRunReadOnlySql !== false;
         activeSessionId.value = msg.activeSessionId || undefined;
         selectedConnId.value = msg.context?.connId;
+        editingIndex.value = null;
         if (!msg.activeSessionId) resetMessages([]);
         post({ type: 'requestBusinessRules' });
         break;
@@ -227,6 +231,7 @@ onMounted(() => {
         activeSessionId.value = session.id;
         resetMessages(Array.isArray(session.messages) ? [...session.messages] : []);
         streaming.value = null;
+        editingIndex.value = null;
         if (session.connId) selectedConnId.value = session.connId;
         break;
       }
@@ -425,9 +430,44 @@ onUnmounted(() => {
 function send(): void {
   const text = input.value.trim();
   if (!text || generating.value) return;
+  const editIndex = editingIndex.value;
+  if (editIndex !== null) {
+    // 编辑旧用户消息：本地从该条起截断，宿主同步截断后重发。
+    messages.value = messages.value.slice(0, editIndex);
+    messages.value.push({ role: 'user', content: text });
+    streaming.value = { content: '', reasoning: '' };
+    post({ type: 'editAndResend', sessionId: activeSessionId.value ?? '', messageIndex: editIndex, text });
+    editingIndex.value = null;
+    input.value = '';
+    return;
+  }
   messages.value.push({ role: 'user', content: text });
   streaming.value = { content: '', reasoning: '' };
   post({ type: 'send', sessionId: activeSessionId.value ?? '', text });
+  input.value = '';
+}
+
+/** 重新生成最后一条 assistant（失败消息即重试）。 */
+function regenerate(): void {
+  if (generating.value) return;
+  let lastAssistant = -1;
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    if (messages.value[i]!.role === 'assistant') { lastAssistant = i; break; }
+  }
+  if (lastAssistant < 0) return;
+  messages.value = messages.value.slice(0, lastAssistant);
+  streaming.value = { content: '', reasoning: '' };
+  post({ type: 'regenerate', sessionId: activeSessionId.value ?? '' });
+}
+
+function editMessage(index: number, text: string): void {
+  if (generating.value) return;
+  editingIndex.value = index;
+  input.value = text;
+}
+
+function cancelEdit(): void {
+  editingIndex.value = null;
   input.value = '';
 }
 
@@ -446,6 +486,8 @@ function useSuggestion(text: string): void {
 function newChat(): void {
   resetMessages([]);
   streaming.value = null;
+  editingIndex.value = null;
+  input.value = '';
   post({ type: 'newChat' });
 }
 
@@ -556,6 +598,12 @@ function openContextDetail(): void {
     <div class="ai-toolbar">
       <button class="ai-btn" @click="newChat">{{ t('wv.ai.newChat') }}</button>
       <button class="ai-btn" @click="toggleSection('sessions')">{{ t('wv.ai.sessions') }}</button>
+      <button
+        class="ai-btn ai-auto-run"
+        :class="{ on: autoRunReadOnlySql }"
+        :title="t('wv.ai.autoRun.hint')"
+        @click="post({ type: 'openSettings' })"
+      >{{ autoRunReadOnlySql ? t('wv.ai.autoRun.on') : t('wv.ai.autoRun.off') }}</button>
       <span class="ai-spacer"></span>
       <button v-if="generating" class="ai-btn" @click="stop">{{ t('wv.ai.stop') }}</button>
     </div>
@@ -618,7 +666,13 @@ function openContextDetail(): void {
           :suggestions="suggestions"
           @copy="copyMessage"
           @suggest="useSuggestion"
+          @regenerate="regenerate"
+          @edit="editMessage"
         />
+        <div v-if="editingIndex !== null" class="ai-edit-banner">
+          <span>{{ t('wv.ai.editBanner', { n: editingIndex + 1 }) }}</span>
+          <button class="ai-btn" @click="cancelEdit">{{ t('wv.ai.cancelEdit') }}</button>
+        </div>
         <ChatInput v-model="input" :generating="generating" @send="send" @stop="stop" />
       </div>
     </div>
@@ -768,5 +822,21 @@ function openContextDetail(): void {
 .ai-rules-summary {
   margin-bottom: 4px;
   color: var(--vscode-descriptionForeground);
+}
+.ai-auto-run.on {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+  border-color: var(--vscode-testing-iconPassed, #3fb950);
+}
+.ai-edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 12px 0;
+  padding: 6px 12px;
+  border: 1px solid var(--vscode-focusBorder, #007acc);
+  border-radius: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
 }
 </style>

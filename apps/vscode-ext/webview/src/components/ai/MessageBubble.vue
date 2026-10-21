@@ -14,9 +14,17 @@ const props = defineProps<{
   dbType?: string;
   /** 消息在消息流中的下标（blockRef 绑定用，P9）。 */
   msgIdx?: number;
+  /** 最后一条 assistant 可重新生成（含失败重试）。 */
+  canRegenerate?: boolean;
+  /** 用户消息可编辑后重发。 */
+  canEdit?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: 'copy', text: string): void }>();
+const emit = defineEmits<{
+  (e: 'copy', text: string): void;
+  (e: 'regenerate'): void;
+  (e: 'edit'): void;
+}>();
 const { t } = useI18n();
 
 const blocks = computed(() => parseMessageBlocks(props.message.content));
@@ -109,6 +117,10 @@ watch(
 
     <div v-if="!props.streaming" class="ai-msg-actions">
       <button class="ai-btn" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
+      <button v-if="props.canEdit" class="ai-btn" @click="emit('edit')">{{ t('wv.ai.edit') }}</button>
+      <button v-if="props.canRegenerate" class="ai-btn" @click="emit('regenerate')">
+        {{ message.error ? t('wv.ai.retry') : t('wv.ai.regenerate') }}
+      </button>
     </div>
   </div>
 </template>

@@ -16,6 +16,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'copy', text: string): void;
   (e: 'suggest', text: string): void;
+  (e: 'regenerate'): void;
+  (e: 'edit', index: number, text: string): void;
 }>();
 
 const { t } = useI18n();
@@ -79,7 +81,11 @@ onBeforeUnmount(() => observer?.disconnect());
           :message="message"
           :db-type="props.dbType"
           :msg-idx="index"
+          :can-edit="message.role === 'user'"
+          :can-regenerate="index === messages.length - 1 && message.role === 'assistant'"
           @copy="emit('copy', $event)"
+          @regenerate="emit('regenerate')"
+          @edit="emit('edit', index, message.content)"
         />
         <MessageBubble
           v-if="streaming"

@@ -68,6 +68,8 @@ export interface AiInitDown {
   quota: AiQuotaState | null;
   isLoggedIn: boolean;
   includeColumnComments: boolean;
+  /** 只读 SQL 是否自动执行（webview 顶栏显示状态，避免静默行为）。 */
+  autoRunReadOnlySql: boolean;
   context: AiContextState;
   sessions: AiSessionSummary[];
   activeSessionId?: string;
@@ -342,6 +344,8 @@ export interface AiBlockRef {
 export type AiUpMessage =
   | { type: 'ready' }
   | AiSendUp
+  | { type: 'regenerate'; sessionId: string }
+  | { type: 'editAndResend'; sessionId: string; messageIndex: number; text: string }
   | { type: 'abort' }
   | { type: 'newChat' }
   | { type: 'renameChat'; sessionId: string; title: string }
