@@ -14,7 +14,7 @@ import { DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-co
 import { BaseWebView } from './baseWebView.js';
 import { getAiChatHtml } from '../webview/html.js';
 import { AiService, readAiConfig, type AiMutableStream, type AiRequestMeta } from '../ai/aiService.js';
-import { AiSessionStore, type AiChatSession } from '../ai/aiSessionStore.js';
+import { AiSessionStore, type AiChatMessage, type AiChatSession, type AiMessageUsage } from '../ai/aiSessionStore.js';
 import { dropTrailingAssistant, replaceUserMessage } from '../ai/chatEdit.js';
 import { AiContextStore, findColumnNote, findTableNote } from '../ai/aiContextStore.js';
 import { AiKeyStore } from '../ai/aiKeyStore.js';
@@ -109,6 +109,8 @@ export class AiChatView extends BaseWebView {
   private replyBinding?: ReplyBinding;
   private activeSessionId?: string;
   private activeStream?: AiMutableStream<ChatStreamChunk>;
+  /** 最近一次成功拉取的配额快照；用于计算单轮积分消耗。 */
+  private lastQuota: AiQuotaState | null = null;
   /** 流序号：新请求/中止后旧流的迟到 chunk 一律丢弃。 */
   private streamSeq = 0;
 
@@ -442,6 +444,8 @@ export class AiChatView extends BaseWebView {
   private async runRequest(session: AiChatSession, messages: ChatMessage[], meta: AiRequestMeta, dialect?: string): Promise<void> {
     this.abortStream();
     const streamId = ++this.streamSeq;
+    const startedAt = Date.now();
+    const beforeUsed = this.lastQuota?.used ?? null;
     this.replyBinding = { connId: this.selectedConnId, scope: this.selectedScope };
     const config = readAiConfig();
     const stream = this.deps.service.streamChat(
@@ -457,9 +461,11 @@ export class AiChatView extends BaseWebView {
 
     let assistant = '';
     let reasoning = '';
+    let tokens: number | null = null;
     try {
       for await (const chunk of stream) {
         if (this.streamSeq !== streamId) return;
+        if (chunk.usage) tokens = chunk.usage.totalTokens;
         if (chunk.reasoning) {
           reasoning += chunk.reasoning;
           this.post({ type: 'chunk', sessionId: session.id, delta: '', reasoning: chunk.reasoning } as never);
@@ -475,11 +481,18 @@ export class AiChatView extends BaseWebView {
       if (assistant && dialect) {
         assistant = quoteReservedIdentifiersInMarkdown(assistant, dialect);
       }
+      const usage = await this.buildTurnUsage(startedAt, beforeUsed, tokens);
       if (assistant || reasoning) {
-        session.messages.push({ role: 'assistant', content: assistant, ...(reasoning ? { reasoning } : {}) });
+        const message: AiChatMessage = {
+          role: 'assistant',
+          content: assistant,
+          ...(reasoning ? { reasoning } : {}),
+          usage,
+        };
+        session.messages.push(message);
         this.saveSession(session);
       }
-      this.post({ type: 'finish', sessionId: session.id, ...(assistant ? { content: assistant } : {}) } as never);
+      this.post({ type: 'finish', sessionId: session.id, ...(assistant ? { content: assistant } : {}), usage } as never);
     } catch (err) {
       if (this.streamSeq !== streamId) return;
       const aborted = (err as { code?: string } | null)?.code === 'AI_ABORTED';
@@ -487,23 +500,29 @@ export class AiChatView extends BaseWebView {
       if (assistant && dialect) {
         assistant = quoteReservedIdentifiersInMarkdown(assistant, dialect);
       }
-      if (assistant) {
-        session.messages.push({ role: 'assistant', content: assistant });
-      }
+      const usage = await this.buildTurnUsage(startedAt, beforeUsed, tokens);
+      const partial: AiChatMessage | undefined = assistant
+        ? { role: 'assistant', content: assistant, usage }
+        : undefined;
+      if (partial) session.messages.push(partial);
       if (aborted) {
-        if (assistant) this.saveSession(session);
-        this.post({ type: 'finish', sessionId: session.id, aborted: true, ...(assistant ? { content: assistant } : {}) } as never);
+        if (partial) this.saveSession(session);
+        this.post({ type: 'finish', sessionId: session.id, aborted: true, ...(assistant ? { content: assistant } : {}), usage } as never);
       } else {
         const code = (err as { code?: string } | null)?.code ?? 'AI_ERROR';
         const message = err instanceof Error ? err.message : String(err);
-        session.messages.push({ role: 'assistant', content: message, error: true });
+        session.messages.push({
+          role: 'assistant',
+          content: message,
+          error: true,
+          ...(!partial ? { usage } : {}),
+        });
         this.saveSession(session);
-        this.post({ type: 'finish', sessionId: session.id, error: { code, message } } as never);
+        this.post({ type: 'finish', sessionId: session.id, error: { code, message }, usage } as never);
       }
     } finally {
       if (this.streamSeq === streamId) this.activeStream = undefined;
     }
-    void this.refreshQuota();
   }
 
   /**
@@ -920,6 +939,7 @@ export class AiChatView extends BaseWebView {
   private async pushInit(): Promise<void> {
     const provider = await this.deps.service.describeProvider();
     const quota = await this.fetchQuotaState();
+    this.lastQuota = quota;
     const context = (await this.buildContext()).state;
     const active = this.activeSessionId ? this.deps.sessions.get(this.activeSessionId) : undefined;
     const down: AiDownMessage = {
@@ -962,10 +982,38 @@ export class AiChatView extends BaseWebView {
   private async refreshQuota(requestId?: string): Promise<void> {
     try {
       const quota = await this.fetchQuotaState();
+      if (quota) this.lastQuota = quota;
       this.post({ type: 'quotaUpdate', quota, ok: quota !== null, ...(requestId ? { requestId } : {}) } as never);
     } catch {
       this.post({ type: 'quotaUpdate', quota: null, ok: false, ...(requestId ? { requestId } : {}) } as never);
     }
+  }
+
+  /**
+   * 结算后回写单轮用量：服务端 settle 可能晚于 SSE [DONE]，用量未变化时短暂重试一次。
+   * credits 用「已用计费 token 差值」计算；并发设备/后台消费会合并进差值。
+   */
+  private async buildTurnUsage(startedAt: number, beforeUsed: number | null, tokens: number | null): Promise<AiMessageUsage> {
+    const durationMs = Date.now() - startedAt;
+    let after: AiQuotaState | null = null;
+    try {
+      after = await this.fetchQuotaState();
+      if (beforeUsed !== null && after && after.used <= beforeUsed) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const retry = await this.fetchQuotaState();
+        if (retry) after = retry;
+      }
+    } catch {
+      after = null;
+    }
+    if (after) {
+      this.lastQuota = after;
+      this.post({ type: 'quotaUpdate', quota: after, ok: true } as never);
+    }
+    const credits = beforeUsed !== null && after && after.used > beforeUsed
+      ? (after.used - beforeUsed) / 1000
+      : null;
+    return { credits, tokens, durationMs, startedAt };
   }
 
   /** 轻量 provider 状态回执（模型保存后使用；不查 schema/上下文）。 */

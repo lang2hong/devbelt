@@ -6,9 +6,13 @@ import ToolResultInline from './ToolResultInline.vue';
 import ToolRunningInline from './ToolRunningInline.vue';
 import { useI18n } from '../../composables/useI18n';
 import { parseMessageBlocks, type AiRunningPayload, type AiToolResultPayload } from '../../utils/aiChatStream';
+import { formatCredits } from '../../utils/credits';
+import { formatDateTime } from '../../utils/formatTime';
+import { formatElapsed } from '../../../../src/ai/slowQuery';
+import type { AiMessageUsage } from '../../../../src/ai/aiSessionStore';
 
 const props = defineProps<{
-  message: { role: 'user' | 'assistant'; content: string; reasoning?: string; error?: boolean; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> };
+  message: { role: 'user' | 'assistant'; content: string; reasoning?: string; error?: boolean; usage?: AiMessageUsage; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> };
   streaming?: boolean;
   /** 当前连接引擎（传给 CodeBlock 决定运行按钮显隐）。 */
   dbType?: string;
@@ -115,6 +119,14 @@ watch(
       <MarkdownText :text="message.content" />
     </p>
 
+    <div v-if="message.role === 'assistant' && message.usage && !props.streaming" class="ai-msg-usage">
+      <span v-if="message.usage.credits !== null">{{ t('wv.ai.msg.credits', { credits: formatCredits(message.usage.credits) }) }}</span>
+      <span v-else>{{ t('wv.ai.msg.creditsUnknown') }}</span>
+      <span v-if="message.usage.credits === null && message.usage.tokens !== null">{{ t('wv.ai.msg.tokens', { tokens: message.usage.tokens.toLocaleString() }) }}</span>
+      <span>{{ t('wv.ai.msg.duration', { duration: formatElapsed(message.usage.durationMs) }) }}</span>
+      <span>{{ t('wv.ai.msg.startedAt', { time: formatDateTime(message.usage.startedAt) }) }}</span>
+    </div>
+
     <div v-if="!props.streaming" class="ai-msg-actions">
       <button class="ai-btn" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
       <button v-if="props.canEdit" class="ai-btn" @click="emit('edit')">{{ t('wv.ai.edit') }}</button>
@@ -152,6 +164,15 @@ watch(
 .ai-text {
   margin: 0;
   white-space: pre-wrap;
+}
+.ai-msg-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
+  font-variant-numeric: tabular-nums;
 }
 .ai-md-heading {
   margin: 12px 0 6px;

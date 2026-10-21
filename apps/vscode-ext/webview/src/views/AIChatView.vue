@@ -13,6 +13,7 @@ import BusinessRulesDialog from '../components/ai/BusinessRulesDialog.vue';
 import ModelAccessDialog from '../components/ai/ModelAccessDialog.vue';
 import type { CatalogProvider, CustomVendor, ModelAccessSyncPrefs, ModelAccessTestResult } from '../../../src/ai/modelAccess';
 import { summarizeBusinessRules } from '../../../src/ai/businessRules';
+import type { AiMessageUsage } from '../../../src/ai/aiSessionStore';
 
 interface SessionSummary {
   id: string;
@@ -27,6 +28,8 @@ interface ChatMessage {
   /** 推理模型的思考过程（可折叠展示；本地会话回看）。 */
   reasoning?: string;
   error?: boolean;
+  /** 本轮积分消耗、耗时与触发时间（随会话历史持久化）。 */
+  usage?: AiMessageUsage;
   /** 代码块下标 → 内联执行结果（P9：blockRef 绑定；瞬态，不进会话存储）。 */
   blockResults?: Record<number, AiToolResultPayload>;
   /** 代码块下标 → 执行中指示（toolRunning；toolResult 到达即清除；瞬态）。 */
@@ -261,9 +264,10 @@ onMounted(() => {
         // 保证显示 = 落库 = 自动执行 = 插入编辑器四者一致。
         const content = typeof msg.content === 'string' ? msg.content : (streaming.value?.content ?? '');
         const reasoning = streaming.value?.reasoning ?? '';
+        const usage = msg.usage && typeof msg.usage === 'object' ? msg.usage as AiMessageUsage : undefined;
         streaming.value = null;
-        if (content || reasoning) messages.value.push({ role: 'assistant', content, ...(reasoning ? { reasoning } : {}) });
-        if (msg.error) messages.value.push({ role: 'assistant', content: msg.error.message, error: true });
+        if (content || reasoning) messages.value.push({ role: 'assistant', content, ...(reasoning ? { reasoning } : {}), ...(usage ? { usage } : {}) });
+        if (msg.error) messages.value.push({ role: 'assistant', content: msg.error.message, error: true, ...(!content && !reasoning && usage ? { usage } : {}) });
         // 自动执行仅限正常完成：Stop 中断（aborted）后的半截/完整 SQL 不跑，
         // 用户中断即表达「不要继续」，自动执行与之相悖。
         // 「让 AI 优化」的回复不自动执行（优化后的查询可能同样很慢，避免无人值守反复重跑）。

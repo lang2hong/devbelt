@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
+import { formatCreditTokens } from '../../utils/credits';
 
 export interface ProviderState {
   mode: 'server-proxy' | 'openai-compatible';
@@ -122,13 +123,6 @@ function onSelectScope(event: Event): void {
   if (value) emit('selectScope', value);
 }
 
-/** 积分换算：1 积分 = 1000 计费 token（额度池口径 ÷1000 展示）。 */
-function toCredits(tokens: number): string {
-  const credits = tokens / 1000;
-  if (credits >= 100) return Math.round(credits).toLocaleString();
-  return String(Number(credits.toFixed(1)));
-}
-
 const deltaLabel = ref<string | null>(null);
 let deltaTimer: number | undefined;
 watch(
@@ -137,7 +131,7 @@ watch(
     if (!next || !prev) return;
     const saved = prev.remaining - next.remaining;
     if (saved <= 0) return;
-    deltaLabel.value = t('wv.ai.quota.delta', { credits: toCredits(saved) });
+    deltaLabel.value = t('wv.ai.quota.delta', { credits: formatCreditTokens(saved) });
     if (deltaTimer) window.clearTimeout(deltaTimer);
     deltaTimer = window.setTimeout(() => { deltaLabel.value = null; }, 2400);
   },
@@ -149,13 +143,13 @@ const quotaLabel = computed(() => {
   if (!quota) return t('wv.ai.quota.none');
   if (quota.topupRemaining > 0) {
     return t('wv.ai.quota.dual', {
-      used: toCredits(quota.used),
-      limit: toCredits(quota.limit),
-      monthly: toCredits(quota.monthlyRemaining ?? quota.remaining),
-      topup: toCredits(quota.topupRemaining),
+      used: formatCreditTokens(quota.used),
+      limit: formatCreditTokens(quota.limit),
+      monthly: formatCreditTokens(quota.monthlyRemaining ?? quota.remaining),
+      topup: formatCreditTokens(quota.topupRemaining),
     });
   }
-  return t('wv.ai.quota.value', { used: toCredits(quota.used), limit: toCredits(quota.limit), remaining: toCredits(quota.remaining) });
+  return t('wv.ai.quota.value', { used: formatCreditTokens(quota.used), limit: formatCreditTokens(quota.limit), remaining: formatCreditTokens(quota.remaining) });
 });
 
 const usedPct = computed(() => {

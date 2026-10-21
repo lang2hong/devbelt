@@ -5,7 +5,7 @@
  * 不复用 QueryView/DesignView 的 WebviewMode 单入口，消息类型也不混入既有联合。
  * `type` 命名沿用既有「down = host → webview / up = webview → host」约定。
  */
-import type { AiChatMessage, AiChatSession } from '../ai/aiSessionStore.js';
+import type { AiChatMessage, AiChatSession, AiMessageUsage } from '../ai/aiSessionStore.js';
 
 /** 上下文摘要（面板 ContextBar/状态条展示；不含 schema 原文）。 */
 export interface AiContextState {
@@ -96,6 +96,8 @@ export interface AiFinishDown {
    * 缺省（无正文）沿用旧行为。
    */
   content?: string;
+  /** 本轮积分/耗时/触发时间；完成、失败、取消均尽量携带。 */
+  usage?: AiMessageUsage;
 }
 
 export interface AiQuotaUpdateDown {
@@ -396,4 +398,4 @@ export type AiUpMessage =
   | { type: 'saveBusinessRules'; domainContext: string; defaultDirectives: string };
 
 /** 会话消息类型在协议层再导出，webview 侧从 ai-protocol 单点取。 */
-export type { AiChatMessage, AiChatSession };
+export type { AiChatMessage, AiChatSession, AiMessageUsage };

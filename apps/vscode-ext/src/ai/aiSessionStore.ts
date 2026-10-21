@@ -1,6 +1,18 @@
 import { randomUUID } from 'crypto';
 import type * as vscode from 'vscode';
 
+/** 单轮 AI 请求的展示/对账元数据（本地会话持久化；不含明文上下文）。 */
+export interface AiMessageUsage {
+  /** 本次计费积分；BYOK/额度不可用时为 null。 */
+  credits: number | null;
+  /** 上游返回的原始 token 总数（缺失为 null；仅展示辅助）。 */
+  tokens: number | null;
+  /** 从请求触发到流结束的耗时（ms）。 */
+  durationMs: number;
+  /** 请求触发时间（epoch ms）。 */
+  startedAt: number;
+}
+
 /** 一条会话消息（只存文本；不存 schema 上下文原文，避免 Memento 膨胀）。 */
 export interface AiChatMessage {
   role: 'user' | 'assistant';
@@ -9,6 +21,8 @@ export interface AiChatMessage {
   reasoning?: string;
   /** 该条为错误提示（如上游失败），渲染为警示样式且不进入后续请求上下文。 */
   error?: boolean;
+  /** 本条助手回复的积分/耗时/触发时间元数据。 */
+  usage?: AiMessageUsage;
 }
 
 export interface AiChatSession {
@@ -33,6 +47,17 @@ const MAX_MESSAGE_CHARS = 100_000;
 const TITLE_CHARS = 30;
 
 function normalizeMessage(message: AiChatMessage): AiChatMessage {
+  const rawUsage = message.usage;
+  const usage: AiMessageUsage | undefined = rawUsage
+    && Number.isFinite(rawUsage.startedAt)
+    && Number.isFinite(rawUsage.durationMs)
+    ? {
+        credits: typeof rawUsage.credits === 'number' && Number.isFinite(rawUsage.credits) ? rawUsage.credits : null,
+        tokens: typeof rawUsage.tokens === 'number' && Number.isFinite(rawUsage.tokens) ? rawUsage.tokens : null,
+        durationMs: Math.max(0, rawUsage.durationMs),
+        startedAt: rawUsage.startedAt,
+      }
+    : undefined;
   return {
     role: message.role,
     content: message.content.length > MAX_MESSAGE_CHARS ? message.content.slice(0, MAX_MESSAGE_CHARS) : message.content,
@@ -40,6 +65,7 @@ function normalizeMessage(message: AiChatMessage): AiChatMessage {
       ? { reasoning: message.reasoning.length > MAX_MESSAGE_CHARS ? message.reasoning.slice(0, MAX_MESSAGE_CHARS) : message.reasoning }
       : {}),
     ...(message.error ? { error: true as const } : {}),
+    ...(usage ? { usage } : {}),
   };
 }
 
