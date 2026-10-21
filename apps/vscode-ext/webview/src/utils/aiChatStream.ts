@@ -6,6 +6,8 @@
  * 属于不可信内容，禁止注入 HTML）。流式未闭合的围栏按代码块渲染（进行中）。
  */
 
+import type { ChartType } from './chartInference';
+
 export type AiMessageBlock =
   | { type: 'text'; content: string }
   | { type: 'code'; lang: string; content: string }
@@ -62,6 +64,8 @@ export interface AiToolResultPayload {
   isError?: boolean;
   /** 用户消息命中图表意图（路径 A）→ 内联结果默认以图表呈现（可切回表格）。 */
   preferChart?: boolean;
+  /** 用户明确指定的图型；null/缺省时按结果形态推荐。 */
+  preferredChart?: ChartType | null;
   /** 实测执行耗时（ms；SQL in-chat）。 */
   costMs?: number;
   /** 用户取消或确认门禁未放行（无结果集）。 */

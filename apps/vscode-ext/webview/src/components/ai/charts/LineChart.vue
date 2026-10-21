@@ -18,7 +18,7 @@ import {
  * 数据点（点少时）+ 点上数值（单序列且放得下）+ nice ticks（顶刻度 ≥ 最大值）+
  * x 标签公共前缀折叠/抽稀 + 竖向游标悬停（同一 x 的所有序列值）。
  */
-const props = defineProps<{ xLabel: string; xValues: string[]; series: ChartSeries[] }>();
+const props = defineProps<{ xLabel: string; xValues: string[]; series: ChartSeries[]; area?: boolean }>();
 
 const { el, width } = useChartWidth();
 const H = CHART_HEIGHT;
@@ -94,7 +94,7 @@ const leave = () => {
       </g>
       <line v-if="hover !== null" :x1="x(hover)" :x2="x(hover)" :y1="TOP" :y2="baseY" class="ai-chart-cursor" />
       <g v-for="(line, si) in lines" :key="si">
-        <path v-if="series.length === 1" :d="line.area" :fill="line.color" class="ai-chart-area" />
+        <path v-if="series.length === 1" :d="line.area" :fill="line.color" class="ai-chart-area" :class="{ strong: area }" />
         <path :d="line.path" :stroke="line.color" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
         <template v-if="showDots">
           <circle
@@ -136,6 +136,7 @@ const leave = () => {
 .ai-chart-axis { stroke: rgba(125, 125, 125, 0.45); stroke-width: 1; }
 .ai-chart-tick { fill: var(--vscode-descriptionForeground, #888); font-size: 11px; }
 .ai-chart-area { opacity: 0.12; pointer-events: none; }
+.ai-chart-area.strong { opacity: 0.28; }
 .ai-chart-dot { pointer-events: none; stroke: var(--vscode-editor-background, #1e1e1e); stroke-width: 1.5; }
 .ai-chart-cursor { stroke: rgba(125, 125, 125, 0.45); stroke-width: 1; stroke-dasharray: 3 3; }
 .ai-chart-hit { fill: transparent; }

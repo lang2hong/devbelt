@@ -7,7 +7,7 @@
  *   形态不满足 → null（无按钮、不自动画，fail-open 回表格）。
  */
 
-export type ChartType = 'bar' | 'line' | 'pie';
+export type ChartType = 'bar' | 'line' | 'pie' | 'area' | 'stackedBar' | 'horizontalBar';
 
 export interface ChartSeries {
   label: string;
@@ -25,13 +25,32 @@ export interface ChartSpec {
 
 /** 图表意图词（中英，小写匹配；命中任一即视为路径 A）。 */
 const CHART_INTENT_WORDS = [
-  '图表', '柱状', '柱形', '折线', '趋势', '走势', '曲线', '饼图', '占比', '分布',
-  '可视化', '画图', '图形', '直方', 'chart', 'plot', 'visualize', 'visualise', 'graph',
+  '图表', '柱状', '柱形', '折线', '趋势', '走势', '曲线', '饼图', '环形', '占比', '比例', '分布',
+  '可视化', '画图', '图形', '直方', '面积', '横向', '水平', '条形', '堆叠',
+  'chart', 'plot', 'visualize', 'visualise', 'graph', 'area', 'horizontal', 'stacked',
 ];
 
 export function hasChartIntent(text: string): boolean {
   const lower = String(text ?? '').toLowerCase();
   return CHART_INTENT_WORDS.some((w) => lower.includes(w));
+}
+
+/** 用户明确指定的图型；只说“图表/可视化”时返回 null（按数据形态推荐）。 */
+export function preferredChartType(text: string): ChartType | null {
+  const lower = String(text ?? '').toLowerCase();
+  if (/饼图|环形|占比|比例|份额|pie|donut|doughnut/.test(lower)) return 'pie';
+  if (/堆叠|stacked/.test(lower)) return 'stackedBar';
+  if (/横向|水平|条形|horizontal/.test(lower)) return 'horizontalBar';
+  if (/面积|area/.test(lower)) return 'area';
+  if (/折线|曲线|趋势|走势|line|trend/.test(lower)) return 'line';
+  if (/柱状|柱形|直方|bar|column|histogram/.test(lower)) return 'bar';
+  return null;
+}
+
+/** 从可用图型中选中用户偏好；偏好不可用时回退推荐序第一项。 */
+export function chooseChartType(types: readonly ChartType[], preferred?: ChartType | null): ChartType | null {
+  if (types.length === 0) return null;
+  return preferred && types.includes(preferred) ? preferred : types[0]!;
 }
 
 /** 解析数值单元格（去千分位逗号/百分号；失败 → undefined）。 */
@@ -94,9 +113,10 @@ const PIE_MAX_SLICES = 12;
  * - 数值列（去掉 x）按原顺序成序列，最多 6 条（超出忽略）；
  * - 行过滤：至少首个数值列可解析的行才进图；
  * - 资格：柱 ≤ 60 行且数值全非负；线 ≤ 200 点、x 时间样且数值全非负；
- *   饼 = 恰两列、≤ 12 行、数值全正（负值图元会被钳到 0 基线造成误导，
- *   故柱/线同样要求全非负，负值 fail-open 回表格）；
- * - 推荐序：时间样 → 线优先；两列小额全正且非时间样 → 饼优先；否则柱优先。
+ *   饼 = 单指标、≤ 12 行、数值全非负且至少一个正数；额外文本列不影响饼
+ *   （负值图元会被钳到 0 基线造成误导，故柱/线同样要求全非负，负值 fail-open 回表格）；
+ * - 变体：时间单序列追加面积；多序列追加堆叠柱；分类多/标签长追加横向条形；
+ * - 推荐序：时间样 → 线优先；分类小额 → 饼优先；否则柱优先。
  */
 export function inferCharts(header: string[], rows: string[][]): ChartSpec | null {
   if (!Array.isArray(header) || header.length < 2 || !Array.isArray(rows) || rows.length === 0) return null;
@@ -134,20 +154,31 @@ export function inferCharts(header: string[], rows: string[][]): ChartSpec | nul
   };
 
   const timeLike = isTimeLike(spec.xLabel, spec.xValues);
-  const allPositive = spec.series[0]!.values.every((v) => v > 0);
   /** 柱/线要求数值全非负（绘图按 0 基线钳制，负值会失真）。 */
   const allNonNegative = spec.series.every((s) => s.values.every((v) => v >= 0));
-  const twoColumns = header.length === 2;
+  const firstValues = spec.series[0]!.values;
+  const pieOk = spec.series.length === 1
+    && kept.length <= PIE_MAX_SLICES
+    && firstValues.every((v) => v >= 0)
+    && firstValues.some((v) => v > 0);
 
   const barOk = allNonNegative && kept.length <= BAR_MAX_ROWS;
   const lineOk = allNonNegative && timeLike && kept.length <= LINE_MAX_POINTS;
-  const pieOk = twoColumns && spec.series.length === 1 && kept.length <= PIE_MAX_SLICES && allPositive;
+  const singleSeries = spec.series.length === 1;
+  const horizontalOk = barOk && (kept.length > 8 || spec.xValues.some((v) => v.length > 12));
 
-  // 推荐序：时间样 → 线优先；两列小额全正且非时间样 → 饼优先；柱作通用次选。
+  // 推荐序：时间样 → 线/面积；分类小额 → 饼；柱/横向/堆叠按形态追加。
   const types: ChartType[] = [];
-  if (lineOk) types.push('line');
+  if (lineOk) {
+    types.push('line');
+    if (singleSeries) types.push('area');
+  }
   if (!timeLike && pieOk) types.push('pie');
-  if (barOk) types.push('bar');
+  if (barOk) {
+    types.push('bar');
+    if (horizontalOk) types.push('horizontalBar');
+    if (!singleSeries) types.push('stackedBar');
+  }
   if (timeLike && pieOk) types.push('pie');
   spec.types = types;
   if (spec.types.length === 0) return null;

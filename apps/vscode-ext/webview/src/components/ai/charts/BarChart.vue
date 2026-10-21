@@ -19,12 +19,18 @@ import {
  * 水平 x 标签（公共前缀折叠 + 按宽截断 + 放不下时抽稀）+ 分组悬停高亮与提示。
  * 轴名不画在图内：标题行「指标 by 维度」已说明含义。
  */
-const props = defineProps<{ xLabel: string; xValues: string[]; series: ChartSeries[] }>();
+const props = defineProps<{ xLabel: string; xValues: string[]; series: ChartSeries[]; stacked?: boolean }>();
 
 const { el, width } = useChartWidth();
 const H = CHART_HEIGHT;
 
-const maxV = computed(() => Math.max(1, ...props.series.flatMap((s) => s.values.map((v) => Math.abs(v)))));
+const maxV = computed(() => {
+  if (props.stacked) {
+    return Math.max(1, ...props.xValues.map((_, gi) =>
+      props.series.reduce((sum, s) => sum + Math.max(s.values[gi] ?? 0, 0), 0)));
+  }
+  return Math.max(1, ...props.series.flatMap((s) => s.values.map((v) => Math.abs(v))));
+});
 const ticks = computed(() => niceTicks(maxV.value));
 const yMax = computed(() => ticks.value[ticks.value.length - 1] || 1);
 const tickLabels = computed(() => ticks.value.map(fmtChartValue));
@@ -43,7 +49,7 @@ const y = (v: number): number => 20 + plotH - (Math.max(v, 0) / yMax.value) * pl
 const n = computed(() => Math.max(props.xValues.length, 1));
 const groupW = computed(() => plotW.value / n.value);
 const barW = computed(() => {
-  const k = props.series.length;
+  const k = props.stacked ? 1 : props.series.length;
   const cap = k === 1 ? 56 : 36;
   return Math.max(2, Math.min((groupW.value * 0.7) / k, cap));
 });
@@ -58,14 +64,36 @@ function barPath(x: number, top: number, w: number, h: number): string {
 
 const groups = computed(() =>
   props.xValues.map((xv, gi) => {
+    const gx = PAD.value.left + groupW.value * gi;
+    const cx = gx + groupW.value / 2;
+    if (props.stacked) {
+      const bw = barW.value;
+      const start = gx + (groupW.value - bw) / 2;
+      let acc = 0;
+      const bars = props.series.map((s, si) => {
+        const value = Math.max(s.values[gi] ?? 0, 0);
+        const base = acc;
+        acc += value;
+        const top = y(acc);
+        return {
+          value,
+          label: fmtChartValue(value),
+          color: CHART_PALETTE[si % CHART_PALETTE.length]!,
+          x: start,
+          cx: start + bw / 2,
+          top,
+          path: barPath(start, top, bw, y(base) - top),
+        };
+      });
+      return { x: xv, gx, cx, bars, total: acc, totalLabel: fmtChartValue(acc), totalTop: y(acc) };
+    }
     const k = props.series.length;
     const span = barW.value * k + BAR_GAP * (k - 1);
-    const gx = PAD.value.left + groupW.value * gi;
     const start = gx + (groupW.value - span) / 2;
     return {
       x: xv,
       gx,
-      cx: gx + groupW.value / 2,
+      cx,
       bars: props.series.map((s, si) => {
         const value = s.values[gi] ?? 0;
         const bx = start + (barW.value + BAR_GAP) * si;
@@ -80,15 +108,20 @@ const groups = computed(() =>
           path: barPath(bx, top, barW.value, baseY - top),
         };
       }),
+      total: 0,
+      totalLabel: '',
+      totalTop: 0,
     };
   }),
 );
 
 /** 顶值标注：每根柱宽 ≥ 最长数值文本宽才显示（多序列也显示，小值也能直接读）。 */
 const showValues = computed(() => {
+  if (props.stacked) return false;
   const longest = Math.max(...groups.value.flatMap((g) => g.bars.map((b) => textWidth(b.label))));
   return barW.value + BAR_GAP >= longest * 0.92;
 });
+const showStackTotal = computed(() => !!props.stacked && barW.value >= 14);
 
 /** x 标签：公共前缀折叠 → 放不下就抽稀（每 step 个显示一个）→ 按可用宽截断。 */
 const shortLabels = computed(() => smartLabels(props.xValues));
@@ -103,6 +136,7 @@ const { tip, onEnter, onMove, onLeave } = useChartTip();
 const tipText = (gi: number): string => {
   const g = groups.value[gi]!;
   const lines = g.bars.map((b, bi) => `${props.series[bi]!.label}: ${b.value.toLocaleString()}`);
+  if (props.stacked) lines.push(`Total: ${g.total.toLocaleString()}`);
   return [`${props.xLabel}: ${g.x}`, ...lines].join('\n');
 };
 const enter = (gi: number) => (e: MouseEvent) => {
@@ -122,7 +156,7 @@ const leave = () => {
         <i :style="{ background: CHART_PALETTE[si % CHART_PALETTE.length] }"></i>{{ s.label }}
       </span>
     </div>
-    <svg :width="width" :height="H" class="ai-chart-svg" role="img" :aria-label="`${xLabel} bar chart`">
+    <svg :width="width" :height="H" class="ai-chart-svg" role="img" :aria-label="`${xLabel} ${stacked ? 'stacked ' : ''}bar chart`">
       <g v-for="(t, ti) in ticks" :key="ti">
         <line :x1="PAD.left" :x2="width - PAD.right" :y1="y(t)" :y2="y(t)" :class="ti === 0 ? 'ai-chart-axis' : 'ai-chart-grid'" />
         <text :x="PAD.left - 8" :y="y(t) + 4" class="ai-chart-tick" text-anchor="end">{{ tickLabels[ti] }}</text>
@@ -143,6 +177,7 @@ const leave = () => {
         <template v-if="showValues">
           <text v-for="(b, bi) in g.bars" :key="`v${bi}`" :x="b.cx" :y="b.top - 5" class="ai-chart-value" text-anchor="middle">{{ b.label }}</text>
         </template>
+        <text v-if="showStackTotal && g.total > 0" :x="g.cx" :y="g.totalTop - 5" class="ai-chart-value" text-anchor="middle">{{ g.totalLabel }}</text>
         <text
           v-if="gi % labelStep === 0"
           :x="g.cx"

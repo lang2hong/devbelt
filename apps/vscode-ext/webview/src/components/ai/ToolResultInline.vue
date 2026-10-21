@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue';
 import { formatToolResultContent, parseMessageBlocks, type AiToolResultPayload } from '../../utils/aiChatStream';
-import { inferCharts, type ChartType } from '../../utils/chartInference';
+import { chooseChartType, inferCharts, type ChartType } from '../../utils/chartInference';
 import { fmtChartValue } from './charts/chartShared';
 import { useI18n } from '../../composables/useI18n';
 import MarkdownText from './MarkdownText.vue';
 import { OPTIMIZE_SQL_KEY } from '../../utils/runInChat';
 import { formatElapsed, isSlowQuery } from '../../../../src/ai/slowQuery';
 import BarChart from './charts/BarChart.vue';
+import HorizontalBarChart from './charts/HorizontalBarChart.vue';
 import LineChart from './charts/LineChart.vue';
 import PieChart from './charts/PieChart.vue';
 
@@ -40,7 +41,10 @@ const view = ref<View>('table');
 watch(
   () => props.result,
   (r) => {
-    view.value = r.preferChart && chartSpec.value ? chartSpec.value.types[0]! : 'table';
+    const picked = r.preferChart && chartSpec.value
+      ? chooseChartType(chartSpec.value.types, r.preferredChart)
+      : null;
+    view.value = picked ?? 'table';
   },
   { immediate: true },
 );
@@ -49,6 +53,9 @@ const CHART_META: Record<ChartType, { label: string }> = {
   bar: { label: 'wv.ai.chart.bar' },
   line: { label: 'wv.ai.chart.line' },
   pie: { label: 'wv.ai.chart.pie' },
+  area: { label: 'wv.ai.chart.area' },
+  stackedBar: { label: 'wv.ai.chart.stackedBar' },
+  horizontalBar: { label: 'wv.ai.chart.horizontalBar' },
 };
 
 /** 图表语义三件套：标题（按 dim 统计 metrics）/ 副行（原结果标题）/ 提示（项数·总计·悬停）。 */
@@ -91,7 +98,10 @@ const chartHint = computed(() => {
       </div>
       <div class="ai-chart-area">
         <BarChart v-if="view === 'bar'" :x-label="chartSpec.xLabel" :x-values="chartSpec.xValues" :series="chartSpec.series" />
+        <BarChart v-else-if="view === 'stackedBar'" stacked :x-label="chartSpec.xLabel" :x-values="chartSpec.xValues" :series="chartSpec.series" />
+        <HorizontalBarChart v-else-if="view === 'horizontalBar'" :x-label="chartSpec.xLabel" :x-values="chartSpec.xValues" :series="chartSpec.series" />
         <LineChart v-else-if="view === 'line'" :x-label="chartSpec.xLabel" :x-values="chartSpec.xValues" :series="chartSpec.series" />
+        <LineChart v-else-if="view === 'area'" area :x-label="chartSpec.xLabel" :x-values="chartSpec.xValues" :series="chartSpec.series" />
         <PieChart v-else :x-label="chartSpec.xLabel" :x-values="chartSpec.xValues" :series="chartSpec.series" />
       </div>
       <p class="ai-chart-hint">{{ chartHint }}</p>

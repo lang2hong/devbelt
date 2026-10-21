@@ -57,7 +57,7 @@ provide(RUN_IN_CHAT_KEY, (payload: RunInChatPayload) => {
 });
 
 import { autoExecutableSqlBlocks, formatToolResultContent, isForeignSession, type AiRunningPayload, type AiToolResultPayload } from '../utils/aiChatStream';
-import { hasChartIntent } from '../utils/chartInference';
+import { hasChartIntent, preferredChartType } from '../utils/chartInference';
 import { OPTIMIZE_SQL_KEY, RUN_IN_CHAT_KEY, type RunInChatPayload } from '../utils/runInChat';
 import { formatElapsed } from '../../../src/ai/slowQuery';
 
@@ -408,6 +408,7 @@ onMounted(() => {
             costMs: typeof msg.costMs === 'number' ? msg.costMs : undefined,
             canceled: !!msg.canceled,
             preferChart: !!lastUser && hasChartIntent(lastUser.content),
+            preferredChart: lastUser ? preferredChartType(lastUser.content) : null,
           };
           break;
         }

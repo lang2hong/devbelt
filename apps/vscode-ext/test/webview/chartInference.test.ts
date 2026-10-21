@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasChartIntent, inferCharts } from '../../webview/src/utils/chartInference';
+import { chooseChartType, hasChartIntent, inferCharts, preferredChartType } from '../../webview/src/utils/chartInference';
 
 describe('hasChartIntent（图表意图关键词，中英）', () => {
   it('中文意图词命中', () => {
@@ -18,6 +18,22 @@ describe('hasChartIntent（图表意图关键词，中英）', () => {
     expect(hasChartIntent('查询所有用户')).toBe(false);
     expect(hasChartIntent('')).toBe(false);
   });
+
+  it('明确图型偏好：饼/线/面积/横向/堆叠/柱', () => {
+    expect(preferredChartType('各状态占比用饼图')).toBe('pie');
+    expect(preferredChartType('按月的趋势折线图')).toBe('line');
+    expect(preferredChartType('用面积图看月度变化')).toBe('area');
+    expect(preferredChartType('画横向条形图')).toBe('horizontalBar');
+    expect(preferredChartType('用堆叠柱状图')).toBe('stackedBar');
+    expect(preferredChartType('画个柱状图')).toBe('bar');
+    expect(preferredChartType('用图表展示')).toBeNull();
+  });
+
+  it('偏好可用时优先，否则回退推荐序第一项', () => {
+    expect(chooseChartType(['bar', 'pie'], 'pie')).toBe('pie');
+    expect(chooseChartType(['bar', 'pie'], 'line')).toBe('bar');
+    expect(chooseChartType([], 'pie')).toBeNull();
+  });
 });
 
 describe('inferCharts（结果形态 → 图表规格）', () => {
@@ -30,7 +46,7 @@ describe('inferCharts（结果形态 → 图表规格）', () => {
   it('时间样 x + 多数值列 → 线优先 + 多序列（千分位可解析）', () => {
     const spec = inferCharts(['month', 'sales', 'orders'], monthRows());
     expect(spec).not.toBeNull();
-    expect(spec!.types).toEqual(['line', 'bar']);
+    expect(spec!.types).toEqual(['line', 'bar', 'stackedBar']);
     expect(spec!.xLabel).toBe('month');
     expect(spec!.series).toHaveLength(2);
     expect(spec!.series[0]).toEqual({ label: 'sales', values: [1200, 1838, 950] });
@@ -49,7 +65,7 @@ describe('inferCharts（结果形态 → 图表规格）', () => {
   it('类别 x 多行 → 柱优先', () => {
     const rows = Array.from({ length: 20 }, (_, i) => [`dept_${i}`, String(i * 10)]);
     const spec = inferCharts(['dept', 'total'], rows);
-    expect(spec!.types).toEqual(['bar']);
+    expect(spec!.types).toEqual(['bar', 'horizontalBar']);
   });
 
   it('全数值列（无类别轴）→ null；少于两列 → null；空行 → null', () => {
@@ -58,10 +74,19 @@ describe('inferCharts（结果形态 → 图表规格）', () => {
     expect(inferCharts(['a', 'b'], [])).toBeNull();
   });
 
-  it('饼资格：含非正数 → 不给饼；超 12 行 → 不给饼', () => {
-    expect(inferCharts(['k', 'v'], [['a', '0'], ['b', '5']])!.types).not.toContain('pie');
+  it('饼资格：零值可保留，超 12 行仍不给饼', () => {
+    expect(inferCharts(['k', 'v'], [['a', '0'], ['b', '5']])!.types).toContain('pie');
     const rows = Array.from({ length: 13 }, (_, i) => [`k${i}`, '2']);
     expect(inferCharts(['k', 'v'], rows)!.types).not.toContain('pie');
+  });
+
+  it('饼资格：额外文本列不阻止单指标饼图', () => {
+    const spec = inferCharts(
+      ['status', 'label', 'count'],
+      [['active', '运行中', '10'], ['pending', '等待', '5'], ['closed', '关闭', '3']],
+    );
+    expect(spec!.types).toContain('pie');
+    expect(spec!.series).toHaveLength(1);
   });
 
   it('负值：柱/线资格同时失效（fail-open 回表格，不把负值画成 0）', () => {
@@ -103,6 +128,24 @@ describe('inferCharts（结果形态 → 图表规格）', () => {
     const spec = inferCharts(['月份', 'v'], [['1月', '10'], ['2月', '20']]);
     expect(spec!.types[0]).toBe('line');
   });
+
+  it('时间单序列追加面积；多序列追加堆叠柱；长标签追加横向条形', () => {
+    const single = inferCharts(['month', 'sales'], [['2026-01', '10'], ['2026-02', '20']])!;
+    expect(single.types).toContain('area');
+    expect(single.types).toContain('pie');
+    expect(chooseChartType(single.types, 'pie')).toBe('pie');
+
+    const multi = inferCharts(['month', 'sales', 'orders'], [
+      ['2026-01', '10', '2'], ['2026-02', '20', '4'],
+    ])!;
+    expect(multi.types).toContain('stackedBar');
+    expect(multi.types).not.toContain('area');
+
+    const long = inferCharts(['service_name', 'count'], [
+      ['payments-api-production', '10'], ['orders-api-production', '20'],
+    ])!;
+    expect(long.types).toContain('horizontalBar');
+  });
 });
 
 describe('inferCharts（ID 列识别：雪花/手机号/编号不算度量）', () => {
@@ -116,7 +159,7 @@ describe('inferCharts（ID 列识别：雪花/手机号/编号不算度量）', 
       ],
     );
     expect(spec).not.toBeNull();
-    expect(spec!.types).toEqual(['pie', 'bar']);
+    expect(spec!.types).toEqual(['pie', 'bar', 'horizontalBar']);
     expect(spec!.xLabel).toBe('tenant_id');
     expect(spec!.series[0]).toEqual({ label: 'animal_count', values: [168, 849, 821] });
   });
