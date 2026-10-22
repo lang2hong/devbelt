@@ -76,6 +76,15 @@ function aiExplain(): void {
   post({ type: 'aiExplain', index: active.value });
 }
 
+const copiedSuggestion = ref<string | null>(null);
+
+function copySuggestion(sql: string): void {
+  post({ type: 'copyText', text: sql });
+  copiedSuggestion.value = sql;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => { copiedSuggestion.value = null; }, 1500);
+}
+
 function copyRaw(): void {
   if (!rawText.value) return;
   post({ type: 'copyText', text: rawText.value });
@@ -237,6 +246,32 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <section v-if="currentPlan" class="suggest" :aria-label="t('wv.explain.suggest.title')">
+        <div class="suggest-head">
+          <span class="details-title">{{ t('wv.explain.suggest.title') }}</span>
+          <span class="muted">{{ t('wv.explain.suggest.notice') }}</span>
+        </div>
+        <div v-if="!current.suggestions || current.suggestions.length === 0" class="muted">
+          {{ t('wv.explain.suggest.none') }}
+        </div>
+        <div v-for="s in current.suggestions ?? []" :key="s.sql" class="suggestion">
+          <div class="suggest-row">
+            <span class="chip" :class="`conf-${s.confidence}`">{{ t(`wv.explain.suggest.confidence.${s.confidence}`) }}</span>
+            <code class="ddl">{{ s.sql }}</code>
+            <button class="btn" @click="copySuggestion(s.sql)">
+              {{ copiedSuggestion === s.sql ? t('wv.explain.copied') : t('wv.explain.suggest.copy') }}
+            </button>
+          </div>
+          <ul class="notes">
+            <li v-for="r in s.reasons" :key="`r-${r}`">{{ t(`wv.explain.suggest.reason.${r}`) }}</li>
+            <li v-for="r in s.risks" :key="`k-${r}`" class="risk">{{ t(`wv.explain.suggest.risk.${r}`) }}</li>
+          </ul>
+        </div>
+        <div v-for="r in current.redundantIndexes ?? []" :key="`${r.table}.${r.index}`" class="muted">
+          {{ t('wv.explain.suggest.redundant', { table: r.table, index: r.index, coveredBy: r.coveredBy }) }}
+        </div>
+      </section>
+
       <div v-else-if="current.fallback" class="fallback">
         <div class="fallback-title">{{ t('wv.explain.fallback') }}</div>
         <div class="muted">{{ t('wv.explain.fallbackReason', { reason: current.fallback.reason }) }}</div>
@@ -308,4 +343,14 @@ pre { margin: 6px 0; padding: 8px; overflow: auto; background: var(--vscode-text
 .fallback { padding: 10px; overflow: auto; }
 .fallback-title { font-weight: 600; margin-bottom: 4px; }
 .empty { padding: 16px; color: var(--vscode-descriptionForeground, #888); }
+.suggest { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.18)); padding: 8px 10px; font-size: 12px; overflow: auto; max-height: 35vh; }
+.suggest-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+.suggestion { padding: 6px 0; border-bottom: 1px dashed var(--vscode-panel-border, rgba(128,128,128,.18)); }
+.suggest-row { display: flex; align-items: center; gap: 8px; }
+.ddl { flex: 1; font-family: var(--vscode-editor-font-family, monospace); white-space: pre-wrap; word-break: break-all; }
+.notes { margin: 4px 0 0 18px; padding: 0; }
+.notes .risk { color: var(--vscode-descriptionForeground, #888); }
+.chip.conf-high { background: var(--vscode-charts-green, #388a34); }
+.chip.conf-medium { background: var(--vscode-charts-blue, #3794ff); }
+.chip.conf-low { background: var(--vscode-badge-background, #4d4d4d); }
 </style>

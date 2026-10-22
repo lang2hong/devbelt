@@ -376,7 +376,7 @@ Explain / SlowQuery / Dictionary 使用独立 webview mode 或独立 Panel：
 | 9 | 真实库矩阵 + 性能 + i18n |
 | 10 | VSIX smoke + 截图 + CHANGELOG |
 
-> 进度（2026-10-22）：阶段 1–3 已完成。`packages/explain-core` 提供 MySQL / PostgreSQL / SQLite 解析、统一计划模型、告警识别与异常回退；ExplainView 已接入结构化 EXPLAIN、计划树、节点详情、告警高亮、原始计划复制与回退。S3.1 已修复阶段 Review 问题（MySQL 默认库回退、报错与回退区分、过期结果丢弃、告警按 `largeScanRows`（默认 1000）收紧、原始计划 1 MB 上限、面板生命周期测试）。真实库矩阵与 F5 手工走查尚未执行（归入阶段 9）。阶段 4 已完成：ExplainView 提供「AI 解释计划」，把当前语句的规范化计划文本（≤200 节点 / 8000 字符）经 AI Chat 解释，复用 `optimize` 配额与审计，暂不带 schema 上下文。阶段 5 已完成（本地历史部分）：`DevBelt: Slow Queries` 面板按 连接 + 库 + SQL 模板聚合本机查询历史，支持按总/平均/最大耗时与次数排序、按连接/时间/关键字过滤、失败计数、一键打开 SQL 或 EXPLAIN；历史保留量可配置（`devbelt.insights.historyLimit`，10–1000，默认 100）。服务器统计（performance_schema / pg_stat_statements）未做，需真实库与权限验证。阶段 6 起待实施。
+> 进度（2026-10-22）：阶段 1–3 已完成。`packages/explain-core` 提供 MySQL / PostgreSQL / SQLite 解析、统一计划模型、告警识别与异常回退；ExplainView 已接入结构化 EXPLAIN、计划树、节点详情、告警高亮、原始计划复制与回退。S3.1 已修复阶段 Review 问题（MySQL 默认库回退、报错与回退区分、过期结果丢弃、告警按 `largeScanRows`（默认 1000）收紧、原始计划 1 MB 上限、面板生命周期测试）。真实库矩阵与 F5 手工走查尚未执行（归入阶段 9）。阶段 4 已完成：ExplainView 提供「AI 解释计划」，把当前语句的规范化计划文本（≤200 节点 / 8000 字符）经 AI Chat 解释，复用 `optimize` 配额与审计，暂不带 schema 上下文。阶段 5 已完成（本地历史部分）：`DevBelt: Slow Queries` 面板按 连接 + 库 + SQL 模板聚合本机查询历史，支持按总/平均/最大耗时与次数排序、按连接/时间/关键字过滤、失败计数、一键打开 SQL 或 EXPLAIN；历史保留量可配置（`devbelt.insights.historyLimit`，10–1000，默认 100）。服务器统计（performance_schema / pg_stat_statements）未做，需真实库与权限验证。阶段 6 已完成：ExplainView 增加「索引建议」，仅针对计划中大表全扫描 / filesort 的表，用保守的谓词提取（简单等值/范围/JOIN/ORDER BY，遇 OR、函数包裹、子查询即放弃）按「等值 → 范围 → 排序」组合，跳过已有索引前缀、排除主键/唯一列，DDL 由方言 `createIndexSql` 生成、只复制不执行；同时提示冗余前缀索引。降级说明：拿不到列选择性（无统计），因此置信度最高为「中」、低基数类型（bool/tinyint(1)）降为「低」，并在风险中标注「选择性未知」。阶段 7 起待实施。
 
 ## 11. 风险与开放问题
 

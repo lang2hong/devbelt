@@ -38,7 +38,7 @@ const MYSQL_PLAN = { EXPLAIN: JSON.stringify({ query_block: { select_id: 1, tabl
 
 type Handler = (sql: string) => unknown;
 
-function makeManager(handler: Handler) {
+function makeManager(handler: Handler, metadata?: Record<string, unknown>) {
   const executed: string[] = [];
   const query = vi.fn(async (sql: string) => {
     executed.push(sql);
@@ -49,7 +49,7 @@ function makeManager(handler: Handler) {
     retain: vi.fn(),
     release: vi.fn(),
     scanOptionsFor: () => undefined,
-    connectSql: vi.fn(async () => ({ query: { query, wrap: (s: string) => `\`${s}\`` } })),
+    connectSql: vi.fn(async () => ({ query: { query, wrap: (s: string) => `\`${s}\`` }, ...(metadata ? { metadata } : {}) })),
   };
   return { manager, executed, query };
 }
@@ -290,6 +290,52 @@ describe('ExplainPanel', () => {
       await view.handleMessage({ type: 'aiExplain', index: 0 });
       expect(h.bridge.requestChat).not.toHaveBeenCalled();
       expect(posts(view).at(-1)).toMatchObject({ type: 'error' });
+    });
+  });
+
+  describe('index suggestions', () => {
+    const FILTERED_PLAN = { EXPLAIN: JSON.stringify({ query_block: { select_id: 1, table: { table_name: 'users', access_type: 'ALL', rows_examined_per_scan: 5000, attached_condition: "(`users`.`status` = 'x')" } } }) };
+
+    it('attaches suggestions to the plan payload', async () => {
+      const metadata = {
+        getColumns: vi.fn(async () => [{ name: 'id', type: 'int', isPrimary: true, isUnique: false }, { name: 'status', type: 'varchar(20)', isPrimary: false, isUnique: false }]),
+        getIndexes: vi.fn(async () => []),
+        createIndexSql: (name: string, table: string, cols: string[]) => `CREATE INDEX ${name} ON ${table} (${cols.join(', ')})`,
+      };
+      const { manager } = makeManager(() => [FILTERED_PLAN], metadata);
+      ExplainPanel.open(manager, conn(), "SELECT * FROM users WHERE status = 'x'");
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      const stmt = posts(view).find((m) => m.type === 'explainPlan').statements[0];
+      expect(stmt.plan).not.toBeNull();
+      expect(stmt.suggestions).toEqual([
+        expect.objectContaining({ table: 'users', columns: ['status'], sql: 'CREATE INDEX idx_users_status ON users (status)' }),
+      ]);
+      expect(metadata.getColumns).toHaveBeenCalledWith('users', 'app', undefined);
+    });
+
+    it('still shows the plan when metadata reads fail', async () => {
+      const metadata = {
+        getColumns: vi.fn(async () => { throw new Error('denied'); }),
+        getIndexes: vi.fn(async () => []),
+        createIndexSql: vi.fn(),
+      };
+      const { manager } = makeManager(() => [FILTERED_PLAN], metadata);
+      ExplainPanel.open(manager, conn(), "SELECT * FROM users WHERE status = 'x'");
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      const stmt = posts(view).find((m) => m.type === 'explainPlan').statements[0];
+      expect(stmt.plan.roots[0].children[0].object).toBe('users');
+      expect(stmt.suggestions).toEqual([]);
+    });
+
+    it('does not read metadata when the plan has no flagged table', async () => {
+      const metadata = { getColumns: vi.fn(), getIndexes: vi.fn(), createIndexSql: vi.fn() };
+      const SMALL = { EXPLAIN: JSON.stringify({ query_block: { select_id: 1, table: { table_name: 'users', access_type: 'ref', key: 'k', rows_examined_per_scan: 1 } } }) };
+      const { manager } = makeManager(() => [SMALL], metadata);
+      ExplainPanel.open(manager, conn(), 'SELECT * FROM users WHERE id = 1');
+      await mount(ExplainPanel.find('c1'));
+      expect(metadata.getColumns).not.toHaveBeenCalled();
     });
   });
 });

@@ -89,6 +89,25 @@ export interface ExplainFallbackView {
   text: string;
 }
 
+/** P10 S6：一条索引建议（仅建议，从不执行）。 */
+export interface IndexSuggestionView {
+  table: string;
+  columns: string[];
+  name: string;
+  /** 方言 createIndexSql 生成的 DDL（标识符已校验）。 */
+  sql: string;
+  confidence: 'high' | 'medium' | 'low';
+  reasons: string[];
+  risks: string[];
+}
+
+/** 已有索引是另一索引的前缀（信息提示）。 */
+export interface RedundantIndexView {
+  table: string;
+  index: string;
+  coveredBy: string;
+}
+
 /** 一条 EXPLAIN 语句的结果：plan 与 fallback 二选一。 */
 export interface ExplainStatementView {
   sql: string;
@@ -96,6 +115,9 @@ export interface ExplainStatementView {
   fallback?: ExplainFallbackView;
   /** 原始计划超过消息上限被省略（计划树仍完整）。 */
   rawTruncated?: boolean;
+  /** 索引建议（仅结构化计划；元数据读取失败时为空数组）。 */
+  suggestions?: IndexSuggestionView[];
+  redundantIndexes?: RedundantIndexView[];
 }
 
 /** webview → Extension Host。 */

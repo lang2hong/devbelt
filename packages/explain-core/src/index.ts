@@ -13,6 +13,26 @@ export {
   DEFAULT_FORMAT_MAX_NODES,
   type FormatPlanOptions,
 } from './format.js';
+export {
+  extractPredicates,
+  type ColumnPredicate,
+  type PredicateExtraction,
+  type PredicateKind,
+} from './predicates.js';
+export {
+  suggestIndexes,
+  suggestedIndexName,
+  type AdvisorColumn,
+  type AdvisorIndex,
+  type AdvisorTable,
+  type IndexAdvice,
+  type IndexAdvisorInput,
+  type IndexSuggestion,
+  type RedundantIndex,
+  type SuggestionConfidence,
+  type SuggestionReason,
+  type SuggestionRisk,
+} from './indexAdvisor.js';
 
 /** Parse an EXPLAIN result using the dialect that produced it. */
 export function parseExplain(

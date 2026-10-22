@@ -16,6 +16,7 @@ import { diagError } from '../utils/diagnostics';
 import { buildExplainPlanMessages } from '@devbelt/ai-core';
 import { DEFAULT_FORMAT_MAX_CHARS, formatPlanText } from '@devbelt/explain-core';
 import { AiBridge } from '../ai/aiBridge';
+import { buildIndexSuggestions } from './indexSuggestions';
 import {
   buildExplainQuery,
   dialectFor,
@@ -256,9 +257,32 @@ export class ExplainPanel extends BaseWebView {
         }
 
         const parsed = parseExplainRows(dialect, rows);
-        payloads.push(limitStatementPayload(parsed.ok
-          ? { sql: statement, plan: { ...parsed.plan, raw: display } }
-          : { sql: statement, plan: null, fallback: { reason: parsed.error, rows: display, text: rowsToText(rows) } }));
+        if (!parsed.ok) {
+          payloads.push(limitStatementPayload({
+            sql: statement,
+            plan: null,
+            fallback: { reason: parsed.error, rows: display, text: rowsToText(rows) },
+          }));
+          continue;
+        }
+        let advice: Awaited<ReturnType<typeof buildIndexSuggestions>> = { suggestions: [], redundant: [] };
+        try {
+          advice = await buildIndexSuggestions(statement, parsed.plan, {
+            session,
+            dbType: this.conn.dbType,
+            ...(database ? { database } : {}),
+            ...(this.schema ? { schema: this.schema } : {}),
+          });
+        } catch (adviceError) {
+          // 建议是附加信息：失败只记诊断，不影响计划展示。
+          diagError('index suggestions failed', (adviceError as Error)?.message ?? String(adviceError));
+        }
+        payloads.push(limitStatementPayload({
+          sql: statement,
+          plan: { ...parsed.plan, raw: display },
+          suggestions: advice.suggestions,
+          redundantIndexes: advice.redundant,
+        }));
       }
 
       if (!isCurrent()) return;
