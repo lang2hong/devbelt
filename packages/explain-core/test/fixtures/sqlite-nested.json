@@ -1,0 +1,6 @@
+[
+  { "id": 1, "parent": 0, "notused": 0, "detail": "CO-ROUTINE 2" },
+  { "id": 2, "parent": 1, "notused": 0, "detail": "SCAN t" },
+  { "id": 3, "parent": 1, "notused": 0, "detail": "SEARCH u USING COVERING INDEX idx_u (id=?)" },
+  { "id": 4, "parent": 1, "notused": 0, "detail": "SEARCH p USING INTEGER PRIMARY KEY (rowid=?)" }
+]

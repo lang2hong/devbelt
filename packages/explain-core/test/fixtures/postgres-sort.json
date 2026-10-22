@@ -1,0 +1,20 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Sort",
+      "Sort Method": "external merge",
+      "Sort Key": ["created_at"],
+      "Plan Rows": 100,
+      "Total Cost": 200,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Relation Name": "logs",
+          "Plan Rows": 10000,
+          "Total Cost": 180,
+          "Plans": []
+        }
+      ]
+    }
+  }
+]

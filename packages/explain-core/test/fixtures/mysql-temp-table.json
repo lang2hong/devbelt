@@ -1,0 +1,3 @@
+{
+  "EXPLAIN": "{\"query_block\":{\"select_id\":1,\"grouping_operation\":{\"using_temporary_table\":true,\"table\":{\"table_name\":\"events\",\"access_type\":\"range\",\"key\":\"idx_day\",\"rows_examined_per_scan\":300,\"cost_info\":{\"prefix_cost\":\"55.00\"}}}}}"
+}

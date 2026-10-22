@@ -1,0 +1,15 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Seq Scan",
+      "Relation Name": "users",
+      "Alias": "users",
+      "Plan Rows": 1000,
+      "Total Cost": 35.5,
+      "Filter": "(status = 'active'::text)",
+      "Plans": []
+    },
+    "Planning Time": 0.2,
+    "Execution Time": 1.5
+  }
+]

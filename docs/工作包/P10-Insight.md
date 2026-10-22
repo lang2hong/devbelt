@@ -376,6 +376,8 @@ Explain / SlowQuery / Dictionary 使用独立 webview mode 或独立 Panel：
 | 9 | 真实库矩阵 + 性能 + i18n |
 | 10 | VSIX smoke + 截图 + CHANGELOG |
 
+> 进度（2026-10-22）：阶段 1–2 已完成。`packages/explain-core` 已提供 MySQL / PostgreSQL / SQLite 解析、统一计划模型、告警识别与异常回退；阶段 3 起待实施。
+
 ## 11. 风险与开放问题
 
 | 风险 | 应对 |

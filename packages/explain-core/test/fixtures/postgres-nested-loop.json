@@ -1,0 +1,30 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Nested Loop",
+      "Join Type": "Inner",
+      "Plan Rows": 10,
+      "Total Cost": 120,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Relation Name": "orders",
+          "Plan Rows": 100,
+          "Total Cost": 20,
+          "Filter": "(status = 'paid'::text)",
+          "Plans": []
+        },
+        {
+          "Node Type": "Index Scan",
+          "Relation Name": "users",
+          "Index Name": "users_pkey",
+          "Plan Rows": 1,
+          "Total Cost": 8,
+          "Plans": []
+        }
+      ]
+    },
+    "Planning Time": 0.5,
+    "Execution Time": 2.2
+  }
+]
