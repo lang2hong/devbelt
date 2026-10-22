@@ -23,7 +23,7 @@ export class ConnectionDecorationProvider implements FileDecorationProvider, Dis
     if (!conn) return undefined;
     const spec = connectionDecorationSpec(conn);
     if (!spec) return undefined;
-    return { badge: spec.badge, color: new ThemeColor(spec.colorToken) };
+    return { color: new ThemeColor(spec.colorToken) };
   }
 
   dispose(): void {

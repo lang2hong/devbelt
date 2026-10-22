@@ -29,9 +29,10 @@ describe('Elasticsearch 菜单与表单（P8 S2）', () => {
     expectMenu('devbelt.copyNodeName', 'esIndex.ELASTICSEARCH');
   });
 
-  it('连接表单 dbType 下拉含 Elasticsearch 选项（否则 ES 表单段不可达）', () => {
+  it('连接表单类型选择含 Elasticsearch（否则 ES 表单段不可达）', () => {
     const vue = readFileSync(join(process.cwd(), 'webview/src/views/ConnectionFormView.vue'), 'utf8');
-    expect(vue).toMatch(/<option value="ELASTICSEARCH"/);
+    expect(vue).toContain("value: 'ELASTICSEARCH'");
+    expect(vue).toContain('@click="setDbType(opt.value)"');
   });
 
   it('表单 ES 字段被消费：协议 / 认证方式 / Basic 用户名 / API Key', () => {

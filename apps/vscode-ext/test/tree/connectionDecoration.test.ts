@@ -6,14 +6,17 @@ describe('connectionDecoration', () => {
     expect(connectionResource('c1')).toBe(`${CONN_DECORATION_SCHEME}://c1`);
   });
 
-  it('自定义色优先，且不加徽标', () => {
+  it('自定义色优先', () => {
     expect(connectionDecorationSpec({ environment: 'production', color: '#3b82f6' } as never)).toEqual({ colorToken: 'charts.blue' });
+    expect(connectionDecorationSpec({ environment: 'development', color: '#3b82f6' } as never)).toEqual({ colorToken: 'charts.blue' });
   });
 
-  it('production=P/红、staging=S/橙，其它环境不装饰', () => {
-    expect(connectionDecorationSpec({ environment: 'production' } as never)).toEqual({ badge: 'P', colorToken: 'errorForeground' });
-    expect(connectionDecorationSpec({ environment: 'staging' } as never)).toEqual({ badge: 'S', colorToken: 'editorWarning.foreground' });
-    expect(connectionDecorationSpec({ environment: 'dev' } as never)).toBeUndefined();
+  it('production/staging 保留标签色，其它环境不装饰', () => {
+    expect(connectionDecorationSpec({ environment: 'production' } as never)).toEqual({ colorToken: 'errorForeground' });
+    expect(connectionDecorationSpec({ environment: 'staging' } as never)).toEqual({ colorToken: 'editorWarning.foreground' });
+    expect(connectionDecorationSpec({ environment: 'development' } as never)).toBeUndefined();
+    expect(connectionDecorationSpec({ environment: 'test' } as never)).toBeUndefined();
+    expect(connectionDecorationSpec({ environment: 'sandbox' } as never)).toBeUndefined();
     expect(connectionDecorationSpec({} as never)).toBeUndefined();
   });
 });

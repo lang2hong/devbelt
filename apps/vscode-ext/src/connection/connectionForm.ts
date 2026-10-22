@@ -101,7 +101,7 @@ export class ConnectionForm extends BaseWebView {
     presetGroupId?: string,
     private resolveEffective?: (conn: SavedConnection) => SavedConnection,
   ) {
-    super('devbelt.connectionForm', editing ? 'Edit Connection' : 'New Connection');
+    super('devbelt.connectionForm', editing ? l10n('wv.form.editTitle') : l10n('wv.form.title'));
     this.groups = groups;
     this.onSaved = onSaved;
     this.editing = editing;
@@ -122,6 +122,7 @@ export class ConnectionForm extends BaseWebView {
       ConnectionForm.current.editing = editing;
       ConnectionForm.current.presetGroupId = presetGroupId;
       ConnectionForm.current.resolveEffective = resolveEffective;
+      ConnectionForm.current.updateTitle();
       ConnectionForm.current.sendInit();
       return;
     }
@@ -135,6 +136,10 @@ export class ConnectionForm extends BaseWebView {
     }
     try {
       switch (msg.type) {
+        case 'cancel': {
+          this.panel.dispose();
+          break;
+        }
         case 'test': {
           // 编辑连接时表单不回传未改动的密钥（留空=保留），测试需回退到已保存值。
           const conn = mergeSecretsFromStored(decodeConnection(msg.payload), this.editing);
@@ -168,7 +173,13 @@ export class ConnectionForm extends BaseWebView {
     if (ConnectionForm.current === this) ConnectionForm.current = undefined;
   }
 
+  /** 面板 tab 标题跟随新建/编辑与当前语言（复用同一个面板时也要更新）。 */
+  private updateTitle(): void {
+    this.panel.title = this.editing ? l10n('wv.form.editTitle') : l10n('wv.form.title');
+  }
+
   private sendInit(): void {
+    this.updateTitle();
     // 打开表单期间分组可能被别处增删：构造时缓存的分组会过期，下拉选项陈旧。
     // 发送前从存储重新读取。
     this.groups = this.store.getGroups();

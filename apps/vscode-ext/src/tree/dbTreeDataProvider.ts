@@ -9,6 +9,7 @@ import { validateConnectionPaths, type PathValidationResult, type PathValidation
 import { DbTreeNode, NodeKind, type CategoryType } from './dbTreeNode';
 import { dbTypeIconFile, type ConnIconState } from './dbTypeIcon';
 import { connectionResource } from './connectionDecoration';
+import { connectionEnvironmentLabel } from './connectionEnvironment';
 import { MetadataNodeBuilder } from './metadataNodeBuilder';
 import { RedisKeyTreeState } from './redisKeyTreeState';
 import { visibleRedisDbIndexes } from './redisDbList';
@@ -774,8 +775,10 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
     const logo = this.dbTypeIcon(conn, state);
     const pathCheck = this.pathIssues.get(conn.id);
     const hasPathIssues = !!pathCheck && !pathCheck.valid;
+    const envLabel = connectionEnvironmentLabel(conn.environment) ?? '';
     if (!isOpen) {
       node.id = `closed_${conn.id}`;
+      node.description = envLabel;
       // 不传 arguments：带参的 TreeItem.command 会被 VS Code 缓存成 `<cmd> /N`，
       // 整树刷新释放旧槽后，落在刷新窗口里的点击会报 command not found。
       // 命令侧从当前树选中节点解析连接。
@@ -792,7 +795,7 @@ export class DbTreeDataProvider implements TreeDataProvider<DbTreeNode> {
       }
     } else {
       node.id = conn.id;
-      node.description = this.connVersions.get(conn.id) || '';
+      node.description = [envLabel, this.connVersions.get(conn.id)].filter(Boolean).join(' · ');
       node.iconPath = logo;
       node.tooltip = this.connectionTooltip(conn, pathCheck);
     }

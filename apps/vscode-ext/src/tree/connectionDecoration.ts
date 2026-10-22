@@ -16,24 +16,23 @@ export function connectionResource(id: string): string {
 }
 
 export interface ConnectionDecorationSpec {
-  /** 右侧小徽标（1–2 字符）；无则为纯标签着色。 */
-  badge?: string;
   /** 主题色 token（`ThemeColor` 只接受 token，不接受 hex）。 */
   colorToken: string;
 }
 
 /**
- * 连接 → 装饰规格：
- * - 用户自定义色优先（仅着色，不加徽标）；
- * - 否则 production=`P`红 / staging=`S`橙；
- * - 其它环境返回 undefined（不装饰，避免噪音）。
+ * 连接 → 标签颜色规格。
+ *
+ * 环境文字由 `connectionEnvironmentLabel` 放在 TreeItem.description 中；
+ * 这里只保留自定义色与 production/staging 的标签色。连接节点有 iconPath，
+ * FileDecoration.badge 不会被渲染，因此不再返回 badge。
  */
 export function connectionDecorationSpec(
   conn: Pick<SavedConnection, 'environment' | 'color'>,
 ): ConnectionDecorationSpec | undefined {
   const custom = connectionColorToken(conn.color);
   if (custom) return { colorToken: custom };
-  if (conn.environment === 'production') return { badge: 'P', colorToken: 'errorForeground' };
-  if (conn.environment === 'staging') return { badge: 'S', colorToken: 'editorWarning.foreground' };
+  if (conn.environment === 'production') return { colorToken: 'errorForeground' };
+  if (conn.environment === 'staging') return { colorToken: 'editorWarning.foreground' };
   return undefined;
 }

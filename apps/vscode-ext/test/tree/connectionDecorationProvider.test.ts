@@ -27,20 +27,22 @@ describe('ConnectionDecorationProvider', () => {
     expect(p.provideFileDecoration({ scheme: 'file', authority: 'c1' } as never)).toBeUndefined();
   });
 
-  it('未知连接返回 undefined；命中返回 badge + 主题色', () => {
+  it('未知连接返回 undefined；命中返回主题色', () => {
     const p = new ConnectionDecorationProvider(storeWith({ id: 'c1', environment: 'production' }) as never);
     expect(p.provideFileDecoration({ scheme: 'devbelt-conn', authority: 'nope' } as never)).toBeUndefined();
     const deco = p.provideFileDecoration({ scheme: 'devbelt-conn', authority: 'c1' } as never);
-    expect(deco?.badge).toBe('P');
+    expect(deco?.badge).toBeUndefined();
     expect((deco?.color as unknown as { id: string })?.id).toBe('errorForeground');
   });
 
-  it('无装饰环境返回 undefined', () => {
-    const p = new ConnectionDecorationProvider(storeWith({ id: 'c1', environment: 'dev' }) as never);
-    expect(p.provideFileDecoration({ scheme: 'devbelt-conn', authority: 'c1' } as never)).toBeUndefined();
+  it('未知环境/development 返回 undefined', () => {
+    const unknown = new ConnectionDecorationProvider(storeWith({ id: 'c1', environment: 'sandbox' }) as never);
+    expect(unknown.provideFileDecoration({ scheme: 'devbelt-conn', authority: 'c1' } as never)).toBeUndefined();
+    const dev = new ConnectionDecorationProvider(storeWith({ id: 'c1', environment: 'development' }) as never);
+    expect(dev.provideFileDecoration({ scheme: 'devbelt-conn', authority: 'c1' } as never)).toBeUndefined();
   });
 
-  it('store 变更触发 onDidChangeFileDecorations（防徽标 stale）', () => {
+  it('store 变更触发 onDidChangeFileDecorations（防装饰 stale）', () => {
     const store = storeWith({ id: 'c1', environment: 'production' });
     const p = new ConnectionDecorationProvider(store as never);
     let fired = 0;
