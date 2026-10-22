@@ -48,7 +48,7 @@ async function submit() {
 
 <template>
   <div class="card">
-    <h1>登录 DB Client</h1>
+    <h1>登录 DevBelt</h1>
     <form @submit.prevent="submit">
       <label>邮箱</label>
       <input v-model="email" type="email" autocomplete="username" required />

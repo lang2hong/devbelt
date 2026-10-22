@@ -146,7 +146,7 @@ function toggleTheme(): void {
     <template v-else-if="me_">
       <header class="top">
         <nav class="nav" aria-label="主导航">
-          <a class="brand" href="/">DB Client</a>
+          <a class="brand" href="/">DevBelt</a>
           <a class="home" href="/" title="返回 DevBelt 首页">首页</a>
           <a
             v-for="g in NAV"

@@ -45,7 +45,7 @@ describe('套件首页渲染', () => {
 
   it('工具段列出已发布扩展与待开发项，并带 Marketplace 链接', () => {
     const html = renderHome();
-    for (const tool of ['DB Client', 'DevBelt DB Client', 'REST NEO', 'l2h-harness']) {
+    for (const tool of ['DevBelt', 'DevBelt DB Client', 'REST NEO', 'l2h-harness']) {
       expect(html).toContain(tool);
     }
     expect(html).toContain('https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client');

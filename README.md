@@ -1,6 +1,6 @@
-# DB Client
+# DevBelt
 
-集成在 VS Code 中的数据库客户端，支持 MySQL、SQLite、PostgreSQL 本地连接，带账号体系和端到端加密个人连接同步（开发中）。
+集成在 VS Code 中的数据库客户端，支持 MySQL / PostgreSQL / SQLite 本地连接、Redis、Elasticsearch、AI 辅助，以及端到端加密的个人连接同步、2FA/TOTP 验证器。
 
 ## 功能
 
@@ -14,12 +14,12 @@
 - Redis：单机/Cluster/Sentinel、键浏览与五类型 CRUD、Stream、字节级 hex、CLI 控制台、命令日志
 - Elasticsearch：集群总览、索引/mapping/文档 CRUD、DSL 查询、REST 控制台、只读切面 fail-closed
 - 账号注册/登录、邮箱验证、令牌自动轮换、设备会话管理
-- AI 能力（P9 代码全部交付（S1–S6），待发布硬门禁验收）：NL2SQL（Alt+A 生成+意图复述/假设状态条+一键 Chat 细化回路+ENUM/字典映射+大库预筛）、SQL 解释/优化（含 EXPLAIN）、AI Chat 面板（独立 WebviewPanel，流式/会话历史/schema 上下文/Context 明细）、错误诊断（敏感阻断）、数据问答（样本默认不发）、表设计 AI 生成/审阅（结果回 Chat）、代码块插入/执行；Inline 补全（S5 已交付：`Alt+/` 手动触发 Ghost-Text，默认关）；**加油包（多档位购买+管理后台建单）移 P9.1**；P9 v1 单段月额度（Free/Pro，服务端代理 parse-and-forward + `GET /api/ai/usage`），双通道（自带 Key + 服务端代理）。（详见 [P9 阶段文档](docs/阶段/P9-AI.md)）
+- AI 能力（P9 代码全部交付（S1–S6），待发布硬门禁验收）：NL2SQL（Alt+A 生成+意图复述/假设状态条+一键 Chat 细化回路+ENUM/字典映射+大库预筛）、SQL 解释/优化（含 EXPLAIN）、AI Chat 面板（独立 WebviewPanel，流式/会话历史/schema 上下文/Context 明细）、错误诊断（敏感阻断）、数据问答（样本默认不发）、表设计 AI 生成/审阅（结果回 Chat）、代码块插入/执行；Inline 补全（S5 已交付：`Alt+/` 手动触发 Ghost-Text，默认关）；**加油包（多档位购买+管理后台建单）移 P9.1**；P9 v1 单段月额度（Free/Pro，服务端代理 parse-and-forward + `GET /api/ai/usage`），双通道（自带 Key + 服务端代理）。（详见 [P9 工作包](docs/工作包/P9-AI.md)）
 - 中英双语
 
-**个人连接同步**：底层密码学、协议与端到端运行时/UI 均已实现（`devbelt.syncNow` 已注册）；待**双设备安装版验证**（B6 矩阵）。v2 目标为**连接 + 分组 + 保存查询 + 查询文件夹全量同步**，树内容跨设备一致；本机路径字段随 E2EE 密文同步。详见[P2 v2 阶段文档](docs/阶段/P2-个人同步-v2.md)。
+**个人连接同步**：底层密码学、协议与端到端运行时/UI 均已实现（`devbelt.syncNow` 已注册）；待**双设备安装版验证**（B6 矩阵）。v2 目标为**连接 + 分组 + 保存查询 + 查询文件夹全量同步**，树内容跨设备一致；本机路径字段随 E2EE 密文同步。详见[P2 v2 工作包](docs/工作包/P2-个人同步-v2.md)。
 
-**安装版可用性**：命令/视图注册测试通过，但尚未完成干净 Profile VSIX smoke test，见[P0 阶段文档](docs/阶段/P0-安装版可用性.md)。
+**安装版可用性**：命令/视图注册测试通过，但尚未完成干净 Profile VSIX smoke test，见[发布与运维](docs/发布与运维.md) 的安装版 smoke 章节。
 
 ## 文档
 
@@ -28,8 +28,10 @@
 | [产品介绍](docs/产品介绍.md) | 产品能力和当前开发状态 |
 | [架构](docs/架构.md) | 代码结构、包职责、关键运行流程 |
 | [开发指南](docs/开发指南.md) | 环境、构建、测试、调试 |
-| [路线图](docs/路线图.md) | 阶段顺序、目标、完成定义 |
-| [阶段文档](docs/README.md#阶段文档) | 每个阶段的完整规格与验收 |
+| [版本路线图](docs/版本路线图.md) | 0.1.0 之后的版本线、功能批次与发布门禁 |
+| [发布与运维](docs/发布与运维.md) | 发布、验收门禁、部署、回滚、运行 |
+| [工作包](docs/工作包/README.md) | 单一功能规格与状态 |
+| [文档中心](docs/README.md) | 线性阅读顺序与全部文档索引 |
 
 ## 开发
 

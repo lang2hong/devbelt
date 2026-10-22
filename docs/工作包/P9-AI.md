@@ -1,28 +1,10 @@
 # P9 — AI 能力（NL2SQL / Chat / 解释 / 诊断 / 补全）
 
-> 状态：draft v5.1（2026-10-12 v5 评审整改：S2 阻塞修复 `usage_month` 列名/stream_options include_usage/
-> ensure-row 预占、schema 3-4K 预算与次数诚实标注；补齐状态字典 500 字上限/默认业务指令信任边界/
-> parse-and-forward abort+try-catch/大库元数据批量取数；修正 §6.5 示例/§6.1 node fetch/§6.10 Webview
-> 独立面板/敏感列黑名单等前后矛盾；v5：加油包剥离 P9.1、流式 parse-and-forward、列注释默认开+开关、
-> 意图复述+ENUM+默认指令+大库预筛+一键升级回路）。P7/P8 铺好了"新引擎接缝"，本阶段不引入新数据引擎，
-> 而是引入一条**横向能力接缝**：AI Provider + Chat 面板 + 上下文注入通道，贯穿 SQL 编辑器、结果
-> 面板、错误面板、表设计器四个现有 UI。本文先讲产品能力与关键决策，技术设计在 §六，切片顺序在 §九。
+> 状态：S1–S6 已交付（双通道、自带 Key / 服务端代理、单段月额度 Free/Pro、AI Chat 面板、NL2SQL v5、Explain/Optimize/诊断、Schema 设计 AI 审阅、Inline 补全 Alt+/）；加油包（多档位购买）剥离到 P9.1；待 F5 真机与多模型手工矩阵（见 `docs/发布与运维.md` §6）。
 >
-> 事实校对（v1→v2）：项目内当前零 AI/LLM 相关代码（grep 无命中）；`BaseWebView` 已支持 Vue
-> mode switch、`SqlCompletionProvider` 走纯函数引擎；db-core 的 `QueryError`
-> （`packages/db-core/src/query/queryService.ts:48`）在构造时经 `redactSql` 处理密码字面量、
-> 携带 redacted message+sql+costTime，但 `queryRunner` 向 webview 只 post
-> `{type:'error', message}`，sql/costTime 未透传，且错误面不走 `containsSecretSql`
-> （后者仅门控历史/审计）——P9 错误诊断需在 error 消息新增 `sqlForAi`（经二次秘密扫描）、
-> `dbType`、`costTime` 字段；`QueryResult` 已带 rows/fields；DDL/写 SQL 的执行闸门是 vscode-ext
-> `apps/vscode-ext/src/utils/sqlSafety.ts` 的 `confirmSqlExecution`/`ensureWritable`
-> （只读拦截 + 生产二次确认），`TableDesignView` 私有 `mutate()` 组 SQL 后再走该 gate；权益走
-> `plan_feature_defs + plan_feature_values → deriveEntitlement → CachedEntitlement`
-> 纵表；SecretStorage 已用于 password/ApiKey/TOTP secret；EsClient/RedisClient 都是零第三方依赖
-> 的 transport Client。SQL 风险分类器 `classifyWriteKind`/`analyzeSqlRisk` 本阶段随 S1
-> 从 vscode-ext `utils/sqlRisk.ts`（当前已是零 vscode 依赖的纯函数）下沉到 db-core
-> `src/sql/risk.ts` 供 AI 标签与执行 gate 共用。所有 hook 点均已就位，P9 不改变既有 SQL/Redis/ES
-> 消息流，只加分支。
+> P7/P8 铺好了"新引擎接缝"，本阶段不引入新数据引擎，
+> 而是引入一条**横向能力接缝**：AI Provider + Chat 面板 + 上下文注入通道，贯穿 SQL 编辑器、结果
+> 面板、错误面板、表设计器四个现有 UI。本文先讲产品能力与关键决策，技术设计在 §六，切片顺序在 §九。事实校对以当前代码为准，历史评审修订点不再罗列。
 
 ## 一、这个阶段要做什么
 
@@ -1034,7 +1016,7 @@ Vue 组件：
 - `apps/vscode-ext/src/result/tableQueryView.ts`（0 行结果"问 AI 为什么查不到"按钮接线）
 - `apps/vscode-ext/webview/src/views/AIChatView.vue`（意图复述展示、Alt+A 带上下文跳转入口）
 - `apps/vscode-ext/webview/src/components/ai/*.vue`（SQL 块上方复述/0 行诊断入口/列注释发送计数提示）
-- `docs/阶段/P9-AI.md`（本文档）
+- `docs/工作包/P9-AI.md`（本文档）
 
 修改：
 
@@ -1090,9 +1072,9 @@ Vue 组件：
 
 - `docs/架构.md`（新增 AI 章节：接缝/双通道/权益/安全）
 - `docs/产品介绍.md`（AI 能力加入已实现列表）
-- `docs/路线图.md`、`docs/README.md`（加 P9 行）
+- `docs/版本路线图.md`、`docs/README.md`（加 P9 行）
 - `CHANGELOG.md`（P9 节）
-- `docs/剩余任务.md`（为 P9 占位切片清单）
+- `docs/发布与运维.md` §6（P9 未完成门禁）
 
 ## 八、风险与回滚
 
@@ -1133,7 +1115,7 @@ Vue 组件：
   - **前置（已交付）**：把 vscode-ext `utils/sqlRisk.ts` 的 `classifyWriteKind`/`analyzeSqlRisk`/
     `SqlRisk`/`SqlRiskLevel` 下沉到 `packages/db-core/src/sql/risk.ts`，`@devbelt/db-core/sql`
     追加导出；vscode-ext `sqlRisk.ts` 改为 re-export shim；4 处 src + 1 处测试消费者 import 路径零改动。
-  - **已交付（S1 核心，对应剩余任务台账 [x]）**：`AiProvider` 接口、`OpenAICompatibleProvider`
+  - **已交付（S1 核心，对应当时任务台账 [x]）**：`AiProvider` 接口、`OpenAICompatibleProvider`
     （全局 fetch + SSE 流式 + 超时 + AbortSignal + 错误分类 auth/rate-limit/quota/network/
     timeout/abort/protocol）/ SSE parser / schemaContext 基础（表/列截断/敏感标记，不含 ENUM/
     注释/字典/预筛——这些是 NL2SQL 场景增强，随 S4 补）/ sqlSafety（复用 db-core 分类器，签名
@@ -1230,7 +1212,7 @@ Vue 组件：
   - **多模型手工验证矩阵**：OpenAI / DashScope / DeepSeek / Ollama 本地 qwen2.5-coder:7b
     无契约样本测试 Assumptions/意图复述/ENUM 映射遵循度，不只在单测理想输入上验证；
   - 大库场景（>200 表）预筛命中验证；
-  - 文档回填：架构.md/产品介绍.md/路线图/README/CHANGELOG/剩余任务台账。
+  - 文档回填：架构.md/产品介绍.md/版本路线图/README/CHANGELOG/发布与运维。
 
 ## 十、安全与隐私
 

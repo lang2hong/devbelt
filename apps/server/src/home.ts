@@ -63,7 +63,7 @@ interface HomeTool {
 
 const TOOLS: readonly HomeTool[] = [
   {
-    name: 'DB Client',
+    name: 'DevBelt',
     desc: 'VS Code 数据库客户端：连接 MySQL / PostgreSQL / SQLite，SQL 编辑、结果面板、ER 图、表设计、备份与导入导出。',
     href: 'https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client',
     badge: 'VS Code 扩展',

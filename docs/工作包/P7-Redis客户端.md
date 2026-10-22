@@ -1,14 +1,8 @@
 # P7 — Redis 客户端
 
-> 状态：draft v2（review 修订）。本文档先讲清楚「这个阶段要做什么、给用户什么、怎么用」，
-> 技术实现放在后面，交付切片放最后供开发分拆提交。
+> 状态：核心代码已交付（standalone / ACL / TLS / SSH / Cluster+SSH / Sentinel over SSH / CLI / 键浏览器 / SlowLog / 命令日志 / Monitor / 服务器状态，CI 已覆盖真实 Redis 矩阵）；待表单端到端 UI 走查（见 `docs/发布与运维.md` §6）。
 >
-> 事实校对（v1→v2）：`ConnectionSession` 原定义在 `apps/vscode-ext/src/connection/connectionManager.ts`
-> （非 db-core），本阶段把它拆到新文件 `apps/vscode-ext/src/connection/connectionSession.ts` 并做成
-> SqlConnectionSession | RedisConnectionSession 判别联合；db-core 保持纯 SQL 形态，Redis 驱动客户端
-> （ioredis 封装）放 `packages/db-core/src/redis/`（纯 Node、零 vscode 依赖），连接会话装配仍在
-> ConnectionManager.buildSession 按 dbType 分派；连接颜色标签 `color?: string` 作为所有引擎共用字段
-> 加在 SavedConnection 上，SQL 侧同步显示颜色。
+> 本文档先讲清楚「这个阶段要做什么、给用户什么、怎么用」，技术实现放在后面，交付切片放最后供开发分拆提交。事实校对以当前代码为准。
 >
 > 对齐基线：Another Redis Desktop Manager（ARDM）v1.1.1（MIT，Copyright (c) shibo）。本阶段
 > **直接移植/复制** ARDM 的命令表、ioredis 配置、sendCommand 切面、SSH NAT map 与 viewer 结构（MIT
@@ -484,8 +478,8 @@ db-host 最小改动：
 
 - `docs/架构.md`（实施完回填事实）
 - `docs/产品介绍.md`（加 Redis 到引擎列表，完成后回填）
-- `docs/剩余任务.md`（加 P7 台账区）
-- `docs/README.md`、`docs/路线图.md`（登记 P7）
+- `docs/发布与运维.md` §6（P7 未完成门禁）
+- `docs/README.md`、`docs/版本路线图.md`（登记 P7）
 
 ## 八、风险与回滚
 
@@ -559,7 +553,7 @@ db-host 最小改动：
     sentinel（1m+1s）。
 
 > 状态（收口）：**S1–S4 均已交付**。CI 覆盖与已知限制见 §十一；剩余不可自动化发布门禁
-> （表单端到端 UI 走查、状态/CLI/SlowLog UI 路径）见 `docs/剩余任务.md` 台账。
+> （表单端到端 UI 走查、状态/CLI/SlowLog UI 路径）见 `docs/发布与运维.md` §6。
 
 ## 十、安全与隐私
 

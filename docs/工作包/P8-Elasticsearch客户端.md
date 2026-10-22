@@ -1,12 +1,9 @@
 # P8 — Elasticsearch 客户端
 
-> 状态：draft v2（review 修订）。P7 引入的 EngineKind/ConnectionSession 判别联合是本阶段前置依赖，
-> ES 接入后 `EngineKind = 'sql' | 'redis' | 'elasticsearch'`。本文档结构对齐 P7，先讲产品再讲设计与切片。
+> 状态：核心代码已交付（连接、集群健康、索引浏览、文档 search_after 分页 CRUD、DSL/REST 控制台、只读切面 fail-closed）；待 ES 7/8 真机手工矩阵与面板 UI 走查（见 `docs/发布与运维.md` §6）。
 >
-> 事实校对（v1→v2）：`ConnectionSession` 定义在 `apps/vscode-ext/src/connection/connectionSession.ts`
-> （P7 从原 connectionManager.ts 拆出），不在 db-core；db-core 保持纯 SQL 形态，EngineKind 判别联合
-> 落在 vscode-ext 层；HTTP 客户端用 Node 内置 https（零依赖），EsClient 放 db-core（与 redis/、SQL
-> connection adapters 并列，纯 Node 零 vscode 依赖）。
+> P7 引入的 EngineKind/ConnectionSession 判别联合是本阶段前置依赖，
+> ES 接入后 `EngineKind = 'sql' | 'redis' | 'elasticsearch'`。本文档结构对齐 P7，先讲产品再讲设计与切片。事实校对以当前代码为准。EsClient 放 db-core（与 redis、SQL connection adapters 并列，纯 Node 零 vscode 依赖）。
 >
 > 对齐基线：es-client v3.2.3（Apache-2.0，`gitee.com/qiaoshengda/es-client` / `github.com/q2316367743/es-client`）。
 > v1 定位为 **es-client 核心体验的子集**（不含 ILM/Index Template/导出/AI/Explain/Analyze，见 §十三）。
@@ -368,7 +365,7 @@ db-host 最小改动：
 文档：
 
 - `docs/架构.md`（实施完回填）
-- `docs/产品介绍.md`、`docs/剩余任务.md`、`docs/README.md`、`docs/路线图.md`
+- `docs/产品介绍.md`、`docs/发布与运维.md` §6、`docs/README.md`、`docs/版本路线图.md`
 
 ## 八、风险与回滚
 

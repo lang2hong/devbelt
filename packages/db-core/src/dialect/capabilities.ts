@@ -45,5 +45,5 @@ export function supportsOperation(
 }
 
 export function unsupportedOperationMessage(dbType: DatabaseType, operation: DatabaseOperation): string {
-  return `${dbType} does not support ${operation} in DB Client`;
+  return `${dbType} does not support ${operation} in DevBelt`;
 }

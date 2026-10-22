@@ -33,7 +33,7 @@ async function submit() {
 
 <template>
   <div class="card">
-    <h1>注册 DB Client</h1>
+    <h1>注册 DevBelt</h1>
     <p v-if="done" class="success">验证邮件已发送（若该邮箱尚未注册），请查收并完成验证后登录。</p>
     <form v-else @submit.prevent="submit">
       <label>邮箱</label>

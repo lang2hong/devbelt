@@ -48,837 +48,837 @@
       {
         "command": "devbelt.addConnection",
         "title": "%cmd.addConnection%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.refresh",
         "title": "%cmd.refresh%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(refresh)"
       },
       {
         "command": "devbelt.refreshNode",
         "title": "%cmd.refreshNode%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(refresh)"
       },
       {
         "command": "devbelt.runQuery",
         "title": "%cmd.runQuery%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.runAllQueries",
         "title": "%cmd.runAllQueries%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.runQueryInNewPanel",
         "title": "%cmd.runQueryInNewPanel%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.explainQuery",
         "title": "%cmd.explainQuery%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.runStatement",
         "title": "%cmd.runStatement%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.runSqlFile",
         "title": "%cmd.runSqlFile%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.previewTable",
         "title": "%cmd.previewTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.addGroup",
         "title": "%cmd.addGroup%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.renameGroup",
         "title": "%cmd.renameGroup%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.removeGroup",
         "title": "%cmd.removeGroup%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.moveToGroup",
         "title": "%cmd.moveToGroup%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.login",
         "title": "%cmd.login%",
         "icon": "$(sign-in)",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.logout",
         "title": "%cmd.logout%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.account",
         "title": "%account.title%",
         "icon": "$(account)",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.accountMenu",
         "title": "%cmd.accountMenu%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.openConsole",
         "title": "%cmd.openConsole%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.changeLoginPassword",
         "title": "%cmd.changeLoginPassword%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.initializePersonalSync",
         "title": "%cmd.initializePersonalSync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.unlockPersonalSync",
         "title": "%cmd.unlockPersonalSync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.syncNow",
         "title": "%cmd.syncNow%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.syncEntry",
         "title": "%cmd.syncEntry%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.syncPull",
         "title": "%cmd.syncPull%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.syncPush",
         "title": "%cmd.syncPush%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.fixConnectionPaths",
         "title": "%cmd.fixConnectionPaths%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.removeConnectionPathOverrides",
         "title": "%cmd.removeConnectionPathOverrides%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.changeSyncPassword",
         "title": "%cmd.changeSyncPassword%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.recoverSync",
         "title": "%cmd.recoverSync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.recoverByAccount",
         "title": "%cmd.recoverByAccount%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.destroySync",
         "title": "%cmd.destroySync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.resetSync",
         "title": "%cmd.resetSync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.resetLocalSync",
         "title": "%cmd.resetLocalSync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.toggleAutoSync",
         "title": "%cmd.toggleAutoSync%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.syncDoctor",
         "title": "%cmd.syncDoctor%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.addIndex",
         "title": "%cmd.addIndex%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.dropIndex",
         "title": "%cmd.dropIndex%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.viewTrigger",
         "title": "%cmd.viewTrigger%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dropTrigger",
         "title": "%cmd.dropTrigger%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.addTrigger",
         "title": "%cmd.addTrigger%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.modifyTrigger",
         "title": "%cmd.modifyTrigger%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.addForeignKey",
         "title": "%cmd.addForeignKey%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.dropForeignKey",
         "title": "%cmd.dropForeignKey%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newRoutine",
         "title": "%cmd.newRoutine%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.modifyRoutine",
         "title": "%cmd.modifyRoutine%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newEvent",
         "title": "%cmd.newEvent%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.modifyEvent",
         "title": "%cmd.modifyEvent%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.formatSql",
         "title": "%cmd.formatSql%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.showHistory",
         "title": "%cmd.showHistory%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.updateCell",
         "title": "%cmd.updateCell%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newTable",
         "title": "%cmd.newTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newTableDesigner",
         "title": "%cmd.newTableDesigner%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.dropTable",
         "title": "%cmd.dropTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.renameTable",
         "title": "%cmd.renameTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.truncateTable",
         "title": "%cmd.truncateTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dupTable",
         "title": "%cmd.dupTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.viewTableStructure",
         "title": "%cmd.viewTableStructure%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.editConnection",
         "title": "%cmd.editConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.deleteConnection",
         "title": "%cmd.deleteConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.closeConnection",
         "title": "%cmd.closeConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.openConnection",
         "title": "%cmd.openConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.explorerMenu",
         "title": "%cmd.explorerMenu%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(kebab-horizontal)"
       },
       {
         "command": "devbelt.ai.chat",
         "title": "%cmd.ai.chat%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "devbelt.ai.setApiKey",
         "title": "%cmd.ai.setApiKey%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.clearApiKey",
         "title": "%cmd.ai.clearApiKey%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.testConnection",
         "title": "%cmd.ai.testConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.domainContext",
         "title": "%cmd.ai.domainContext%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.defaultDirectives",
         "title": "%cmd.ai.defaultDirectives%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.explainSql",
         "title": "%cmd.ai.explainSql%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.optimizeSql",
         "title": "%cmd.ai.optimizeSql%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.nl2sqlGhost",
         "title": "%cmd.ai.nl2sqlGhost%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(wand)"
       },
       {
         "command": "devbelt.ai.nl2sqlDetails",
         "title": "%cmd.ai.nl2sqlDetails%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.openChatRefine",
         "title": "%cmd.ai.openChatRefine%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.ai.inlineComplete",
         "title": "%cmd.ai.inlineComplete%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(sparkle)"
       },
       {
         "command": "devbelt.authenticator",
         "title": "%cmd.authenticator%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(key)"
       },
       {
         "command": "devbelt.authenticator.add",
         "title": "%cmd.authenticator.add%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.authenticator.export",
         "title": "%cmd.authenticator.export%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(desktop-download)"
       },
       {
         "command": "devbelt.previewView",
         "title": "%cmd.previewView%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dropView",
         "title": "%cmd.dropView%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newView",
         "title": "%cmd.newView%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.modifyView",
         "title": "%cmd.modifyView%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.openRoutine",
         "title": "%cmd.openRoutine%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dropRoutine",
         "title": "%cmd.dropRoutine%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.openEvent",
         "title": "%cmd.openEvent%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dropEvent",
         "title": "%cmd.dropEvent%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newQuery",
         "title": "%cmd.newQuery%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.openQuery",
         "title": "%cmd.openQuery%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.editQuery",
         "title": "%cmd.editQuery%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.designTable",
         "title": "%cmd.designTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.openTerminal",
         "title": "%cmd.openTerminal%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.serverStatus",
         "title": "%cmd.serverStatus%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.serverStatus",
         "title": "%cmd.redis.serverStatus%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.cluster",
         "title": "%cmd.es.cluster%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.rest",
         "title": "%cmd.es.rest%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.indices",
         "title": "%cmd.es.indices%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.index",
         "title": "%cmd.es.index%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.documents",
         "title": "%cmd.es.documents%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.dsl",
         "title": "%cmd.es.dsl%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.es.nodes",
         "title": "%cmd.es.nodes%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.monitor",
         "title": "%cmd.redis.monitor%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.console",
         "title": "%cmd.redis.console%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.slowlog",
         "title": "%cmd.redis.slowlog%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.commandLog",
         "title": "%cmd.redis.commandLog%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.keyBrowser",
         "title": "%cmd.redis.keyBrowser%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.loadMoreKeys",
         "title": "%cmd.redis.loadMoreKeys%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.loadMoreFolderKeys",
         "title": "%cmd.redis.loadMoreFolderKeys%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.loadAllFolderKeys",
         "title": "%cmd.redis.loadAllFolderKeys%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.loadAllKeys",
         "title": "%cmd.redis.loadAllKeys%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.searchKeys",
         "title": "%cmd.redis.searchKeys%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.clearSearchKeys",
         "title": "%cmd.redis.clearSearchKeys%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.renameKey",
         "title": "%cmd.redis.renameKey%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.setKeyTtl",
         "title": "%cmd.redis.setKeyTtl%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.deleteKey",
         "title": "%cmd.redis.deleteKey%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.deleteFolder",
         "title": "%cmd.redis.deleteFolder%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.deleteByPattern",
         "title": "%cmd.redis.deleteByPattern%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.redis.newKey",
         "title": "%cmd.redis.newKey%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(add)"
       },
       {
         "command": "devbelt.moveConnectionUp",
         "title": "%cmd.moveConnectionUp%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.moveConnectionDown",
         "title": "%cmd.moveConnectionDown%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.compareSchema",
         "title": "%cmd.compareSchema%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.showERDiagram",
         "title": "%cmd.showERDiagram%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.viewTableSource",
         "title": "%cmd.viewTableSource%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.copyTable",
         "title": "%cmd.copyTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.mockData",
         "title": "%cmd.mockData%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.manageUsers",
         "title": "%cmd.manageUsers%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(organization)"
       },
       {
         "command": "devbelt.createDatabase",
         "title": "%cmd.createDatabase%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dropDatabase",
         "title": "%cmd.dropDatabase%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.refreshConnection",
         "title": "%cmd.refreshConnection%",
         "icon": "$(refresh)",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newQueryFromConn",
         "title": "%cmd.newQueryFromConn%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.importData",
         "title": "%cmd.importData%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.exportConnection",
         "title": "%cmd.exportConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.importTable",
         "title": "%cmd.importTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.exportTable",
         "title": "%cmd.exportTable%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newQueryForDb",
         "title": "%cmd.newQueryForDb%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.addColumn",
         "title": "%cmd.addColumn%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.modifyColumn",
         "title": "%cmd.modifyColumn%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.addColumnSql",
         "title": "%cmd.addColumnSql%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.modifyColumnSql",
         "title": "%cmd.modifyColumnSql%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.renameColumn",
         "title": "%cmd.renameColumn%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.modifyIndex",
         "title": "%cmd.modifyIndex%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dropColumn",
         "title": "%cmd.dropColumn%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.copyNodeName",
         "title": "%cmd.copyName%",
         "icon": "$(copy)",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.deleteQuery",
         "title": "%cmd.deleteQuery%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.newQueryFolder",
         "title": "%cmd.newQueryFolder%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.renameQueryFolder",
         "title": "%cmd.renameQueryFolder%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.deleteQueryFolder",
         "title": "%cmd.deleteQueryFolder%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.exportConnections",
         "title": "%cmd.exportConnections%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.importConnections",
         "title": "%cmd.importConnections%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.searchObjects",
         "title": "%cmd.searchObjects%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(search)"
       },
       {
         "command": "devbelt.jumpToRefTable",
         "title": "%cmd.jumpToRefTable%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(link)"
       },
       {
         "command": "devbelt.searchConnections",
         "title": "%cmd.searchConnections%",
-        "category": "DB Client",
+        "category": "DevBelt",
         "icon": "$(search)"
       },
       {
         "command": "devbelt.cloneConnection",
         "title": "%cmd.cloneConnection%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.renameView",
         "title": "%cmd.renameView%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.sessions",
         "title": "%cmd.sessions%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.plans",
         "title": "%cmd.plans%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.syncDatabase",
         "title": "%cmd.syncDatabase%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.restoreDatabase",
         "title": "%cmd.restoreDatabase%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.dashboard",
         "title": "%cmd.dashboard%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.compareData",
         "title": "%cmd.compareData%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.showAuditLog",
         "title": "%cmd.showAuditLog%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.showPoolStatus",
         "title": "%cmd.showPoolStatus%",
-        "category": "DB Client"
+        "category": "DevBelt"
       },
       {
         "command": "devbelt.scheduleBackup",
         "title": "%cmd.scheduleBackup%",
-        "category": "DB Client"
+        "category": "DevBelt"
       }
     ],
     "menus": {
@@ -2182,7 +2182,7 @@
       ]
     },
     "configuration": {
-      "title": "DB Client",
+      "title": "DevBelt",
       "properties": {
         "devbelt.language": {
           "type": "string",
@@ -2368,7 +2368,7 @@
       "activitybar": [
         {
           "id": "devbelt",
-          "title": "DB Client",
+          "title": "DevBelt",
           "icon": "resources/logo.svg"
         }
       ]

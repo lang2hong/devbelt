@@ -19,7 +19,7 @@ Fastify + MySQL 8 服务，负责身份、个人权益、设备和个人同步�
 | 同步 | `/api/db/sync/init`、`/records`、`/change-key`、`/account-recover`、`/destroy`、重置路由 |
 | 控制台 | `/api/db/plans`、`/api/db/console/*`、`/api/console/*` |
 
-字段、授权和错误语义见[P2 阶段文档](../../docs/阶段/P2-个人同步-v1.md)和[架构](../../docs/架构.md)。
+字段、授权和错误语义见[P2 协议基线](../../docs/工作包/P2-个人同步-协议基线.md)和[架构](../../docs/架构.md)。
 
 ## 环境变量
 

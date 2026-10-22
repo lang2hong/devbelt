@@ -1,10 +1,8 @@
 # P5 — 2FA / TOTP 验证器
 
-> 状态：draft v9 final（根据第四轮交付评审修正：协议文件真实路径、secretCache key 与
-> onDidChange 的解析对齐、IPC `null`/`undefined` 序列化、pendingAction 防丢消息、S2/S3
-> 视图按钮范围收口、secretCache 异步预热契约、TagColorKey 类型落地、文案与缓存说明
-> 对齐），达到可直接交付实施标准。
-> 本文档先讲清楚「这个阶段要做的产品是什么、给谁用、怎么用」，技术实现放在最后供开发评审。
+> 状态：本地验证器已交付；待手工走查（导入/导出/剪贴板/TOTP 出码/搜索/标签）。
+>
+> 本文档先讲清楚「这个阶段要做的产品是什么、给谁用、怎么用」，技术实现放在最后供开发评审。历史评审修订点不再罗列，以当前代码与本文为准。
 
 ## 一、这个阶段要做什么
 
@@ -180,7 +178,7 @@ namespace 化重构、批量导入。这些不排期、不承诺。
 package.json `contributes` 改动分两批：
 
 **S2 引入（打开面板命令）：**
-- `commands` 新增**一个**（category 继续用 `"DB Client"`，不新开分类）：
+- `commands` 新增**一个**（category 继续用 `"DevBelt"`，不新开分类）：
   - `devbelt.authenticator` — i18n `cmd.authenticator` = `"Authenticator"` / `"验证器"`，
     handler 打开/聚焦「验证器」webview 面板（`AuthenticatorView.open(store)`）。
 - **后续变更**：新增 `views.devbelt` 的 `devbelt.tools`（webview，工具列表，首项 = 验证器）；容器与活动栏图标沿用既有 `devbelt`，未新增容器。

@@ -1,7 +1,7 @@
 {
   "name": "@devbelt/server",
   "version": "0.1.0",
-  "description": "DB Client server (Fastify + MySQL + Ed25519 + Argon2id)",
+  "description": "DevBelt server (Fastify + MySQL + Ed25519 + Argon2id)",
   "private": true,
   "main": "./dist/index.cjs",
   "scripts": {

@@ -4,7 +4,7 @@ let channel: vscode.LogOutputChannel | undefined;
 
 function getChannel(): vscode.LogOutputChannel {
   if (!channel) {
-    channel = vscode.window.createOutputChannel('DB Client Diagnostics', { log: true });
+    channel = vscode.window.createOutputChannel('DevBelt Diagnostics', { log: true });
   }
   return channel;
 }

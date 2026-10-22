@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   }
   try {
     await app.listen({ port, host });
-    app.log.info(`DB Client server listening on ${host}:${port}`);
+    app.log.info(`DevBelt server listening on ${host}:${port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

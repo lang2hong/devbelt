@@ -27,12 +27,12 @@ const svg = (label: string, inner: string): string =>
 export const FIG = {
   /** VS Code 窗口：活动栏 + 连接树 + 编辑器。 */
   vscode: svg(
-    'VS Code 中的 DB Client 界面',
+    'VS Code 中的 DevBelt 界面',
     `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
      <rect x="1" y="1" width="638" height="34" rx="10" fill="#161d33"/>
      <rect x="1" y="27" width="638" height="8" fill="#161d33"/>
      <circle cx="22" cy="18" r="5" fill="#ff5f56"/><circle cx="40" cy="18" r="5" fill="#ffbd2e"/><circle cx="58" cy="18" r="5" fill="#27c93f"/>
-     <text x="80" y="22" fill="#8b96b5" font-size="12" font-family="sans-serif">db.sql — DevBelt DB Client</text>
+     <text x="80" y="22" fill="#8b96b5" font-size="12" font-family="sans-serif">db.sql — DevBelt DevBelt</text>
      <rect x="1" y="35" width="56" height="304" fill="#121831"/>
      <rect x="18" y="56" width="22" height="22" rx="4" fill="#3d6bff"/>
      <rect x="22" y="96" width="14" height="14" rx="3" fill="#3a4366"/>
@@ -66,7 +66,7 @@ export const FIG = {
     `<rect x="1" y="1" width="638" height="338" rx="10" fill="#0f1426" stroke="#2b3350"/>
      <rect x="60" y="130" width="150" height="80" rx="10" fill="#1d2742" stroke="#3d6bff"/>
      <text x="100" y="165" fill="#e6e9f2" font-size="13" font-family="sans-serif">VS Code</text>
-     <text x="86" y="188" fill="#9aa4bf" font-size="11" font-family="sans-serif">DB Client</text>
+     <text x="86" y="188" fill="#9aa4bf" font-size="11" font-family="sans-serif">DevBelt</text>
      <rect x="270" y="130" width="150" height="80" rx="10" fill="#1d2742" stroke="#3a4366"/>
      <text x="318" y="165" fill="#e6e9f2" font-size="13" font-family="sans-serif">SSH</text>
      <text x="300" y="188" fill="#9aa4bf" font-size="11" font-family="sans-serif">跳板机 :22</text>
@@ -138,12 +138,12 @@ export const DOCS: readonly DocPage[] = [
     sections: [
       {
         heading: '安装',
-        html: `<p>DevBelt DB Client 通过 VS Code 扩展发布。安装后在活动栏打开「DB Client」视图即可开始；本地连接（MySQL / PostgreSQL / SQLite）<strong>无需登录</strong>。</p>`,
+        html: `<p>DevBelt DevBelt 通过 VS Code 扩展发布。安装后在活动栏打开「DevBelt」视图即可开始；本地连接（MySQL / PostgreSQL / SQLite）<strong>无需登录</strong>。</p>`,
       },
       {
         heading: '建立连接',
         html: `<ol>
-          <li>在「DB Client」视图标题栏点击 <em>新增连接</em>。</li>
+          <li>在「DevBelt」视图标题栏点击 <em>新增连接</em>。</li>
           <li>选择数据库类型并填写主机、端口、用户名、密码（可选 SSH 隧道）。</li>
           <li>点击 <em>测试连接</em> 确认后保存；密码等敏感字段存入 VS Code SecretStorage。</li>
         </ol>`,
@@ -314,7 +314,7 @@ function shell(title: string, body: string, opts: DocsRenderOptions): string {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${escapeHtml(title)} · DevBelt 文档</title>
-    <meta name="description" content="DevBelt DB Client 使用文档。" />
+    <meta name="description" content="DevBelt DevBelt 使用文档。" />
     <style>${STYLE}    </style>
   </head>
   <body>
@@ -355,7 +355,7 @@ export function renderDocsIndex(opts: DocsRenderOptions = {}): string {
         ${toc()}
         <article>
           <h1>使用文档</h1>
-          <p class="summary">DevBelt DB Client 的产品使用指南。开发者文档见仓库 <code>docs/</code>。</p>
+          <p class="summary">DevBelt DevBelt 的产品使用指南。开发者文档见仓库 <code>docs/</code>。</p>
           <div class="cards">
           ${cards}
           </div>

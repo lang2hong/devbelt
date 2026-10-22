@@ -76,7 +76,7 @@ async function openAccountMenu(deps: Deps): Promise<void> {
     items.push({ label: `$(link-external) ${l10n('account.action.openConsole')}`, cmd: 'devbelt.openConsole' });
     items.push({ label: `$(sign-out) ${l10n('account.action.logout')}`, cmd: 'devbelt.logout' });
   }
-  const picked = await vscode.window.showQuickPick(items, { title: 'DB Client' });
+  const picked = await vscode.window.showQuickPick(items, { title: 'DevBelt' });
   if (picked?.cmd) await vscode.commands.executeCommand(picked.cmd);
 }
 

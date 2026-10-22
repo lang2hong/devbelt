@@ -48,17 +48,17 @@ export class SmtpEmailSender implements EmailSender {
     await this.transporter.sendMail({
       from: this.from,
       to: input.to,
-      subject: '验证你的 DB Client 邮箱',
+      subject: '验证你的 DevBelt 邮箱',
       text:
         '验证你的邮箱\n\n' +
         `${greeting}，你好：\n\n` +
-        '你已注册 DB Client。点击下方链接完成邮箱验证（链接 24 小时内有效）：\n\n' +
+        '你已注册 DevBelt。点击下方链接完成邮箱验证（链接 24 小时内有效）：\n\n' +
         `${url}\n\n` +
         `或在扩展中粘贴验证码：${input.token}\n\n` +
-        '如果你没有注册过 DB Client，请忽略本邮件。',
+        '如果你没有注册过 DevBelt，请忽略本邮件。',
       html: this.wrap(
         this.heading('验证你的邮箱', greeting) +
-        '<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">你已注册 DB Client 账号。点击下方按钮完成邮箱验证，链接 <b>24 小时内</b>有效。</p>' +
+        '<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">你已注册 DevBelt 账号。点击下方按钮完成邮箱验证，链接 <b>24 小时内</b>有效。</p>' +
         this.button('验证邮箱', url) +
         this.tokenCard('验证码', input.token),
       ),
@@ -69,14 +69,14 @@ export class SmtpEmailSender implements EmailSender {
     await this.transporter.sendMail({
       from: this.from,
       to: input.to,
-      subject: 'DB Client 账号提示',
+      subject: 'DevBelt 账号提示',
       text:
-        '这个邮箱已在 DB Client 注册过。\n\n' +
+        '这个邮箱已在 DevBelt 注册过。\n\n' +
         '如果忘记了密码，可在登录页面使用找回功能（如尚未开放请联系管理员）。\n' +
         '如果不是你本人注册的，请忽略本邮件。',
       html: this.wrap(
         this.heading('这个邮箱已注册', undefined) +
-        '<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">这个邮箱已注册过 DB Client。若忘记密码，请在登录页使用找回功能。</p>' +
+        '<p style="margin:12px 0 0;color:#57606a;font-size:14px;line-height:1.7;">这个邮箱已注册过 DevBelt。若忘记密码，请在登录页使用找回功能。</p>' +
         '<p style="margin:8px 0 0;color:#8b949e;font-size:13px;">如果不是你本人注册的，请忽略本邮件。</p>',
       ),
     });
@@ -88,11 +88,11 @@ export class SmtpEmailSender implements EmailSender {
     await this.transporter.sendMail({
       from: this.from,
       to: input.to,
-      subject: 'DB Client 同步重置确认',
+      subject: 'DevBelt 同步重置确认',
       text:
         '同步重置确认\n\n' +
         `${greeting}，你好：\n\n` +
-        '你的 DB Client 账号请求了一次同步重置。点击下方链接确认（24 小时内有效）：\n\n' +
+        '你的 DevBelt 账号请求了一次同步重置。点击下方链接确认（24 小时内有效）：\n\n' +
         `${url}\n\n` +
         '如果这不是你的操作，请忽略本邮件，并检查你的账号安全。',
       html: this.wrap(
@@ -109,11 +109,11 @@ export class SmtpEmailSender implements EmailSender {
     await this.transporter.sendMail({
       from: this.from,
       to: input.to,
-      subject: 'DB Client 账号同步恢复已使用',
+      subject: 'DevBelt 账号同步恢复已使用',
       text:
         '账号同步恢复提醒\n\n' +
         `${greeting}，你好：\n\n` +
-        '你的 DB Client 账号刚刚执行了一次「账号同步恢复」，服务端已向该请求签发云端同步数据的恢复材料。\n\n' +
+        '你的 DevBelt 账号刚刚执行了一次「账号同步恢复」，服务端已向该请求签发云端同步数据的恢复材料。\n\n' +
         '如果这是你本人操作，可忽略本邮件。\n\n' +
         '如果不是你本人操作，说明你的账号登录可能已泄露，请立即修改账户密码，并检查账号安全。',
       html: this.wrap(
@@ -141,7 +141,7 @@ export class SmtpEmailSender implements EmailSender {
     return `<div style="font-family:-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif;color:#1f2328;">` +
       `<div style="background:#f6f8fa;padding:24px 12px;">` +
       `<div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #d0d7de;border-radius:8px;padding:28px 32px;">` +
-      `<div style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 4px;">DB Client</div>` +
+      `<div style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 4px;">DevBelt</div>` +
       `<div style="height:1px;background:#eaeef2;margin:16px 0;"></div>` +
       inner +
       `<div style="margin-top:24px;padding-top:16px;border-top:1px solid #eaeef2;color:#8b949e;font-size:12px;line-height:1.7;">这是一封系统自动发送的邮件，请勿回复。如果你没有发起此操作，请忽略本邮件。</div>` +
