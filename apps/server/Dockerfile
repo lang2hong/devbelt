@@ -1,4 +1,4 @@
-# DB Client 同步服务镜像
+# DevBelt 同步服务镜像
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./

@@ -14,7 +14,7 @@ test('套件首页：介绍/工具两段', async ({ page }) => {
   await expect(page.locator('#intro')).toBeVisible();
   await expect(page.locator('#tools')).toBeVisible();
   // 已发布/开发中工具
-  await expect(page.getByText('DB Client', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('DevBelt', { exact: false }).first()).toBeVisible();
   await expect(page.getByText('REST NEO')).toBeVisible();
   await expect(page.getByText('DevBelt DB Client')).toBeVisible();
 });

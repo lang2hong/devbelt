@@ -129,7 +129,7 @@ ssh "$REMOTE" "sudo mkdir -p '$(dirname "$LOG_FILE")'"
 
 ssh "$REMOTE" "sudo tee /etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=DB Client sync server
+Description=DevBelt sync server
 After=network.target
 
 [Service]

@@ -1,4 +1,4 @@
-# DB Client 同步服务 —— nginx 反向代理示例
+# DevBelt 同步服务 —— nginx 反向代理示例
 #
 # 与 server 端 `DEVBELT_DB_TRUST_PROXY` 配对使用。使用本反代配置时必须显式设置
 # `DEVBELT_DB_TRUST_PROXY=1`（信任 1 跳）；未设置时默认 false，生产环境会拒绝启动。
