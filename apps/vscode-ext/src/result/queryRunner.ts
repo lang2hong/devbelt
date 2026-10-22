@@ -8,13 +8,12 @@ import { confirmSqlExecution } from '../utils/sqlSafety';
 import { classifyWriteKind } from '../utils/sqlRisk';
 import { buildCountSql, buildTableSelect, type ColumnTypeMap, type FilterCondition } from './tableQuerySql';
 import { diagError } from '../utils/diagnostics';
-import { l10n } from '../i18n';
 import { containsSecretSql } from '../utils/sqlSecret';
 import { AiSqlRegistry } from '../ai/aiSqlRegistry';
 
 /**
  * 查询执行器：持有表/查询的查询状态（分页、排序、筛选、运行句柄），
- * 并封装 execute / explain / cancel / buildSelect。
+ * 并封装 execute / cancel / buildSelect。
  *
  * 与视图解耦：经注入的 post 回调输出运行状态与结果。
  * 同一视图/会话的查询通过串行队列按序执行，避免并发污染 USE/事务状态并防止取消句柄被覆盖。
@@ -87,10 +86,6 @@ export class QueryRunner {
     database = this.database || this.conn.database,
   ): Promise<void> {
     return this.enqueue(() => this.doExecute(sql, onExecuted, database));
-  }
-
-  explain(sql: string): Promise<void> {
-    return this.enqueue(() => this.doExplain(sql));
   }
 
   cancel(): void {
@@ -259,51 +254,6 @@ export class QueryRunner {
         } catch { /* best-effort rollback */ }
         this.openTransaction = false;
       }
-    } finally {
-      this.runningToken = undefined;
-      this.post({ type: 'finished' });
-    }
-  }
-
-  private async doExplain(sql: string): Promise<void> {
-    if (this.disposed) return;
-    try {
-      if (!(await confirmSqlExecution(this.conn, sql, this.manager.scanOptionsFor?.(this.conn), { database: this.database }))) return;
-      this.post({ type: 'running' });
-      const session = await this.manager.connectSql(this.conn, this.database);
-      const token: QueryCancelToken = {};
-      this.runningToken = token;
-      const database = this.database || this.conn.database;
-      if (database && this.conn.dbType === DatabaseType.MYSQL) {
-        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`, undefined, { token });
-      }
-      // 方言 EXPLAIN 前缀：
-      //  - SQLite 用 EXPLAIN QUERY PLAN 输出人类可读计划（裸 EXPLAIN 只吐 VM 字节码，
-      //    对用户无用），且对非 SELECT 静默不执行，天然无副作用。
-      //  - MySQL/PG 用不带 ANALYZE 的 EXPLAIN：只生成计划不执行，避免 PG 的
-      //    EXPLAIN ANALYZE 对 INSERT/UPDATE/DELETE 产生真实写库副作用。
-      const prefix = this.conn.dbType === DatabaseType.SQLITE ? 'EXPLAIN QUERY PLAN ' : 'EXPLAIN ';
-      const stmts = splitSqlStatements(sql, this.manager.scanOptionsFor?.(this.conn));
-      const results: any[] = [];
-      let skippedDdl = false;
-      for (const stmt of stmts) {
-        // DDL 没有执行计划可解释（EXPLAIN CREATE/ALTER/DROP 在 MySQL/PG 是语法错误，
-        // SQLite 则静默），遇到即跳过，不让数据库抛一句晦涩的语法错误。
-        if (classifyWriteKind(stmt, this.manager.scanOptionsFor?.(this.conn)) === 'ddl') {
-          skippedDdl = true;
-          continue;
-        }
-        const explainSql = `${prefix}${stmt}`;
-        results.push(await session.query.query(explainSql, undefined, { token }));
-      }
-      if (results.length === 0 && skippedDdl) {
-        this.post({ type: 'error', message: l10n('wv.query.explainUnsupported') });
-      } else {
-        this.post({ type: 'results', results, sql: `${prefix}${sql}`, transactionState: undefined, explain: true });
-      }
-    } catch (err) {
-      diagError('explain failed', (err as Error).message);
-      this.post({ type: 'error', message: (err as Error).message });
     } finally {
       this.runningToken = undefined;
       this.post({ type: 'finished' });

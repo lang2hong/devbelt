@@ -2486,6 +2486,7 @@
   },
   "dependencies": {
     "@devbelt/db-host": "workspace:*",
+    "@devbelt/explain-core": "workspace:*",
     "chart.js": "^4.4.0",
     "jsqr": "^1.4.0",
     "pngjs": "^7.0.0",

@@ -12,6 +12,7 @@ import type {
   TotpAlgorithm,
   TagColorKey,
 } from '../authenticator/types';
+import type { ExplainPlan } from '@devbelt/explain-core';
 
 /** App.vue 顶层视图模式（扩展在 `init` 消息里下发）。 */
 export type WebviewMode =
@@ -37,6 +38,8 @@ export type WebviewMode =
   | 'redis'
   /** P8：Elasticsearch 面板（Cluster / REST 控制台；S3/S4 增更多 tab）。 */
   | 'elasticsearch'
+  /** P10：EXPLAIN 计划树面板。 */
+  | 'explain'
   /** S7k.8：数据体检面板（发现本地与云端不一致 → 用户选择修复）。 */
   | 'syncDoctor';
 
@@ -74,6 +77,35 @@ export interface WebviewErrorMessage extends WebviewMessage {
   type: 'error';
   message: string;
 }
+
+// ────────────────────────── P10：EXPLAIN 计划树 ──────────────────────────
+
+/** 结构化解析失败时保留的原始输出。 */
+export interface ExplainFallbackView {
+  reason: string;
+  rows: unknown[];
+  text: string;
+}
+
+/** 一条 EXPLAIN 语句的结果：plan 与 fallback 二选一。 */
+export interface ExplainStatementView {
+  sql: string;
+  plan: ExplainPlan | null;
+  fallback?: ExplainFallbackView;
+}
+
+/** webview → Extension Host。 */
+export type ExplainUpMessage =
+  | { type: 'ready'; __load?: string }
+  | { type: 'rerun' }
+  | { type: 'copyText'; text: string };
+
+/** Extension Host → webview。 */
+export type ExplainDownMessage =
+  | (WebviewInitMessage & { mode: 'explain' })
+  | { type: 'explainRunning' }
+  | { type: 'explainPlan'; statements: ExplainStatementView[] }
+  | { type: 'error'; message: string };
 
 // ────────────────────────── S7k.8：同步体检（数据体检）面板 ──────────────────────────
 // 与 SyncDoctorView provider / SyncDoctorView.vue 共享的强类型契约。

@@ -285,7 +285,7 @@ function closeResult(index: number) {
 }
 
 function explain() {
-  post({ type: 'explain', sql: sql.value });
+  post({ type: 'openExplain', sql: sql.value });
 }
 
 function cancel() {

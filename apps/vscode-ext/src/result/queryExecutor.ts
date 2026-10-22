@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { TableQueryView } from './tableQueryView';
+import { ExplainPanel } from '../explain/explainPanel';
 import { QueryRunner } from './queryRunner';
 import { HistoryStore } from '../history/historyStore';
 import type { AuditLogger } from '../utils/auditLogger';
@@ -180,13 +181,12 @@ export class QueryExecutor {
   }
 
   /**
-   * 执行 EXPLAIN 查询计划。
+   * 打开 EXPLAIN 计划面板。
    *
-   * 走专门的 openForExplain：此前先 openForQuery（排一条普通执行）再覆盖队列为
-   * explain，复用面板时原语句已经开跑，写语句会产生一次真实副作用。
+   * 计划解析与展示由 ExplainPanel 负责；这里只保留命令入口与审计。
    */
   async explain(conn: SavedConnection, sql: string, database?: string): Promise<void> {
-    await TableQueryView.openForExplain(conn, this.manager, sql, database, 'reuse');
+    ExplainPanel.open(this.manager, conn, sql, database);
     this.audit?.log({
       action: 'query_explain',
       connName: conn.name || conn.host,

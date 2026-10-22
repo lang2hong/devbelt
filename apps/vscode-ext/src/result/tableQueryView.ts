@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from './baseWebView';
+import { ExplainPanel } from '../explain/explainPanel';
 import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
 import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
@@ -48,7 +49,6 @@ export class TableQueryView extends BaseWebView {
     sql: string;
     database?: string;
     onExecuted?: (result: any, error?: Error) => void;
-    explain?: boolean;
   }> = [];
   /**
    * P9 S4：最后一次单结果集快照（数据问答 / 0 行诊断素材）。
@@ -154,25 +154,7 @@ export class TableQueryView extends BaseWebView {
     schema?: string,
     viewColumn?: vscode.ViewColumn,
   ): Promise<TableQueryView> {
-    return TableQueryView.openWith(conn, manager, sql, database, onExecuted, mode, 'execute', schema, viewColumn);
-  }
-
-  /**
-   * 打开面板并直接以 EXPLAIN 模式执行，**不会先跑一遍原语句**。
-   *
-   * 原先 explain 是「openForQuery 排一条普通执行 + 再 queueQueryExplain 覆盖队列」。
-   * 复用已有面板时 `queueQuery` 在 ready 状态下会同步启动执行，等 explain 覆盖
-   * 队列时原语句已经开跑 —— 对写语句意味着一次真实副作用。
-   */
-  static async openForExplain(
-    conn: SavedConnection,
-    manager: ConnectionManager,
-    sql: string,
-    database?: string,
-    mode: 'reuse' | 'new' = 'reuse',
-    schema?: string,
-  ): Promise<TableQueryView> {
-    return TableQueryView.openWith(conn, manager, sql, database, undefined, mode, 'explain', schema);
+    return TableQueryView.openWith(conn, manager, sql, database, onExecuted, mode, schema, viewColumn);
   }
 
   private static async openWith(
@@ -182,13 +164,11 @@ export class TableQueryView extends BaseWebView {
     database: string | undefined,
     onExecuted: ((result: any, error?: Error) => void) | undefined,
     mode: 'reuse' | 'new',
-    kind: 'execute' | 'explain',
     schema?: string,
     viewColumn: vscode.ViewColumn = vscode.ViewColumn.Beside,
   ): Promise<TableQueryView> {
     const enqueue = (view: TableQueryView): void => {
-      if (kind === 'explain') view.queueQueryExplain(sql, database);
-      else view.queueQuery(sql, database, onExecuted);
+      view.queueQuery(sql, database, onExecuted);
     };
 
     const existing = mode === 'reuse' ? TableQueryView.queryViews.get(conn.id) : undefined;
@@ -318,8 +298,8 @@ export class TableQueryView extends BaseWebView {
         this.runner.offset = 0;
         await this.runner.execute(msg.sql || this.runner.buildSelect());
         break;
-      case 'explain':
-        await this.runner.explain(msg.sql);
+      case 'openExplain':
+        ExplainPanel.open(this.manager, this.conn, msg.sql, this.database, this.opts.schema);
         break;
       case 'nextPage':
         this.runner.offset += this.runner.limit; await this.runner.execute(this.runner.buildSelect());
@@ -460,14 +440,6 @@ export class TableQueryView extends BaseWebView {
     }
   }
 
-  /** 覆盖待执行队列为 explain 模式。 */
-  public queueQueryExplain(sql: string, database?: string): void {
-    this.pendingQueries = [{ sql, database, explain: true }];
-    if (this.ready) {
-      void this.executePendingQueries();
-    }
-  }
-
   /**
    * 视图切库时把 retain 从旧库会话键迁到新库会话键（先持有新键再释放旧键）。
    *
@@ -491,11 +463,7 @@ export class TableQueryView extends BaseWebView {
         this.database = query.database;
         this.runner.setDatabase(query.database);
         this.post({ type: 'querySql', sql: query.sql, dbName: query.database || '' });
-        if (query.explain) {
-          await this.runner.explain(query.sql);
-        } else {
-          await this.runner.execute(query.sql, query.onExecuted, query.database);
-        }
+        await this.runner.execute(query.sql, query.onExecuted, query.database);
       }
     } finally {
       this.executingPendingQuery = false;

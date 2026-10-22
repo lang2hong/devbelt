@@ -24,6 +24,8 @@ const RedisView = defineAsyncComponent(() => import('./views/RedisView.vue'));
 const ElasticsearchView = defineAsyncComponent(() => import('./views/ElasticsearchView.vue'));
 // 数据体检面板（S7k.8）同样按需加载，单独分片。
 const SyncDoctorView = defineAsyncComponent(() => import('./views/SyncDoctorView.vue'));
+// EXPLAIN 计划树（P10）按需加载。
+const ExplainView = defineAsyncComponent(() => import('./views/ExplainView.vue'));
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
@@ -63,5 +65,6 @@ onUnmounted(() => cleanup?.());
       <RedisView v-else-if="mode === 'redis'" />
       <ElasticsearchView v-else-if="mode === 'elasticsearch'" />
       <SyncDoctorView v-else-if="mode === 'syncDoctor'" />
+      <ExplainView v-else-if="mode === 'explain'" />
       <ERDiagramView v-else />
 </template>

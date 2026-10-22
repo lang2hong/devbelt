@@ -189,6 +189,9 @@ importers:
       '@devbelt/db-host':
         specifier: workspace:*
         version: link:../../packages/db-host
+      '@devbelt/explain-core':
+        specifier: workspace:*
+        version: link:../../packages/explain-core
       chart.js:
         specifier: ^4.4.0
         version: 4.5.1
