@@ -69,6 +69,13 @@ function rerun(): void {
   post({ type: 'rerun' });
 }
 
+const canAiExplain = computed(() => !!current.value && (!!current.value.plan || !!current.value.fallback?.text));
+
+function aiExplain(): void {
+  if (!canAiExplain.value) return;
+  post({ type: 'aiExplain', index: active.value });
+}
+
 function copyRaw(): void {
   if (!rawText.value) return;
   post({ type: 'copyText', text: rawText.value });
@@ -109,6 +116,7 @@ onUnmounted(() => {
       <span v-if="running" class="running">{{ t('wv.explain.running') }}</span>
       <span class="spacer" />
       <button class="btn" :disabled="running" @click="rerun">{{ t('wv.explain.rerun') }}</button>
+      <button v-if="canAiExplain" class="btn" :disabled="running" @click="aiExplain">{{ t('wv.explain.aiExplain') }}</button>
       <button class="btn" :disabled="!rawText" @click="copyRaw">{{ t('wv.explain.copyRaw') }}</button>
       <span v-if="copied" class="copied">{{ t('wv.explain.copied') }}</span>
     </div>

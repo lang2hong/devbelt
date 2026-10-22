@@ -7,6 +7,12 @@ export * from './types.js';
 export { parseMysqlExplain } from './mysql.js';
 export { parsePostgresExplain } from './postgres.js';
 export { parseSqliteExplain } from './sqlite.js';
+export {
+  formatPlanText,
+  DEFAULT_FORMAT_MAX_CHARS,
+  DEFAULT_FORMAT_MAX_NODES,
+  type FormatPlanOptions,
+} from './format.js';
 
 /** Parse an EXPLAIN result using the dialect that produced it. */
 export function parseExplain(

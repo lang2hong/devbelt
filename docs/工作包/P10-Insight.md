@@ -376,7 +376,7 @@ Explain / SlowQuery / Dictionary 使用独立 webview mode 或独立 Panel：
 | 9 | 真实库矩阵 + 性能 + i18n |
 | 10 | VSIX smoke + 截图 + CHANGELOG |
 
-> 进度（2026-10-22）：阶段 1–3 已完成。`packages/explain-core` 提供 MySQL / PostgreSQL / SQLite 解析、统一计划模型、告警识别与异常回退；ExplainView 已接入结构化 EXPLAIN、计划树、节点详情、告警高亮、原始计划复制与回退。S3.1 已修复阶段 Review 问题（MySQL 默认库回退、报错与回退区分、过期结果丢弃、告警按 `largeScanRows`（默认 1000）收紧、原始计划 1 MB 上限、面板生命周期测试）。真实库矩阵与 F5 手工走查尚未执行（归入阶段 9）。阶段 4 起待实施。
+> 进度（2026-10-22）：阶段 1–3 已完成。`packages/explain-core` 提供 MySQL / PostgreSQL / SQLite 解析、统一计划模型、告警识别与异常回退；ExplainView 已接入结构化 EXPLAIN、计划树、节点详情、告警高亮、原始计划复制与回退。S3.1 已修复阶段 Review 问题（MySQL 默认库回退、报错与回退区分、过期结果丢弃、告警按 `largeScanRows`（默认 1000）收紧、原始计划 1 MB 上限、面板生命周期测试）。真实库矩阵与 F5 手工走查尚未执行（归入阶段 9）。阶段 4 已完成：ExplainView 提供「AI 解释计划」，把当前语句的规范化计划文本（≤200 节点 / 8000 字符）经 AI Chat 解释，复用 `optimize` 配额与审计，暂不带 schema 上下文。阶段 5 起待实施。
 
 ## 11. 风险与开放问题
 

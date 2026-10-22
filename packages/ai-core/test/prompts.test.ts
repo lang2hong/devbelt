@@ -4,6 +4,7 @@ import {
   buildDataQaMessages,
   buildDiagnoseMessages,
   buildExplainMessages,
+  buildExplainPlanMessages,
   buildInlineCompletionMessages,
   buildNl2SqlMessages,
   buildOptimizeMessages,
@@ -91,6 +92,38 @@ describe('prompts', () => {
   it('explain：SQL 以代码块包装', () => {
     const content = userContent(buildExplainMessages({ sql: 'SELECT 1', dbType: 'SQLITE' }));
     expect(content).toContain('```sql\nSELECT 1\n```');
+  });
+
+  it('explain plan：单语句带计划文本与方言，不出现空段落', () => {
+    const content = userContent(
+      buildExplainPlanMessages({
+        statements: [{ sql: 'SELECT * FROM t', planText: '- Seq Scan on t rows=5000' }],
+        dbType: 'PG',
+      }),
+    );
+    expect(content).toContain('Execution plan:');
+    expect(content).toContain('- Seq Scan on t rows=5000');
+    expect(content).toContain('Dialect: PG');
+    expect(content).toContain('nothing will be executed');
+    expect(content).not.toContain('Statement 1:');
+    expect(content).not.toContain('Raw EXPLAIN output:');
+  });
+
+  it('explain plan：多语句编号，fallback 用原始输出段', () => {
+    const content = userContent(
+      buildExplainPlanMessages({
+        statements: [
+          { sql: 'SELECT 1', planText: '- Result' },
+          { sql: 'SELECT 2', fallbackText: 'id select_type table' },
+        ],
+      }),
+    );
+    expect(content).toContain('Statement 1:');
+    expect(content).toContain('Statement 2:');
+    expect(content).toContain('Raw EXPLAIN output:');
+    expect(content).toContain('id select_type table');
+    expect(content).not.toContain('Dialect:');
+    expect(content).not.toMatch(/```\n```/);
   });
 
   it('optimize：有 EXPLAIN 时包含，无则不出现空代码块', () => {

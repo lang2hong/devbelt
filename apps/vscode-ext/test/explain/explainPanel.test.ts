@@ -4,13 +4,18 @@ const h = vi.hoisted(() => ({
   confirm: vi.fn(async () => true),
   clipboard: vi.fn(async () => undefined),
   diag: vi.fn(),
+  info: vi.fn(),
+  bridge: undefined as undefined | { requestChat: ReturnType<typeof vi.fn> },
 }));
 
 vi.mock('vscode', () => ({
   ViewColumn: { Beside: -2 },
   workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
   env: { language: 'en', clipboard: { writeText: h.clipboard } },
+  window: { showInformationMessage: h.info },
 }));
+
+vi.mock('../../src/ai/aiBridge', () => ({ AiBridge: { tryGet: () => h.bridge } }));
 
 vi.mock('../../src/result/baseWebView', () => ({
   BaseWebView: class {
@@ -71,6 +76,8 @@ beforeEach(() => {
   h.confirm.mockReset().mockResolvedValue(true);
   h.clipboard.mockClear();
   h.diag.mockClear();
+  h.info.mockClear();
+  h.bridge = undefined;
 });
 
 describe('ExplainPanel', () => {
@@ -214,5 +221,75 @@ describe('ExplainPanel', () => {
     const view: any = ExplainPanel.find('c1');
     await view.handleMessage({ type: 'copyText', text: '{"a":1}' });
     expect(h.clipboard).toHaveBeenCalledWith('{"a":1}');
+  });
+
+  describe('AI explain', () => {
+    async function mounted(handler: Handler, sql = 'SELECT * FROM users'): Promise<any> {
+      const { manager } = makeManager(handler);
+      ExplainPanel.open(manager, conn(), sql);
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      return view;
+    }
+
+    it('tells the user when AI is not enabled', async () => {
+      const view = await mounted(() => [MYSQL_PLAN]);
+      await view.handleMessage({ type: 'aiExplain', index: 0 });
+      expect(h.info).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends the normalized plan text under the optimize feature', async () => {
+      h.bridge = { requestChat: vi.fn() };
+      const view = await mounted(() => [MYSQL_PLAN]);
+      await view.handleMessage({ type: 'aiExplain', index: 0 });
+
+      expect(h.bridge.requestChat).toHaveBeenCalledTimes(1);
+      const request = h.bridge.requestChat.mock.calls[0][0];
+      expect(request).toMatchObject({ feature: 'optimize', connId: 'c1', connName: 'local' });
+      const user = request.messages.at(-1).content as string;
+      expect(user).toContain('SELECT * FROM users');
+      expect(user).toContain('Table scan on users rows=5000');
+      expect(user).toContain('Dialect: MYSQL');
+      expect(user).not.toContain('query_block');
+    });
+
+    it('sends only the selected statement', async () => {
+      h.bridge = { requestChat: vi.fn() };
+      const view = await mounted(() => [MYSQL_PLAN], 'SELECT 1; SELECT 2');
+      await view.handleMessage({ type: 'aiExplain', index: 1 });
+      const user = h.bridge.requestChat.mock.calls[0][0].messages.at(-1).content as string;
+      expect(user).toContain('SELECT 2');
+      expect(user).not.toContain('SELECT 1');
+    });
+
+    it('sends raw text when only a fallback is available', async () => {
+      h.bridge = { requestChat: vi.fn() };
+      const view = await mounted((sql) => {
+        if (sql.includes('FORMAT=JSON')) throw new Error('unsupported');
+        if (sql.startsWith('EXPLAIN')) return [{ id: 1, table: 'users', type: 'ALL' }];
+        return [];
+      });
+      await view.handleMessage({ type: 'aiExplain', index: 0 });
+      const user = h.bridge.requestChat.mock.calls[0][0].messages.at(-1).content as string;
+      expect(user).toContain('Raw EXPLAIN output:');
+      expect(user).toContain('"table":"users"');
+    });
+
+    it('does nothing when there is no plan yet', async () => {
+      h.bridge = { requestChat: vi.fn() };
+      const { manager } = makeManager(() => [MYSQL_PLAN]);
+      ExplainPanel.open(manager, conn(), 'SELECT 1');
+      await (ExplainPanel.find('c1') as any).handleMessage({ type: 'aiExplain', index: 0 });
+      expect(h.bridge.requestChat).not.toHaveBeenCalled();
+    });
+
+    it('never sends a statement containing a password literal', async () => {
+      h.bridge = { requestChat: vi.fn() };
+      const view = await mounted(() => [MYSQL_PLAN]);
+      view.lastStatements[0].sql = "SELECT * FROM t WHERE p = PASSWORD = 'x'";
+      await view.handleMessage({ type: 'aiExplain', index: 0 });
+      expect(h.bridge.requestChat).not.toHaveBeenCalled();
+      expect(posts(view).at(-1)).toMatchObject({ type: 'error' });
+    });
   });
 });

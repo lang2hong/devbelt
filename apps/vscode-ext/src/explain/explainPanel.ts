@@ -13,6 +13,9 @@ import type {
   ExplainUpMessage,
 } from '../result/protocol';
 import { diagError } from '../utils/diagnostics';
+import { buildExplainPlanMessages } from '@devbelt/ai-core';
+import { DEFAULT_FORMAT_MAX_CHARS, formatPlanText } from '@devbelt/explain-core';
+import { AiBridge } from '../ai/aiBridge';
 import {
   buildExplainQuery,
   dialectFor,
@@ -39,6 +42,8 @@ export class ExplainPanel extends BaseWebView {
   private pendingRun = true;
   private running = false;
   private generation = 0;
+  /** 最近一次推给 webview 的结果（AI 解释的素材，与界面所见一致）。 */
+  private lastStatements: ExplainStatementView[] = [];
 
   private constructor(
     private readonly manager: ConnectionManager,
@@ -119,7 +124,52 @@ export class ExplainPanel extends BaseWebView {
     }
     if (msg.type === 'copyText') {
       await vscode.env.clipboard.writeText(String(msg.text ?? ''));
+      return;
     }
+    if (msg.type === 'aiExplain') {
+      this.requestAiExplain(msg.index);
+    }
+  }
+
+  /**
+   * P10 S4：把当前语句的计划发给 AI Chat 解释。
+   *
+   * 复用 `optimize` feature：沿用现有配额、审计与服务端代理白名单。
+   * 发送的是规范化计划文本（有上限），不是引擎原始 JSON。
+   */
+  private requestAiExplain(index: number | undefined): void {
+    const statement = this.lastStatements[index ?? 0];
+    if (!statement) return;
+    const bridge = AiBridge.tryGet();
+    if (!bridge) {
+      void vscode.window.showInformationMessage(l10n('ai.notEnabled'));
+      return;
+    }
+    // 计划里的过滤条件来自 SQL 字面量；含密码的语句不外发。
+    if (containsSecretSql(statement.sql)) {
+      this.post({ type: 'error', message: l10n('wv.explain.secretBlocked') });
+      return;
+    }
+    const planText = statement.plan ? formatPlanText(statement.plan) : undefined;
+    const fallbackText = !planText && statement.fallback?.text
+      ? statement.fallback.text.slice(0, DEFAULT_FORMAT_MAX_CHARS)
+      : undefined;
+    if (!planText && !fallbackText) return;
+    bridge.requestChat({
+      feature: 'optimize',
+      messages: buildExplainPlanMessages({
+        statements: [{
+          sql: statement.sql,
+          ...(planText ? { planText } : {}),
+          ...(fallbackText ? { fallbackText } : {}),
+        }],
+        dbType: String(this.conn.dbType),
+      }),
+      title: l10n('ai.scenario.explainPlan'),
+      connName: this.conn.name || this.conn.host,
+      connId: this.conn.id,
+      ...(this.database ? { database: this.database } : {}),
+    });
   }
 
   protected onDispose(): void {
@@ -158,6 +208,8 @@ export class ExplainPanel extends BaseWebView {
         return;
       }
 
+      // 旧结果不再代表当前 SQL：AI 解释只能用本次结果。
+      this.lastStatements = [];
       this.post({ type: 'explainRunning' });
       const scanOptions = this.manager.scanOptionsFor?.(this.conn);
       const statements = splitSqlStatements(this.sql, scanOptions);
@@ -217,6 +269,7 @@ export class ExplainPanel extends BaseWebView {
         });
         return;
       }
+      this.lastStatements = payloads;
       this.post({ type: 'explainPlan', statements: payloads });
     } catch (error) {
       const message = (error as Error)?.message ?? String(error);

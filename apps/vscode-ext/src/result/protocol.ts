@@ -100,7 +100,9 @@ export interface ExplainStatementView {
 export type ExplainUpMessage =
   | { type: 'ready'; __load?: string }
   | { type: 'rerun' }
-  | { type: 'copyText'; text: string };
+  | { type: 'copyText'; text: string }
+  /** 让 AI 解释计划；index 为当前语句标签（缺省 0）。 */
+  | { type: 'aiExplain'; index?: number };
 
 /** Extension Host → webview。 */
 export type ExplainDownMessage =
