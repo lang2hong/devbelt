@@ -62,6 +62,7 @@
   "cmd.manageUsers": "Manage Users",
   "view.explorer": "Connections",
   "view.tools": "Tools",
+  "view.feedback": "Feedback",
   "cmd.refreshNode": "Refresh",
   "cmd.runQueryInNewPanel": "Run Query in New Panel",
   "cmd.explainQuery": "Explain Query",

@@ -1320,6 +1320,11 @@ export const zh: MessageCatalog = {
   'wv.es.jsonRoot': '（根）',
   'wv.es.jsonCopy': '复制 JSON',
   'wv.es.jsonCopied': '已复制',
+  // ── Sidebar feedback view ──
+  'feedback.bug': '🐛 报告问题',
+  'feedback.feature': '💡 功能建议',
+  'feedback.docs': '📖 查看文档',
+  'feedback.review': '⭐ 评价评分',
   // ── P9 AI（S3 Chat 面板骨架）──
   'ai.title': 'AI 对话',
   'ai.untitled': '新对话',

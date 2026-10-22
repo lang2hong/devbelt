@@ -2383,6 +2383,11 @@
           "id": "devbelt.tools",
           "name": "%view.tools%",
           "type": "webview"
+        },
+        {
+          "id": "devbelt.feedback",
+          "name": "%view.feedback%",
+          "type": "webview"
         }
       ]
     },

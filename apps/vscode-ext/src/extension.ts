@@ -19,6 +19,7 @@ import { installUnhandledRejectionGuard } from './utils/unhandledRejectionGuard'
 import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connection/redisTopology';
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { ToolsViewProvider } from './tools/toolsView';
+import { FeedbackViewProvider } from './feedback/feedbackView';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
 import { AiKeyStore } from './ai/aiKeyStore';
@@ -212,6 +213,9 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
 
   // 侧边栏「工具」视图（竖向工具列表；首项 = 验证器）。
   context.subscriptions.push(ToolsViewProvider.register());
+
+  // 侧边栏「反馈」视图：Bug 反馈、功能建议、文档、评价入口。
+  context.subscriptions.push(FeedbackViewProvider.register());
 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。

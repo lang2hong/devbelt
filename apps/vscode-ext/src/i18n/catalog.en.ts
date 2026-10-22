@@ -1342,6 +1342,11 @@ export const en: MessageCatalog = {
   'wv.es.jsonRoot': '(root)',
   'wv.es.jsonCopy': 'Copy JSON',
   'wv.es.jsonCopied': 'Copied',
+  // ── Sidebar feedback view ──
+  'feedback.bug': '🐛 Report a Bug',
+  'feedback.feature': '💡 Feature Request',
+  'feedback.docs': '📖 Documentation',
+  'feedback.review': '⭐ Rate & Review',
   // ── P9 AI（S3 Chat 面板骨架）──
   'ai.title': 'AI Chat',
   'ai.untitled': 'New chat',

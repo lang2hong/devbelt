@@ -62,6 +62,7 @@
   "cmd.manageUsers": "管理用户",
   "view.explorer": "连接",
   "view.tools": "工具",
+  "view.feedback": "反馈",
   "cmd.refreshNode": "刷新",
   "cmd.runQueryInNewPanel": "在新面板中运行查询",
   "cmd.explainQuery": "解释查询",
