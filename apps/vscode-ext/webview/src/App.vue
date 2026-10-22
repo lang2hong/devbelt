@@ -26,6 +26,8 @@ const ElasticsearchView = defineAsyncComponent(() => import('./views/Elasticsear
 const SyncDoctorView = defineAsyncComponent(() => import('./views/SyncDoctorView.vue'));
 // EXPLAIN 计划树（P10）按需加载。
 const ExplainView = defineAsyncComponent(() => import('./views/ExplainView.vue'));
+// 慢查询分析（P10）按需加载。
+const SlowQueryView = defineAsyncComponent(() => import('./views/SlowQueryView.vue'));
 
 const { onMessage } = useVsCode();
 const mode = ref<WebviewMode>('query');
@@ -66,5 +68,6 @@ onUnmounted(() => cleanup?.());
       <ElasticsearchView v-else-if="mode === 'elasticsearch'" />
       <SyncDoctorView v-else-if="mode === 'syncDoctor'" />
       <ExplainView v-else-if="mode === 'explain'" />
+      <SlowQueryView v-else-if="mode === 'slowQueries'" />
       <ERDiagramView v-else />
 </template>

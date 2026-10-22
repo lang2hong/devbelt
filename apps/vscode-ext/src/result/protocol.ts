@@ -40,6 +40,8 @@ export type WebviewMode =
   | 'elasticsearch'
   /** P10：EXPLAIN 计划树面板。 */
   | 'explain'
+  /** P10：慢查询分析面板（本地历史聚合）。 */
+  | 'slowQueries'
   /** S7k.8：数据体检面板（发现本地与云端不一致 → 用户选择修复）。 */
   | 'syncDoctor';
 
@@ -109,6 +111,57 @@ export type ExplainDownMessage =
   | (WebviewInitMessage & { mode: 'explain' })
   | { type: 'explainRunning' }
   | { type: 'explainPlan'; statements: ExplainStatementView[] }
+  | { type: 'error'; message: string };
+
+// ────────────────────────── P10：慢查询分析 ──────────────────────────
+
+export type SlowQuerySortView = 'total' | 'avg' | 'max' | 'count';
+export type SlowQueryRangeView = '24h' | '7d' | '30d' | 'all';
+
+export interface SlowQueryFilterView {
+  connectionId?: string;
+  range: SlowQueryRangeView;
+  keyword: string;
+  sort: SlowQuerySortView;
+}
+
+export interface SlowQueryGroupView {
+  key: string;
+  fingerprint: string;
+  sampleSql: string;
+  connectionId?: string;
+  connection: string;
+  database?: string;
+  /** 连接已被删除：不能打开 SQL 绑定连接 / 执行 EXPLAIN。 */
+  missingConnection: boolean;
+  count: number;
+  failed: number;
+  totalMs: number;
+  avgMs: number;
+  maxMs: number;
+  lastTime: number;
+}
+
+/** webview → Extension Host。 */
+export type SlowQueryUpMessage =
+  | { type: 'ready'; __load?: string }
+  | { type: 'slowFilter'; filter: SlowQueryFilterView }
+  | { type: 'slowOpenSql'; key: string }
+  | { type: 'slowExplain'; key: string };
+
+/** Extension Host → webview。 */
+export type SlowQueryDownMessage =
+  | (WebviewInitMessage & { mode: 'slowQueries' })
+  | {
+      type: 'slowSnapshot';
+      filter: SlowQueryFilterView;
+      groups: SlowQueryGroupView[];
+      connections: Array<{ id: string; name: string }>;
+      /** 历史总条数与保留上限（让用户知道样本有多大）。 */
+      historySize: number;
+      historyLimit: number;
+      now: number;
+    }
   | { type: 'error'; message: string };
 
 // ────────────────────────── S7k.8：同步体检（数据体检）面板 ──────────────────────────

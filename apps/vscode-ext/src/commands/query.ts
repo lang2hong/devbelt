@@ -8,6 +8,9 @@ import { openQueryFile, openSqlDocEditor, pickConnection } from './shared';
 import { confirmSqlExecution, ensureWritable } from '../utils/sqlSafety';
 import { statementTextAt } from '../utils/sql';
 import { dialectScanOptions } from '../utils/sqlDialectOptions';
+import { SlowQueryPanel } from '../insights/slowQueryPanel';
+import { ExplainPanel } from '../explain/explainPanel';
+import { clampHistoryLimit } from '../history/historyStore';
 
 export function registerQueryCommands(deps: Deps, sub: Sub): void {
   const { store, manager, executor, history, connCtx, treeProvider } = deps;
@@ -107,6 +110,19 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
       ? new vscode.Range(editor.document.positionAt(0), editor.document.lineAt(editor.document.lineCount - 1).range.end)
       : editor.selection;
     await editor.edit((edit) => edit.replace(range, formatSql(editor.document.getText(range), ctx?.conn.dbType)));
+  });
+
+  sub('devbelt.slowQueries', () => {
+    SlowQueryPanel.open({
+      history,
+      connections: () => store.list(),
+      historyLimit: () => clampHistoryLimit(vscode.workspace.getConfiguration().get<number>('devbelt.insights.historyLimit')),
+      openSql: async (sql, conn, database) => {
+        const editor = await openSqlDocEditor(sql);
+        if (editor && conn) connCtx.setForDoc(editor.document.uri.toString(), conn, database);
+      },
+      explain: (sql, conn, database) => ExplainPanel.open(manager, conn, sql, database),
+    });
   });
 
   sub('devbelt.showHistory', async () => {

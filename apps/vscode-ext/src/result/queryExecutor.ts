@@ -83,6 +83,7 @@ export class QueryExecutor {
             connectionId: conn.id,
             database,
             costTime,
+            failed: true,
           });
         }
         void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, 0, error.message));
@@ -157,6 +158,7 @@ export class QueryExecutor {
           connectionId: conn.id,
           database,
           costTime,
+          failed: true,
         });
       }
       void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, 0, captured.error.message));

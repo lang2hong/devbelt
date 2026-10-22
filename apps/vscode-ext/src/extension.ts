@@ -36,7 +36,7 @@ import { AiBridge } from './ai/aiBridge';
 import { registerAiInlineProvider } from './completion/aiInlineProvider';
 import { createSyncStatusBar } from './sync/syncStatusBar';
 import { createAuthStatusBar } from './sync/authStatusBar';
-import { HistoryStore } from './history/historyStore';
+import { HistoryStore, clampHistoryLimit } from './history/historyStore';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
@@ -90,7 +90,10 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   syncHasConnections();
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
-  const history = new HistoryStore(context.globalState);
+  const history = new HistoryStore(
+    context.globalState,
+    () => clampHistoryLimit(vscode.workspace.getConfiguration().get<number>('devbelt.insights.historyLimit')),
+  );
   // 本机路径覆盖（B3）：仅存本机 globalState、不回传、不产生 mutation/同步事件。
   const overrideStore = new ConnectionPathOverrideStore(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，

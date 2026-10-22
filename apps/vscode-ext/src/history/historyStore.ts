@@ -18,6 +18,19 @@ export interface QueryHistoryEntry {
   costTime: number;
   /** 返回行数 */
   rowCount?: number;
+  /** 执行失败（旧记录无此字段，视为成功）。 */
+  failed?: boolean;
+}
+
+export const HISTORY_LIMIT_DEFAULT = 100;
+export const HISTORY_LIMIT_MIN = 10;
+export const HISTORY_LIMIT_MAX = 1000;
+
+/** 把配置值收敛到允许范围；非法值回退默认。 */
+export function clampHistoryLimit(value: unknown): number {
+  const n = typeof value === 'number' ? Math.floor(value) : NaN;
+  if (!Number.isFinite(n)) return HISTORY_LIMIT_DEFAULT;
+  return Math.min(HISTORY_LIMIT_MAX, Math.max(HISTORY_LIMIT_MIN, n));
 }
 
 /**
@@ -25,7 +38,6 @@ export interface QueryHistoryEntry {
  */
 export class HistoryStore {
   private static readonly KEY = 'devbelt.history';
-  private static readonly DEFAULT_MAX_ENTRIES = 100;
   private static idCounter = 0;
 
   private readonly changedEmitter = new EventEmitter<void>();
@@ -37,6 +49,8 @@ export class HistoryStore {
       get<T>(key: string): T | undefined;
       update(key: string, value: any): Thenable<void>;
     },
+    /** 保留上限（`devbelt.insights.historyLimit`）；每次写入时读取，改配置无需重启。 */
+    private readonly limit: () => number = () => HISTORY_LIMIT_DEFAULT,
   ) {}
 
   /** 读取全部历史（新→旧） */
@@ -61,9 +75,10 @@ export class HistoryStore {
     void eventBus.publish(new HistoryChangedEvent('clear'));
   }
 
-  /** 截断至固定上限，超出时丢弃最旧记录。 */
+  /** 截断至保留上限，超出时丢弃最旧记录。 */
   private trimToRetention(list: QueryHistoryEntry[]): void {
-    if (list.length > HistoryStore.DEFAULT_MAX_ENTRIES) list.length = HistoryStore.DEFAULT_MAX_ENTRIES;
+    const max = clampHistoryLimit(this.limit());
+    if (list.length > max) list.length = max;
   }
 
   // ─── 同步 ───

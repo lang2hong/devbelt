@@ -306,6 +306,11 @@
         "category": "DevBelt"
       },
       {
+        "command": "devbelt.slowQueries",
+        "title": "%cmd.slowQueries%",
+        "category": "DevBelt"
+      },
+      {
         "command": "devbelt.updateCell",
         "title": "%cmd.updateCell%",
         "category": "DevBelt"
@@ -2288,6 +2293,14 @@
           "maximum": 86400,
           "description": "SQL statement execution timeout in seconds (0 = no timeout). Applies to every SQL session; the per-connection request timeout in the connection form overrides it. Changes take effect immediately.",
           "markdownDescription": "SQL 语句执行超时（秒，默认 300；0 = 不超时）。作用于所有 SQL 会话；连接表单的「请求超时」可按连接覆盖。改动实时生效，无需重连。"
+        },
+        "devbelt.insights.historyLimit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Number of local query-history entries kept (used by Slow Queries). Oldest entries are dropped first.",
+          "markdownDescription": "本地查询历史保留条数（慢查询分析使用），默认 100，范围 10–1000。超出时丢弃最旧记录。"
         },
         "devbelt.pg.syncEnabled": {
           "type": "boolean",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { HistoryStore, QueryHistoryEntry } from '../../src/history/historyStore';
+import { HistoryStore, QueryHistoryEntry, clampHistoryLimit } from '../../src/history/historyStore';
 
 function makeMemento(initial: QueryHistoryEntry[] = []) {
   let data: QueryHistoryEntry[] = initial;
@@ -47,5 +47,31 @@ describe('HistoryStore', () => {
       await store.add({ sql: `q${i}`, connection: 'c', costTime: i });
     }
     expect(store.list().length).toBe(100);
+  });
+
+  it('uses the configured retention limit', async () => {
+    let limit = 20;
+    const store = new HistoryStore(makeMemento(), () => limit);
+    for (let i = 0; i < 30; i++) await store.add({ sql: `q${i}`, connection: 'c', costTime: i });
+    expect(store.list()).toHaveLength(20);
+    expect(store.list()[0].sql).toBe('q29');
+
+    limit = 10;
+    await store.add({ sql: 'q30', connection: 'c', costTime: 0 });
+    expect(store.list()).toHaveLength(10);
+  });
+
+  it('clamps the retention limit to 10–1000 and falls back on bad values', () => {
+    expect(clampHistoryLimit(5)).toBe(10);
+    expect(clampHistoryLimit(5000)).toBe(1000);
+    expect(clampHistoryLimit(250.7)).toBe(250);
+    expect(clampHistoryLimit(undefined)).toBe(100);
+    expect(clampHistoryLimit('300')).toBe(100);
+  });
+
+  it('stores the failed flag', async () => {
+    const store = new HistoryStore(makeMemento());
+    await store.add({ sql: 'SELECT x', connection: 'c', costTime: 1, failed: true });
+    expect(store.list()[0].failed).toBe(true);
   });
 });
