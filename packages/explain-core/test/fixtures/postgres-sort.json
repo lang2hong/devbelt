@@ -2,9 +2,8 @@
   {
     "Plan": {
       "Node Type": "Sort",
-      "Sort Method": "external merge",
       "Sort Key": ["created_at"],
-      "Plan Rows": 100,
+      "Plan Rows": 10000,
       "Total Cost": 200,
       "Plans": [
         {

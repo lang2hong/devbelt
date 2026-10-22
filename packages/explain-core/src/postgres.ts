@@ -3,6 +3,7 @@ import {
   asRecord,
   failure,
   finalizePlan,
+  isLargeScan,
   makeNode,
   num,
   parseJson,
@@ -57,19 +58,22 @@ function unwrapPostgres(raw: unknown): { top: Record<string, unknown>; plan: Rec
 function buildPostgresNode(plan: Record<string, unknown>, id: string, options: ExplainParseOptions): ExplainPlanNode {
   const nodeType = str(plan['Node Type']) ?? 'Plan';
   const filter = str(plan.Filter) ?? str(plan['Join Filter']);
-  const joinCondition = str(plan['Hash Cond']) ?? str(plan['Merge Cond']) ?? str(plan['Index Cond']);
+  const joinCondition = str(plan['Hash Cond']) ?? str(plan['Merge Cond']);
+  const indexCondition = str(plan['Index Cond']);
   const object = str(plan['Relation Name']) ?? str(plan.Alias) ?? str(plan['CTE Name']);
   const index = str(plan['Index Name']);
+  const rows = num(plan['Plan Rows']);
   const warnings: ExplainWarning[] = [];
 
-  if (nodeType === 'Seq Scan') {
+  // Small seq scans are frequently the optimal plan; only flag large or unknown-size scans.
+  if (nodeType === 'Seq Scan' && isLargeScan(rows, options)) {
     warnings.push('fullTableScan');
-    if (filter) warnings.push('missingIndex');
+    if (filter && rows !== undefined) warnings.push('missingIndex');
   }
+  // `Sort Method` is only present with EXPLAIN ANALYZE.
   if (nodeType === 'Sort' && str(plan['Sort Method'])?.toLowerCase().includes('external')) {
     warnings.push('filesort');
   }
-  if (nodeType === 'Nested Loop') warnings.push('nestedLoop');
 
   const children = (asArray(plan.Plans) ?? [])
     .flatMap((child, index) => {
@@ -77,17 +81,23 @@ function buildPostgresNode(plan: Record<string, unknown>, id: string, options: E
       return record ? [buildPostgresNode(record, `${id}.${index}`, options)] : [];
     });
 
+  // A nested loop is only a concern when its inner side is a large seq scan.
+  if (nodeType === 'Nested Loop' && children.slice(1).some((child) => child.warnings.includes('fullTableScan'))) {
+    warnings.push('nestedLoop');
+  }
+
   return makeNode(id, {
     operation: nodeType,
     ...(object !== undefined ? { object } : {}),
     ...(index !== undefined ? { index } : {}),
-    ...(num(plan['Plan Rows']) !== undefined ? { estimatedRows: num(plan['Plan Rows']) } : {}),
+    ...(rows !== undefined ? { estimatedRows: rows } : {}),
     ...(num(plan['Actual Rows']) !== undefined ? { actualRows: num(plan['Actual Rows']) } : {}),
     ...(num(plan['Total Cost']) !== undefined ? { estimatedCost: num(plan['Total Cost']) } : {}),
     ...(num(plan['Actual Total Time']) !== undefined ? { actualTimeMs: num(plan['Actual Total Time']) } : {}),
     ...(num(plan['Actual Loops']) !== undefined ? { loops: num(plan['Actual Loops']) } : {}),
     ...(filter !== undefined ? { filter } : {}),
     ...(joinCondition !== undefined ? { joinCondition } : {}),
+    ...(indexCondition !== undefined ? { indexCondition } : {}),
     warnings,
     children,
   });

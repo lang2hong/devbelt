@@ -1,0 +1,30 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Sort",
+      "Sort Key": ["created_at"],
+      "Sort Method": "external merge",
+      "Sort Space Used": 4096,
+      "Sort Space Type": "Disk",
+      "Plan Rows": 10000,
+      "Total Cost": 200,
+      "Actual Rows": 10000,
+      "Actual Total Time": 42.5,
+      "Actual Loops": 1,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Relation Name": "logs",
+          "Plan Rows": 10000,
+          "Total Cost": 180,
+          "Actual Rows": 10000,
+          "Actual Total Time": 12.1,
+          "Actual Loops": 1,
+          "Plans": []
+        }
+      ]
+    },
+    "Planning Time": 0.2,
+    "Execution Time": 45.0
+  }
+]

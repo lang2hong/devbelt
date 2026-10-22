@@ -13,8 +13,12 @@ function planOf(result: ExplainParseResult): ExplainPlan {
   return result.plan;
 }
 
+function block(body: Record<string, unknown>): unknown {
+  return { query_block: { select_id: 1, ...body } };
+}
+
 describe('parseMysqlExplain', () => {
-  it('normalizes a full table scan and its filter', () => {
+  it('normalizes a large full table scan and its filter', () => {
     const plan = planOf(parseMysqlExplain(fixture('mysql-table-scan.json')));
     expect(plan.dialect).toBe('mysql');
     expect(plan.roots).toHaveLength(1);
@@ -29,29 +33,76 @@ describe('parseMysqlExplain', () => {
     expect(table.estimatedRows).toBe(1000);
     expect(table.estimatedCost).toBe(12);
     expect(table.filter).toContain('active');
-    expect(table.warnings).toContain('fullTableScan');
-    expect(table.warnings).toContain('missingIndex');
+    expect(table.warnings).toEqual(['fullTableScan', 'missingIndex']);
     expect(plan.warnings).toEqual(expect.arrayContaining(['fullTableScan', 'missingIndex']));
   });
 
-  it('normalizes nested loops, index lookups and filesort', () => {
+  it('does not flag small full scans', () => {
+    const plan = planOf(parseMysqlExplain(block({
+      table: { table_name: 'flags', access_type: 'ALL', rows_examined_per_scan: 12, attached_condition: '(x = 1)' },
+    })));
+    expect(plan.roots[0].children[0].operation).toBe('Table scan');
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it('flags full scans of unknown size without guessing missingIndex', () => {
+    const plan = planOf(parseMysqlExplain(block({
+      table: { table_name: 't', access_type: 'ALL', attached_condition: '(x = 1)' },
+    })));
+    expect(plan.roots[0].children[0].warnings).toEqual(['fullTableScan']);
+  });
+
+  it('respects a custom largeScanRows threshold', () => {
+    const plan = planOf(parseMysqlExplain(block({
+      table: { table_name: 't', access_type: 'ALL', rows_examined_per_scan: 50, attached_condition: '(x = 1)' },
+    }), { largeScanRows: 10 }));
+    expect(plan.roots[0].children[0].warnings).toEqual(['fullTableScan', 'missingIndex']);
+  });
+
+  it('keeps ordering outside the join and does not flag an index-driven nested loop', () => {
     const plan = planOf(parseMysqlExplain(fixture('mysql-nested-loop.json')));
-    const join = plan.roots[0].children[0];
-
-    expect(join.operation).toBe('Nested loop join');
-    expect(join.warnings).toContain('nestedLoop');
-    expect(join.children).toHaveLength(3);
-
-    expect(join.children[0].operation).toBe('Table scan');
-    expect(join.children[0].object).toBe('orders');
-    expect(join.children[1].operation).toBe('Index lookup');
-    expect(join.children[1].index).toBe('PRIMARY');
-
-    const sort = join.children[2];
+    const sort = plan.roots[0].children[0];
     expect(sort.operation).toBe('Sort');
     expect(sort.warnings).toContain('filesort');
-    expect(sort.children[0].operation).toBe('Index scan');
-    expect(sort.children[0].index).toBe('idx_created');
+
+    const join = sort.children[0];
+    expect(join.operation).toBe('Nested loop join');
+    expect(join.warnings).toEqual([]);
+    expect(join.children.map((child) => child.object)).toEqual(['orders', 'users']);
+    expect(join.children[0].warnings).toContain('fullTableScan');
+    expect(join.children[1].operation).toBe('Index lookup');
+    expect(join.children[1].index).toBe('PRIMARY');
+  });
+
+  it('flags a nested loop whose inner table is a large full scan', () => {
+    const plan = planOf(parseMysqlExplain(block({
+      nested_loop: [
+        { table: { table_name: 'a', access_type: 'const', key: 'PRIMARY', rows_examined_per_scan: 1 } },
+        { table: { table_name: 'b', access_type: 'ALL', rows_examined_per_scan: 50000 } },
+      ],
+    })));
+    const join = plan.roots[0].children[0];
+    expect(join.warnings).toEqual(['nestedLoop']);
+  });
+
+  it('treats block-nested-loop join buffers as nested loops and hash joins as not', () => {
+    const bnl = planOf(parseMysqlExplain(block({
+      table: { table_name: 'b', access_type: 'index', key: 'k', using_join_buffer: 'Block Nested Loop' },
+    })));
+    expect(bnl.roots[0].children[0].warnings).toContain('nestedLoop');
+
+    const hash = planOf(parseMysqlExplain(block({
+      table: { table_name: 'b', access_type: 'index', key: 'k', using_join_buffer: 'hash join' },
+    })));
+    expect(hash.roots[0].children[0].warnings).not.toContain('nestedLoop');
+  });
+
+  it('preserves the order of sibling operations from the JSON', () => {
+    const plan = planOf(parseMysqlExplain(block({
+      table: { table_name: 'outer_t', access_type: 'index', key: 'k' },
+      nested_loop: [{ table: { table_name: 'inner_t', access_type: 'index', key: 'k' } }],
+    })));
+    expect(plan.roots[0].children.map((child) => child.operation)).toEqual(['Index scan', 'Nested loop join']);
   });
 
   it('flags temporary tables used for grouping', () => {

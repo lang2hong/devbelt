@@ -12,10 +12,13 @@ import type {
   ExplainStatementView,
   ExplainUpMessage,
 } from '../result/protocol';
+import { diagError } from '../utils/diagnostics';
 import {
   buildExplainQuery,
   dialectFor,
+  limitStatementPayload,
   parseExplainRows,
+  rawForDisplay,
   rowsToText,
   shouldSkipExplain,
 } from './explainRunner';
@@ -35,7 +38,7 @@ export class ExplainPanel extends BaseWebView {
   private webviewReady = false;
   private pendingRun = true;
   private running = false;
-  private runId = 0;
+  private generation = 0;
 
   private constructor(
     private readonly manager: ConnectionManager,
@@ -68,9 +71,14 @@ export class ExplainPanel extends BaseWebView {
       existing.sql = sql;
       existing.database = database;
       existing.schema = schema;
+      // 作废在途结果：它属于上一条 SQL。
+      existing.generation += 1;
       existing.pendingRun = true;
       existing.reveal();
-      if (existing.webviewReady) void existing.run();
+      if (existing.webviewReady && !existing.running) {
+        existing.pendingRun = false;
+        void existing.run();
+      }
       return;
     }
     const view = new ExplainPanel(manager, conn, sql, database, schema);
@@ -128,7 +136,9 @@ export class ExplainPanel extends BaseWebView {
       this.pendingRun = true;
       return;
     }
-    const runId = ++this.runId;
+    // generation 在 open() 换 SQL 时也会递增：在途结果属于旧 SQL，直接丢弃。
+    const generation = ++this.generation;
+    const isCurrent = (): boolean => generation === this.generation && this.webviewReady;
     this.running = true;
     try {
       if (containsSecretSql(this.sql)) {
@@ -152,8 +162,10 @@ export class ExplainPanel extends BaseWebView {
       const scanOptions = this.manager.scanOptionsFor?.(this.conn);
       const statements = splitSqlStatements(this.sql, scanOptions);
       const session = await this.manager.connectSql(this.conn, this.database);
-      if (this.database && this.conn.dbType === DatabaseType.MYSQL) {
-        await session.query.query(`USE ${session.query.wrap(validateIdent(this.database))}`);
+      // MySQL 会话被同连接的其它面板共享，可能已 USE 到别的库：每次都显式切回目标库。
+      const database = this.database || this.conn.database;
+      if (database && this.conn.dbType === DatabaseType.MYSQL) {
+        await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
 
       const payloads: ExplainStatementView[] = [];
@@ -168,54 +180,36 @@ export class ExplainPanel extends BaseWebView {
         }
 
         const request = buildExplainQuery(this.conn.dbType, statement);
-        let rows: unknown[] = [];
+        let rows: unknown[];
         let fallbackReason: string | undefined;
-
         try {
           const result = await session.query.query(request.sql);
           rows = Array.isArray(result?.rows) ? result.rows : [];
         } catch (structuredError) {
-          // 旧版本/受限权限：JSON 格式不可用时退回普通 EXPLAIN，保留原始文本。
-          try {
-            const result = await session.query.query(request.fallbackSql);
-            rows = Array.isArray(result?.rows) ? result.rows : [];
-            fallbackReason = (structuredError as Error)?.message ?? String(structuredError);
-          } catch (fallbackError) {
-            payloads.push({
-              sql: statement,
-              plan: null,
-              fallback: {
-                reason: (fallbackError as Error)?.message ?? String(fallbackError),
-                rows: [],
-                text: '',
-              },
-            });
-            continue;
-          }
+          // 旧版本/受限权限：JSON 格式不可用时退回普通 EXPLAIN。
+          // 普通 EXPLAIN 也失败说明是语句本身的问题（语法/表不存在），按错误抛出。
+          const result = await session.query.query(request.fallbackSql);
+          rows = Array.isArray(result?.rows) ? result.rows : [];
+          fallbackReason = (structuredError as Error)?.message ?? String(structuredError);
         }
 
+        const display = rawForDisplay(dialect, rows);
         if (fallbackReason !== undefined) {
-          payloads.push({
+          payloads.push(limitStatementPayload({
             sql: statement,
             plan: null,
-            fallback: { reason: fallbackReason, rows, text: rowsToText(rows) },
-          });
+            fallback: { reason: fallbackReason, rows: display, text: rowsToText(rows) },
+          }));
           continue;
         }
 
         const parsed = parseExplainRows(dialect, rows);
-        if (parsed.ok) {
-          payloads.push({ sql: statement, plan: parsed.plan });
-        } else {
-          payloads.push({
-            sql: statement,
-            plan: null,
-            fallback: { reason: parsed.error, rows, text: rowsToText(rows) },
-          });
-        }
+        payloads.push(limitStatementPayload(parsed.ok
+          ? { sql: statement, plan: { ...parsed.plan, raw: display } }
+          : { sql: statement, plan: null, fallback: { reason: parsed.error, rows: display, text: rowsToText(rows) } }));
       }
 
-      if (runId !== this.runId || !this.webviewReady) return;
+      if (!isCurrent()) return;
       if (payloads.length === 0) {
         this.post({
           type: 'error',
@@ -225,12 +219,12 @@ export class ExplainPanel extends BaseWebView {
       }
       this.post({ type: 'explainPlan', statements: payloads });
     } catch (error) {
-      if (runId === this.runId) {
-        this.post({ type: 'error', message: (error as Error)?.message ?? String(error) });
-      }
+      const message = (error as Error)?.message ?? String(error);
+      diagError('explain failed', message);
+      if (isCurrent()) this.post({ type: 'error', message });
     } finally {
       this.running = false;
-      if (this.pendingRun && this.webviewReady && runId === this.runId) {
+      if (this.pendingRun && this.webviewReady) {
         this.pendingRun = false;
         void this.run();
       }

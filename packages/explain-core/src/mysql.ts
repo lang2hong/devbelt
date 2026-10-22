@@ -4,6 +4,7 @@ import {
   bool,
   failure,
   finalizePlan,
+  isLargeScan,
   isRecord,
   makeNode,
   num,
@@ -30,6 +31,8 @@ const OPERATION_KEYS = [
   'order_by_subqueries',
   'group_by_subqueries',
 ] as const;
+
+const OPERATION_KEY_SET: ReadonlySet<string> = new Set(OPERATION_KEYS);
 
 /**
  * Parse MySQL `EXPLAIN FORMAT=JSON` output.
@@ -85,8 +88,9 @@ function buildQueryBlock(block: Record<string, unknown>, id: string, options: Ex
 
 function buildContainer(record: Record<string, unknown>, parentId: string, options: ExplainParseOptions): ExplainPlanNode[] {
   const children: ExplainPlanNode[] = [];
-  for (const key of OPERATION_KEYS) {
-    if (!(key in record)) continue;
+  // Keep the JSON's own key order so siblings appear as MySQL reported them.
+  for (const key of Object.keys(record)) {
+    if (!OPERATION_KEY_SET.has(key)) continue;
     const value = record[key];
     if (value === undefined || value === null) continue;
     const built = buildOperation(key, value, `${parentId}.${children.length}`, options);
@@ -153,24 +157,23 @@ function buildTable(table: Record<string, unknown>, id: string, options: Explain
   else if (access === 'fulltext') operation = 'Full-text search';
   else if (access === 'unique_subquery' || access === 'index_subquery') operation = 'Index subquery';
 
+  const rows = num(table.rows_examined_per_scan) ?? num(table.rows_produced_per_join);
   const warnings: ExplainWarning[] = [];
-  if (access === 'all') {
+  // Small full scans are often optimal; only flag scans that are large or of unknown size.
+  if (access === 'all' && isLargeScan(rows, options)) {
     warnings.push('fullTableScan');
-    if (filter) warnings.push('missingIndex');
+    if (filter && rows !== undefined) warnings.push('missingIndex');
   }
   if (bool(table.using_filesort)) warnings.push('filesort');
   if (bool(table.using_temporary_table)) warnings.push('temporaryTable');
-  if (str(table.using_join_buffer)) warnings.push('nestedLoop');
+  // `hash join` join buffers are not nested-loop scans.
+  if (/block nested loop/i.test(str(table.using_join_buffer) ?? '')) warnings.push('nestedLoop');
 
   return makeNode(id, {
     operation,
     ...(object !== undefined ? { object } : {}),
     ...(key !== undefined ? { index: key } : {}),
-    ...(num(table.rows_examined_per_scan) !== undefined
-      ? { estimatedRows: num(table.rows_examined_per_scan) }
-      : num(table.rows_produced_per_join) !== undefined
-        ? { estimatedRows: num(table.rows_produced_per_join) }
-        : {}),
+    ...(rows !== undefined ? { estimatedRows: rows } : {}),
     ...(num(costInfo?.prefix_cost) !== undefined ? { estimatedCost: num(costInfo?.prefix_cost) } : {}),
     ...(filter !== undefined ? { filter } : {}),
     warnings,
@@ -197,9 +200,12 @@ function buildNestedLoop(value: unknown, id: string, options: ExplainParseOption
       children.push(child);
     }
   }
+  // Every pre-8.0.18 MySQL join is a nested loop; only flag it when an inner
+  // table is driven by a large full scan.
+  const innerFullScan = children.slice(1).some((child) => child.warnings.includes('fullTableScan'));
   return makeNode(id, {
     operation: 'Nested loop join',
-    warnings: ['nestedLoop'],
+    warnings: innerFullScan ? ['nestedLoop'] : [],
     children,
   });
 }

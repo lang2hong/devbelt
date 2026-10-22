@@ -2,6 +2,7 @@ import { DatabaseType } from '@devbelt/db-core';
 import type { SqlScanOptions } from '@devbelt/db-core/sql';
 import { parseExplain, type ExplainDialect, type ExplainParseResult } from '@devbelt/explain-core';
 import { classifyWriteKind } from '../utils/sqlRisk';
+import type { ExplainStatementView } from '../result/protocol';
 
 export interface ExplainQuery {
   /** Structured request used for the plan tree. */
@@ -53,6 +54,52 @@ export function shouldSkipExplain(statement: string, scanOptions?: SqlScanOption
 /** Parse the rows returned by a structured EXPLAIN request. */
 export function parseExplainRows(dialect: ExplainDialect, rows: unknown[]): ExplainParseResult {
   return parseExplain(dialect, rows);
+}
+
+/** Largest serialized statement payload sent to the webview (same budget as the ES panel). */
+export const RAW_PAYLOAD_LIMIT_BYTES = 1024 * 1024;
+
+/**
+ * Rows as shown/copied in the raw pane. mysql2 returns the JSON plan as a
+ * string in the `EXPLAIN` column; decode it so the copy is readable JSON
+ * instead of an escaped string.
+ */
+export function rawForDisplay(dialect: ExplainDialect, rows: unknown[]): unknown[] {
+  if (dialect !== 'mysql') return rows;
+  return rows.map((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+    const record = row as Record<string, unknown>;
+    if (typeof record.EXPLAIN !== 'string') return row;
+    try {
+      return { ...record, EXPLAIN: JSON.parse(record.EXPLAIN) as unknown };
+    } catch {
+      return row;
+    }
+  });
+}
+
+function byteSize(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+}
+
+/**
+ * Keep a statement payload within `limitBytes`. The parsed tree is always
+ * kept; the raw plan / fallback rows are dropped first, then fallback text is
+ * clipped, and `rawTruncated` tells the UI that something was omitted.
+ */
+export function limitStatementPayload(
+  view: ExplainStatementView,
+  limitBytes = RAW_PAYLOAD_LIMIT_BYTES,
+): ExplainStatementView {
+  if (byteSize(view) <= limitBytes) return view;
+  if (view.plan) {
+    return { ...view, plan: { ...view.plan, raw: null }, rawTruncated: true };
+  }
+  if (view.fallback) {
+    const text = Buffer.from(view.fallback.text, 'utf8').subarray(0, limitBytes).toString('utf8');
+    return { ...view, fallback: { ...view.fallback, rows: [], text }, rawTruncated: true };
+  }
+  return view;
 }
 
 /** Render legacy EXPLAIN rows for the raw/fallback pane. */

@@ -5,7 +5,9 @@ import type { ExplainParseResult, ExplainPlan } from '@devbelt/explain-core';
 import {
   buildExplainQuery,
   dialectFor,
+  limitStatementPayload,
   parseExplainRows,
+  rawForDisplay,
   rowsToText,
   shouldSkipExplain,
 } from '../../src/explain/explainRunner';
@@ -79,5 +81,31 @@ describe('explainRunner', () => {
   it('renders single-column legacy rows as text', () => {
     expect(rowsToText([{ 'QUERY PLAN': 'Seq Scan on users' }])).toBe('Seq Scan on users');
     expect(rowsToText([{ a: 1, b: 2 }])).toBe('{"a":1,"b":2}');
+  });
+
+  it('decodes the MySQL EXPLAIN column for display and leaves other dialects alone', () => {
+    const rows = [{ EXPLAIN: '{"query_block":{"select_id":1}}' }];
+    expect(rawForDisplay('mysql', rows)).toEqual([{ EXPLAIN: { query_block: { select_id: 1 } } }]);
+    expect(rawForDisplay('mysql', [{ EXPLAIN: 'not json' }])).toEqual([{ EXPLAIN: 'not json' }]);
+    expect(rawForDisplay('postgres', rows)).toBe(rows);
+  });
+
+  it('limits oversized payloads while keeping the plan tree', () => {
+    const plan = planOf(parseExplainRows('mysql', [fixture('mysql-plan.json')]));
+    const small = limitStatementPayload({ sql: 'SELECT 1', plan }, 1_000_000);
+    expect(small.rawTruncated).toBeUndefined();
+
+    const limited = limitStatementPayload({ sql: 'SELECT 1', plan }, 10);
+    expect(limited.rawTruncated).toBe(true);
+    expect(limited.plan?.raw).toBeNull();
+    expect(limited.plan?.roots).toEqual(plan.roots);
+
+    const fallback = limitStatementPayload(
+      { sql: 'SELECT 1', plan: null, fallback: { reason: 'r', rows: [{ a: 'x'.repeat(100) }], text: 'y'.repeat(100) } },
+      20,
+    );
+    expect(fallback.rawTruncated).toBe(true);
+    expect(fallback.fallback?.rows).toEqual([]);
+    expect(fallback.fallback?.text.length).toBe(20);
   });
 });

@@ -13,6 +13,10 @@ function planOf(result: ExplainParseResult): ExplainPlan {
   return result.plan;
 }
 
+function single(detail: string): ExplainPlan {
+  return planOf(parseSqliteExplain([{ id: 1, parent: 0, detail }]));
+}
+
 describe('parseSqliteExplain', () => {
   it('rebuilds roots and child plan steps', () => {
     const plan = planOf(parseSqliteExplain(fixture('sqlite-basic.json')));
@@ -33,7 +37,8 @@ describe('parseSqliteExplain', () => {
     expect(search.operation).toBe('Index search');
     expect(search.object).toBe('orders');
     expect(search.index).toBe('idx_user');
-    expect(search.filter).toBe('user_id=?');
+    expect(search.indexCondition).toBe('user_id=?');
+    expect(search.filter).toBeUndefined();
     expect(search.warnings).toEqual([]);
   });
 
@@ -51,6 +56,25 @@ describe('parseSqliteExplain', () => {
     expect(root.children[2].index).toBe('INTEGER PRIMARY KEY');
   });
 
+  it('does not flag constant rows or index-ordered scans', () => {
+    expect(single('SCAN CONSTANT ROW').roots[0]).toMatchObject({ operation: 'Constant row', warnings: [] });
+
+    const covering = single('SCAN t USING COVERING INDEX idx_t').roots[0];
+    expect(covering).toMatchObject({ operation: 'Covering index scan', object: 't', index: 'idx_t', warnings: [] });
+
+    const ordered = single('SCAN t USING INDEX idx_t').roots[0];
+    expect(ordered).toMatchObject({ operation: 'Index scan', index: 'idx_t', warnings: [] });
+  });
+
+  it('strips the legacy TABLE prefix from older SQLite output', () => {
+    expect(single('SCAN TABLE users').roots[0]).toMatchObject({ operation: 'Table scan', object: 'users' });
+    expect(single('SEARCH TABLE orders USING INDEX idx_user (user_id=?)').roots[0]).toMatchObject({
+      operation: 'Index search',
+      object: 'orders',
+      index: 'idx_user',
+    });
+  });
+
   it('accepts a rows wrapper or a JSON string', () => {
     const rows = fixture('sqlite-basic.json');
     expect(planOf(parseSqliteExplain({ rows })).roots).toHaveLength(2);
@@ -58,8 +82,7 @@ describe('parseSqliteExplain', () => {
   });
 
   it('preserves unknown detail text instead of dropping it', () => {
-    const plan = planOf(parseSqliteExplain([{ id: 1, parent: 0, detail: 'SOMETHING NEW' }]));
-    expect(plan.roots[0].operation).toBe('SOMETHING NEW');
+    expect(single('SOMETHING NEW').roots[0].operation).toBe('SOMETHING NEW');
   });
 
   it('returns a fallback result for an unknown shape', () => {

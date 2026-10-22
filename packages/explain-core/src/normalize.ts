@@ -1,3 +1,4 @@
+import { DEFAULT_LARGE_SCAN_ROWS } from './types.js';
 import type {
   ExplainDialect,
   ExplainParseOptions,
@@ -18,6 +19,7 @@ export interface NodeDraft {
   loops?: number;
   filter?: string;
   joinCondition?: string;
+  indexCondition?: string;
   warnings?: ExplainWarning[];
   children?: ExplainPlanNode[];
 }
@@ -35,6 +37,7 @@ export function makeNode(id: string, draft: NodeDraft): ExplainPlanNode {
     ...(draft.loops !== undefined ? { loops: draft.loops } : {}),
     ...(draft.filter !== undefined ? { filter: draft.filter } : {}),
     ...(draft.joinCondition !== undefined ? { joinCondition: draft.joinCondition } : {}),
+    ...(draft.indexCondition !== undefined ? { indexCondition: draft.indexCondition } : {}),
     warnings: draft.warnings ?? [],
     children: draft.children ?? [],
   };
@@ -72,6 +75,15 @@ export function bool(value: unknown): boolean | undefined {
   if (value === 1 || value === '1') return true;
   if (value === 0 || value === '0') return false;
   return undefined;
+}
+
+export function largeScanRows(options: ExplainParseOptions): number {
+  return options.largeScanRows ?? DEFAULT_LARGE_SCAN_ROWS;
+}
+
+/** Rows unknown counts as large: without an estimate we cannot rule it out. */
+export function isLargeScan(rows: number | undefined, options: ExplainParseOptions): boolean {
+  return rows === undefined || rows >= largeScanRows(options);
 }
 
 export function walkPlan(nodes: readonly ExplainPlanNode[], visit: (node: ExplainPlanNode) => void): void {

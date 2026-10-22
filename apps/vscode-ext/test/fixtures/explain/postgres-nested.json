@@ -18,13 +18,13 @@
           "Node Type": "Index Scan",
           "Relation Name": "users",
           "Index Name": "users_pkey",
+          "Index Cond": "(id = orders.user_id)",
           "Plan Rows": 1,
           "Total Cost": 8,
           "Plans": []
         }
       ]
     },
-    "Planning Time": 0.5,
-    "Execution Time": 2.2
+    "Planning Time": 0.5
   }
 ]

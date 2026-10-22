@@ -695,6 +695,8 @@ export const en: MessageCatalog = {
   'wv.explain.loops': 'Loops',
   'wv.explain.filter': 'Filter',
   'wv.explain.joinCondition': 'Join condition',
+  'wv.explain.indexCondition': 'Index condition',
+  'wv.explain.rawTruncated': 'Raw plan exceeds 1 MB and was omitted; the plan tree is complete.',
   'wv.explain.warnings': 'Warnings',
   'wv.explain.noWarnings': 'No warnings',
   'wv.explain.rawPlan': 'Raw plan',

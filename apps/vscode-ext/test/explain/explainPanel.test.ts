@@ -1,0 +1,218 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const h = vi.hoisted(() => ({
+  confirm: vi.fn(async () => true),
+  clipboard: vi.fn(async () => undefined),
+  diag: vi.fn(),
+}));
+
+vi.mock('vscode', () => ({
+  ViewColumn: { Beside: -2 },
+  workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
+  env: { language: 'en', clipboard: { writeText: h.clipboard } },
+}));
+
+vi.mock('../../src/result/baseWebView', () => ({
+  BaseWebView: class {
+    panel = { title: '' };
+    post = vi.fn();
+    initSent = false;
+    constructor(..._args: unknown[]) { /* noop */ }
+    dispose(): void { this.onDispose(); }
+    reveal(): void { /* noop */ }
+    onDispose(): void { /* noop */ }
+  },
+}));
+
+vi.mock('../../src/utils/sqlSafety', () => ({ confirmSqlExecution: h.confirm }));
+vi.mock('../../src/utils/diagnostics', () => ({ diagError: h.diag, diagWarn: vi.fn(), diagInfo: vi.fn() }));
+
+import { ExplainPanel } from '../../src/explain/explainPanel';
+
+const MYSQL_PLAN = { EXPLAIN: JSON.stringify({ query_block: { select_id: 1, table: { table_name: 'users', access_type: 'ALL', rows_examined_per_scan: 5000 } } }) };
+
+type Handler = (sql: string) => unknown;
+
+function makeManager(handler: Handler) {
+  const executed: string[] = [];
+  const query = vi.fn(async (sql: string) => {
+    executed.push(sql);
+    const out = await handler(sql);
+    return { rows: out ?? [] };
+  });
+  const manager: any = {
+    retain: vi.fn(),
+    release: vi.fn(),
+    scanOptionsFor: () => undefined,
+    connectSql: vi.fn(async () => ({ query: { query, wrap: (s: string) => `\`${s}\`` } })),
+  };
+  return { manager, executed, query };
+}
+
+function conn(overrides: Record<string, unknown> = {}): any {
+  return { id: 'c1', name: 'local', host: 'localhost', dbType: 'MYSQL', database: 'app', ...overrides };
+}
+
+function posts(view: any): any[] {
+  return view.post.mock.calls.map((c: any[]) => c[0]);
+}
+
+async function mount(view: any): Promise<void> {
+  await view.handleMessage({ type: 'ready' });
+  await view.handleMessage({ type: 'ready' });
+}
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+}
+
+beforeEach(() => {
+  ExplainPanel.closeAll();
+  h.confirm.mockReset().mockResolvedValue(true);
+  h.clipboard.mockClear();
+  h.diag.mockClear();
+});
+
+describe('ExplainPanel', () => {
+  it('two-ready protocol: first ready sends init, second runs the plan', async () => {
+    const { manager, executed } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn(), 'SELECT * FROM users');
+    const view: any = ExplainPanel.find('c1');
+
+    await view.handleMessage({ type: 'ready' });
+    expect(posts(view)).toEqual([{ type: 'init', mode: 'explain' }]);
+    expect(executed).toEqual([]);
+
+    await view.handleMessage({ type: 'ready' });
+    const plan = posts(view).find((m) => m.type === 'explainPlan');
+    expect(plan.statements).toHaveLength(1);
+    expect(plan.statements[0].plan.roots[0].children[0].object).toBe('users');
+    expect(executed).toContain('EXPLAIN FORMAT=JSON SELECT * FROM users');
+  });
+
+  it('falls back to conn.database for MySQL when no database is given', async () => {
+    const { manager, executed } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn({ database: 'app' }), 'SELECT 1');
+    await mount(ExplainPanel.find('c1'));
+    expect(executed[0]).toBe('USE `app`');
+  });
+
+  it('prefers the explicit database over conn.database', async () => {
+    const { manager, executed } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn({ database: 'app' }), 'SELECT 1', 'reporting');
+    await mount(ExplainPanel.find('c1'));
+    expect(executed[0]).toBe('USE `reporting`');
+  });
+
+  it('decodes the MySQL EXPLAIN column for the raw pane', async () => {
+    const { manager } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn(), 'SELECT 1');
+    const view: any = ExplainPanel.find('c1');
+    await mount(view);
+    const plan = posts(view).find((m) => m.type === 'explainPlan');
+    expect(typeof plan.statements[0].plan.raw[0].EXPLAIN).toBe('object');
+  });
+
+  it('uses the legacy EXPLAIN as a fallback when the structured format fails', async () => {
+    const { manager } = makeManager((sql) => {
+      if (sql.includes('FORMAT=JSON')) throw new Error('FORMAT not supported');
+      if (sql.startsWith('EXPLAIN')) return [{ id: 1, table: 'users', type: 'ALL' }];
+      return [];
+    });
+    ExplainPanel.open(manager, conn(), 'SELECT 1');
+    const view: any = ExplainPanel.find('c1');
+    await mount(view);
+    const plan = posts(view).find((m) => m.type === 'explainPlan');
+    expect(plan.statements[0].plan).toBeNull();
+    expect(plan.statements[0].fallback.reason).toBe('FORMAT not supported');
+    expect(plan.statements[0].fallback.rows).toHaveLength(1);
+  });
+
+  it('reports the real error when both structured and legacy EXPLAIN fail', async () => {
+    const { manager } = makeManager((sql) => {
+      if (sql.startsWith('EXPLAIN')) throw new Error("Table 'app.nope' doesn't exist");
+      return [];
+    });
+    ExplainPanel.open(manager, conn(), 'SELECT * FROM nope');
+    const view: any = ExplainPanel.find('c1');
+    await mount(view);
+    expect(posts(view).some((m) => m.type === 'explainPlan')).toBe(false);
+    expect(posts(view).at(-1)).toEqual({ type: 'error', message: "Table 'app.nope' doesn't exist" });
+    expect(h.diag).toHaveBeenCalledWith('explain failed', "Table 'app.nope' doesn't exist");
+  });
+
+  it('discards an in-flight result when open() replaces the SQL', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const { manager, executed } = makeManager(async (sql) => {
+      if (sql.includes('old_t')) await gate;
+      return [MYSQL_PLAN];
+    });
+    ExplainPanel.open(manager, conn({ database: undefined }), 'SELECT * FROM old_t');
+    const view: any = ExplainPanel.find('c1');
+    const first = mount(view);
+    await flush();
+
+    ExplainPanel.open(manager, conn({ database: undefined }), 'SELECT * FROM new_t');
+    release();
+    await first;
+    await flush();
+
+    const plans = posts(view).filter((m) => m.type === 'explainPlan');
+    expect(plans).toHaveLength(1);
+    expect(plans[0].statements[0].sql).toBe('SELECT * FROM new_t');
+    expect(executed).toContain('EXPLAIN FORMAT=JSON SELECT * FROM new_t');
+  });
+
+  it('blocks SQL containing a password literal before connecting', async () => {
+    const { manager } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn(), "ALTER USER 'a'@'%' IDENTIFIED BY 'secret'");
+    const view: any = ExplainPanel.find('c1');
+    await mount(view);
+    expect(manager.connectSql).not.toHaveBeenCalled();
+    expect(posts(view).at(-1)).toMatchObject({ type: 'error' });
+  });
+
+  it('does nothing when the safety confirmation is declined', async () => {
+    h.confirm.mockResolvedValue(false);
+    const { manager } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn(), 'DELETE FROM users');
+    const view: any = ExplainPanel.find('c1');
+    await mount(view);
+    expect(manager.connectSql).not.toHaveBeenCalled();
+    expect(posts(view).some((m) => m.type === 'explainRunning')).toBe(false);
+  });
+
+  it('omits the raw plan above the payload limit but keeps the tree', async () => {
+    const big = { query_block: { select_id: 1, table: { table_name: 'users', access_type: 'ALL', attached_condition: 'x'.repeat(1_200_000) } } };
+    const { manager } = makeManager(() => [{ EXPLAIN: JSON.stringify(big) }]);
+    ExplainPanel.open(manager, conn(), 'SELECT 1');
+    const view: any = ExplainPanel.find('c1');
+    await mount(view);
+    const stmt = posts(view).find((m) => m.type === 'explainPlan').statements[0];
+    expect(stmt.rawTruncated).toBe(true);
+    expect(stmt.plan.raw).toBeNull();
+    expect(stmt.plan.roots[0].children[0].object).toBe('users');
+  });
+
+  it('reuses the panel per connection and releases the connection on dispose', async () => {
+    const { manager } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn(), 'SELECT 1');
+    const view: any = ExplainPanel.find('c1');
+    ExplainPanel.open(manager, conn(), 'SELECT 2');
+    expect(ExplainPanel.find('c1')).toBe(view);
+    expect(manager.retain).toHaveBeenCalledTimes(1);
+
+    view.dispose();
+    expect(ExplainPanel.find('c1')).toBeUndefined();
+    expect(manager.release).toHaveBeenCalledWith('c1');
+  });
+
+  it('copies raw text to the clipboard', async () => {
+    const { manager } = makeManager(() => [MYSQL_PLAN]);
+    ExplainPanel.open(manager, conn(), 'SELECT 1');
+    const view: any = ExplainPanel.find('c1');
+    await view.handleMessage({ type: 'copyText', text: '{"a":1}' });
+    expect(h.clipboard).toHaveBeenCalledWith('{"a":1}');
+  });
+});

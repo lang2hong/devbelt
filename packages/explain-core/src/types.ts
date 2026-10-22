@@ -26,6 +26,8 @@ export interface ExplainPlanNode {
   loops?: number;
   filter?: string;
   joinCondition?: string;
+  /** Condition used to probe an index (PostgreSQL `Index Cond`). */
+  indexCondition?: string;
   warnings: ExplainWarning[];
   children: ExplainPlanNode[];
 }
@@ -47,7 +49,15 @@ export interface ExplainParseOptions {
    * decides whether an absolute threshold is meaningful.
    */
   highCostThreshold?: number;
+  /**
+   * Estimated row count at which a full scan is considered "large". Small
+   * scans are often the optimal plan, so index-related warnings are only
+   * raised at or above this value. Defaults to `DEFAULT_LARGE_SCAN_ROWS`.
+   */
+  largeScanRows?: number;
 }
+
+export const DEFAULT_LARGE_SCAN_ROWS = 1000;
 
 export type ExplainParseResult =
   | { ok: true; plan: ExplainPlan }

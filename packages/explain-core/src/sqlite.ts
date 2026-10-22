@@ -106,19 +106,26 @@ function buildSqliteNode(row: SqliteRow): ExplainPlanNode {
     });
   }
 
-  const scan = /^SCAN\s+(.+?)(?:\s+USING\s+(?:COVERING\s+)?INDEX\s+([^\s(]+))?(?:\s+\(.*\))?$/i.exec(detail);
+  if (/^SCAN\s+CONSTANT\s+ROW$/i.test(detail)) {
+    return makeNode(id, { operation: 'Constant row', warnings, children: [] });
+  }
+
+  const scan = /^SCAN\s+(?:TABLE\s+)?(.+?)(?:\s+USING\s+(COVERING\s+)?INDEX\s+([^\s(]+))?(?:\s+\(.*\))?$/i.exec(detail);
   if (scan) {
-    warnings.push('fullTableScan');
+    const covering = scan[2] !== undefined;
+    const index = scan[3];
+    // EQP has no row estimates; a plain table scan is flagged, an index-ordered or covering scan is not.
+    if (index === undefined) warnings.push('fullTableScan');
     return makeNode(id, {
-      operation: scan[2] ? 'Index scan' : 'Table scan',
+      operation: index === undefined ? 'Table scan' : covering ? 'Covering index scan' : 'Index scan',
       ...(scan[1] !== undefined ? { object: scan[1] } : {}),
-      ...(scan[2] !== undefined ? { index: scan[2] } : {}),
+      ...(index !== undefined ? { index } : {}),
       warnings,
       children: [],
     });
   }
 
-  const search = /^SEARCH\s+(.+?)\s+USING\s+(.+?)(?:\s+\((.*)\))?$/i.exec(detail);
+  const search = /^SEARCH\s+(?:TABLE\s+)?(.+?)\s+USING\s+(.+?)(?:\s+\((.*)\))?$/i.exec(detail);
   if (search) {
     const table = search[1];
     const using = search[2];
@@ -133,7 +140,7 @@ function buildSqliteNode(row: SqliteRow): ExplainPlanNode {
           : 'Index search',
       ...(table !== undefined ? { object: table } : {}),
       ...(index !== undefined ? { index } : {}),
-      ...(condition !== undefined ? { filter: condition } : {}),
+      ...(condition !== undefined ? { indexCondition: condition } : {}),
       children: [],
     });
   }

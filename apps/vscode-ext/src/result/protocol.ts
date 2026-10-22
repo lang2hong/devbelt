@@ -92,6 +92,8 @@ export interface ExplainStatementView {
   sql: string;
   plan: ExplainPlan | null;
   fallback?: ExplainFallbackView;
+  /** 原始计划超过消息上限被省略（计划树仍完整）。 */
+  rawTruncated?: boolean;
 }
 
 /** webview → Extension Host。 */

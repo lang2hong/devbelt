@@ -673,6 +673,8 @@ export const zh: MessageCatalog = {
   'wv.explain.loops': '循环次数',
   'wv.explain.filter': '过滤条件',
   'wv.explain.joinCondition': '连接条件',
+  'wv.explain.indexCondition': '索引条件',
+  'wv.explain.rawTruncated': '原始计划超过 1 MB，已省略；计划树完整。',
   'wv.explain.warnings': '告警',
   'wv.explain.noWarnings': '无告警',
   'wv.explain.rawPlan': '原始计划',

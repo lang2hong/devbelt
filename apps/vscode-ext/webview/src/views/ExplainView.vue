@@ -37,8 +37,9 @@ const selectedNode = computed<ExplainPlanNode | undefined>(() =>
   currentPlan.value ? findPlanNode(currentPlan.value.roots, selectedId.value) : undefined,
 );
 const rawText = computed(() => {
-  const source = current.value?.plan?.raw ?? current.value?.fallback?.rows ?? null;
-  return source == null ? '' : JSON.stringify(source, null, 2);
+  const source = current.value?.plan ? current.value.plan.raw : current.value?.fallback?.rows;
+  if (source == null || (Array.isArray(source) && source.length === 0)) return '';
+  return JSON.stringify(source, null, 2);
 });
 
 function warningLabel(warning: ExplainWarning): string {
@@ -209,6 +210,10 @@ onUnmounted(() => {
                 <dt>{{ t('wv.explain.joinCondition') }}</dt>
                 <dd class="code">{{ selectedNode.joinCondition }}</dd>
               </template>
+              <template v-if="selectedNode.indexCondition">
+                <dt>{{ t('wv.explain.indexCondition') }}</dt>
+                <dd class="code">{{ selectedNode.indexCondition }}</dd>
+              </template>
             </dl>
             <div v-if="selectedNode.warnings.length" class="detail-warnings">
               <div class="details-title">{{ t('wv.explain.warnings') }}</div>
@@ -227,6 +232,7 @@ onUnmounted(() => {
       <div v-else-if="current.fallback" class="fallback">
         <div class="fallback-title">{{ t('wv.explain.fallback') }}</div>
         <div class="muted">{{ t('wv.explain.fallbackReason', { reason: current.fallback.reason }) }}</div>
+        <div v-if="current.rawTruncated" class="muted">{{ t('wv.explain.rawTruncated') }}</div>
         <pre>{{ current.fallback.text || rawText }}</pre>
       </div>
 
@@ -235,7 +241,8 @@ onUnmounted(() => {
           <input v-model="showRaw" type="checkbox" />
           {{ t('wv.explain.rawPlan') }}
         </label>
-        <pre v-if="showRaw">{{ rawText }}</pre>
+        <div v-if="showRaw && current.rawTruncated" class="muted">{{ t('wv.explain.rawTruncated') }}</div>
+        <pre v-if="showRaw && rawText">{{ rawText }}</pre>
       </div>
     </template>
 
