@@ -37,6 +37,7 @@ import { registerAiInlineProvider } from './completion/aiInlineProvider';
 import { createSyncStatusBar } from './sync/syncStatusBar';
 import { createAuthStatusBar } from './sync/authStatusBar';
 import { HistoryStore, clampHistoryLimit } from './history/historyStore';
+import { SqlDiagnosticsProvider } from './diagnostics/sqlDiagnosticsProvider';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
@@ -377,6 +378,15 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
       ),
     ),
   );
+
+  // P10 S7：SQL 静态诊断（不连库；方言规则仅在文档绑定连接时启用）。
+  context.subscriptions.push(new SqlDiagnosticsProvider({
+    resolveDbType: (uri) => connCtx.getForDoc(uri)?.conn.dbType,
+    resolveScanOptions: (uri) => {
+      const conn = connCtx.getForDoc(uri)?.conn;
+      return conn ? manager.scanOptionsFor?.(conn) : undefined;
+    },
+  }));
 
   registerViewCommands({ context, manager, treeProvider, auth, backupScheduler, auditLogger });
 

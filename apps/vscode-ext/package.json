@@ -2294,6 +2294,26 @@
           "description": "SQL statement execution timeout in seconds (0 = no timeout). Applies to every SQL session; the per-connection request timeout in the connection form overrides it. Changes take effect immediately.",
           "markdownDescription": "SQL 语句执行超时（秒，默认 300；0 = 不超时）。作用于所有 SQL 会话；连接表单的「请求超时」可按连接覆盖。改动实时生效，无需重连。"
         },
+        "devbelt.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Static diagnostics for .sql files (no database access).",
+          "markdownDescription": "`.sql` 文件静态诊断（不连接数据库）。"
+        },
+        "devbelt.diagnostics.rules": {
+          "type": "object",
+          "default": {},
+          "description": "Per-rule severity overrides: off | hint | info | warning | error.",
+          "markdownDescription": "按规则覆盖级别：`off` / `hint` / `info` / `warning` / `error`。规则：`updateDeleteWithoutWhere`（UPDATE/DELETE 缺少 WHERE）、`dangerousDdl`（DROP/TRUNCATE/ALTER）、`notInSubquery`（NOT IN 子查询的 NULL 陷阱）、`selectStar`（SELECT *）、`dialectMismatch`（与绑定连接方言不符的写法）。",
+          "properties": {
+            "updateDeleteWithoutWhere": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
+            "dangerousDdl": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
+            "notInSubquery": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
+            "selectStar": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
+            "dialectMismatch": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] }
+          },
+          "additionalProperties": false
+        },
         "devbelt.insights.historyLimit": {
           "type": "number",
           "default": 100,
