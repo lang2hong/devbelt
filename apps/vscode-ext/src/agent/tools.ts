@@ -1,5 +1,6 @@
 import { DatabaseType } from '@devbelt/db-core';
 import type { ColumnMeta, ForeignKeyMeta, IndexMeta, TableMeta } from '@devbelt/db-core';
+import type { SqlConnectionSession } from '../connection/connectionSession.js';
 import type { ToolCall } from '@devbelt/ai-core';
 import type { AgentEngine, ToolDefinition } from '@devbelt/agent-core';
 import {
@@ -101,6 +102,14 @@ export const AGENT_TOOL_DEFINITIONS: readonly ToolDefinition[] = [
     }, ['sql']),
   },
 ];
+
+/** Adapt a real session (QueryService + metadata) to the runtime's session shape. */
+export function bindAgentSession(session: SqlConnectionSession): AgentToolHost['session'] {
+  return {
+    query: (sql, values, options) => session.query.query(sql, values, options),
+    metadata: session.metadata,
+  };
+}
 
 /** Map internal tool metadata to the OpenAI wire shape used by ai-core. */
 export function toModelTools(definitions: readonly ToolDefinition[]) {

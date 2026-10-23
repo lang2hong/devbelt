@@ -28,6 +28,10 @@ import { AiSessionStore } from './ai/aiSessionStore';
 import { AiService } from './ai/aiService';
 import { AiChatView, type AiChatViewDeps } from './result/aiChatView';
 import { agentLedgerPath, recoverAgentLedger } from './agent/ledger';
+import { McpServerHost } from './mcp/server';
+import { McpTokenStore } from './mcp/tokenStore';
+import { McpAuditLog } from './mcp/audit';
+import { registerMcpCommands } from './mcp/commands';
 import { registerAiCommands } from './commands/aiChat';
 import { registerAiEditorCommands } from './commands/aiEditor';
 import { AiSchemaContextBuilder } from './ai/schemaContext';
@@ -424,6 +428,52 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   };
   // P12：把上次异常退出遗留的 EXECUTING 记为 UNKNOWN。
   void recoverAgentLedger(agentLedgerPath(context.globalStorageUri.fsPath)).catch(() => undefined);
+
+  // P12：MCP Server（默认关闭；只暴露所选连接的只读工具）。
+  const mcpTokens = new McpTokenStore(
+    {
+      get: <T>(key: string, fallback: T) => context.globalState.get<T>(key, fallback),
+      update: (key, value) => context.globalState.update(key, value),
+    },
+    context.secrets,
+  );
+  const mcpAudit = new McpAuditLog(`${context.globalStorageUri.fsPath}/mcp/audit.jsonl`);
+  const mcpConfig = () => vscode.workspace.getConfiguration('devbelt');
+  const mcpConnection = () => {
+    const id = mcpConfig().get<string>('mcp.connectionId', '');
+    return id ? store.get(id) : undefined;
+  };
+  const mcpHost = new McpServerHost({
+    tokens: mcpTokens,
+    audit: mcpAudit,
+    manager,
+    getConnection: mcpConnection,
+    getSettings: () => ({
+      rateLimitPerMinute: mcpConfig().get<number>('mcp.rateLimitPerMinute', 60),
+      includeSample: mcpConfig().get<boolean>('mcp.includeSample', false),
+      maxRows: mcpConfig().get<number>('mcp.maxRows', 200),
+    }),
+  });
+  context.subscriptions.push(...registerMcpCommands({ host: mcpHost, tokens: mcpTokens, getConnection: mcpConnection }));
+  const syncMcp = async (): Promise<void> => {
+    const cfg = mcpConfig();
+    if (!cfg.get<boolean>('mcp.enabled', false) || !mcpConnection()) {
+      await mcpHost.stop();
+      return;
+    }
+    try {
+      await mcpHost.start();
+    } catch (err) {
+      void vscode.window.showErrorMessage(l10n('mcp.startFailed', { message: err instanceof Error ? err.message : String(err) }));
+    }
+  };
+  void syncMcp();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('devbelt.mcp')) void syncMcp();
+    }),
+    { dispose: () => { void mcpHost.stop(); } },
+  );
   // 叶子视图（结果面板/表设计器）经桥发起 Chat 请求；未初始化时调用方给明确提示。
   AiBridge.init({
     requestChat: (request) => {

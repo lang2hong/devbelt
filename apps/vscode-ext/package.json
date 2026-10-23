@@ -316,6 +316,26 @@
         "category": "DevBelt"
       },
       {
+        "command": "devbelt.mcp.enable",
+        "title": "%cmd.mcpEnable%",
+        "category": "DevBelt"
+      },
+      {
+        "command": "devbelt.mcp.disable",
+        "title": "%cmd.mcpDisable%",
+        "category": "DevBelt"
+      },
+      {
+        "command": "devbelt.mcp.copyClientConfig",
+        "title": "%cmd.mcpCopyClientConfig%",
+        "category": "DevBelt"
+      },
+      {
+        "command": "devbelt.mcp.revokeClient",
+        "title": "%cmd.mcpRevokeClient%",
+        "category": "DevBelt"
+      },
+      {
         "command": "devbelt.updateCell",
         "title": "%cmd.updateCell%",
         "category": "DevBelt"
@@ -2485,6 +2505,40 @@
           "description": "Allow agent writes on connections marked production. Off by default.",
           "markdownDescription": "允许在标记为生产环境的连接上执行 Agent 写操作（默认拒绝）。"
         },
+        "devbelt.mcp.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run a loopback-only MCP server exposing read-only tools for the selected connection.",
+          "markdownDescription": "启动仅监听本机的 MCP Server，为所选连接提供只读工具（默认关闭）。"
+        },
+        "devbelt.mcp.connectionId": {
+          "type": "string",
+          "default": "",
+          "description": "Connection exposed over MCP. Empty means no connection.",
+          "markdownDescription": "通过 MCP 暴露的连接 ID；留空表示不暴露任何连接。"
+        },
+        "devbelt.mcp.rateLimitPerMinute": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 600,
+          "description": "Per-client requests per minute.",
+          "markdownDescription": "每个 MCP 客户端每分钟的请求上限。"
+        },
+        "devbelt.mcp.includeSample": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include redacted row samples in MCP read-only query results.",
+          "markdownDescription": "MCP 只读查询结果是否包含脱敏后的行样本（默认关闭）。"
+        },
+        "devbelt.mcp.maxRows": {
+          "type": "number",
+          "default": 200,
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Row limit for MCP read-only queries.",
+          "markdownDescription": "MCP 只读查询的最大返回行数。"
+        },
         "devbelt.ai.temperature": {
           "type": "number",
           "default": 0.2,
@@ -2641,13 +2695,15 @@
     "vsix:smoke": "node scripts/vsix-smoke.mjs"
   },
   "dependencies": {
+    "@devbelt/agent-core": "workspace:*",
     "@devbelt/db-host": "workspace:*",
     "@devbelt/explain-core": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "chart.js": "^4.4.0",
     "jsqr": "^1.4.0",
     "pngjs": "^7.0.0",
     "ssh2": "^1.16.1",
-    "@devbelt/agent-core": "workspace:*"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@devbelt/ai-core": "workspace:*",

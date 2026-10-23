@@ -54,7 +54,7 @@ import { assembleOptimizeMessages, injectBusinessRules, type RefinePayload } fro
 import type { ExternalAiRequest } from '../ai/aiBridge.js';
 import type { QueryExecutor } from './queryExecutor.js';
 import { AgentRunner } from '../agent/runner.js';
-import { buildAgentTools, agentEngineOf, toModelTools } from '../agent/tools.js';
+import { buildAgentTools, agentEngineOf, toModelTools, bindAgentSession } from '../agent/tools.js';
 import { buildWriteTools } from '../agent/writeTools.js';
 import { createAgentLedger } from '../agent/ledger.js';
 import { defineToolRegistry, guardToolCall } from '@devbelt/agent-core';
@@ -501,7 +501,7 @@ export class AiChatView extends BaseWebView {
         dbType: conn.dbType,
         ...(database ? { database } : {}),
         ...(schema ? { schema } : {}),
-        session: isolated.session as never,
+        session: bindAgentSession(isolated.session),
         readOnlySession: conn.readOnly === true,
         includeSample,
         maxRows: AI_SELECT_ROW_LIMIT,
