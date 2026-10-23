@@ -262,7 +262,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 审计分为两层：
 
 - **活动日志**：沿用现有 `AuditLogger`，它存 VS Code Memento、上限固定 1000、写入失败只告警，可清理；仅用于本地可见活动，不可作为安全关键审计依据。
-- **安全执行账本**：记录 W2/W3 proposal、批准 / 拒绝和执行状态，使用独立本地 SQLite 持久化；账本写入失败时必须阻断 W2/W3。MCP 调用也必须持久化，不能静默跳过。
+- **安全执行账本**：记录 W2/W3 proposal、批准 / 拒绝和执行状态，使用 append-only JSONL 文件持久化（每条事件写入后 `fsync`，写入方用独占锁文件串行化）；账本写入失败或锁被占用时必须阻断 W2/W3。MCP 调用也必须持久化，不能静默跳过。
 - 状态机：`PROPOSED → APPROVED → EXECUTING → SUCCEEDED / FAILED / UNKNOWN`。执行前必须先持久化 `EXECUTING`；启动时把遗留 `EXECUTING` 恢复为 `UNKNOWN`。
 - 数据库已提交但终态写入失败时，报告 `UNKNOWN` 并要求人工核查；不得声称执行失败或可回滚。
 - 该账本是 fail-closed 本地执行账本，不是不可篡改审计，也不提供跨设备一致性。
@@ -303,7 +303,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | `packages/ai-core` | 扩展 tool calling：请求 `tools` / `tool_choice`，解析 `tool_calls` 与流式增量 |
 | `apps/server` | 代理转发 `tools` / `tool_calls`，计量包含工具调用 token；不记录对话内容 |
 | `apps/vscode-ext/src/utils/auditLogger.ts` | 活动日志字段扩展与查询 |
-| `apps/vscode-ext/src/agent/executionLedger.ts`（新） | 独立 SQLite 安全执行账本、状态机、启动恢复、导出 |
+| `packages/agent-core/src/jsonlLedger.ts`（新） | append-only JSONL 安全执行账本、状态机、启动恢复、导出；路径由扩展宿主注入（`globalStorageUri`） |
 
 ### 7.2 关键依赖与限制
 
@@ -316,7 +316,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - PostgreSQL `openIsolatedSql` 默认 `search_path = pg_catalog`，Agent 必须完全限定对象名；
 - SQLite 连接不支持跨查询事务，dry-run 必须按整批事务实现；正式执行立即提交；
 - MySQL DDL 隐式提交，不能承诺回滚；正式执行不提供执行后回滚；
-- 安全执行账本使用独立 SQLite，需与业务库文件隔离并单独备份。
+- 安全执行账本不使用 SQLite：扩展宿主为 VS Code `^1.85.0`（Node 18），没有内置 `node:sqlite`，引入原生模块会增加 VSIX 打包与跨平台风险；改用 append-only JSONL + `fsync` + 独占锁文件，账本文件与业务库隔离并单独备份。
 
 ### 7.3 命令与配置
 
@@ -419,7 +419,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | 阶段 | 任务 |
 |---|---|
 | 1 | `agent-core`：工具契约、风险分级、Proposal 状态机、审计事件 |
-| 2 | 安全执行账本：独立 SQLite、状态机、启动恢复 |
+| 2 | 安全执行账本：append-only JSONL、`fsync`、锁文件、状态机、启动恢复 |
 | 3 | Tool Result Sanitizer 与宿主策略校验 |
 | 4 | 只读 Tool Runtime：只读事务、只读打开、受限 SQL 分类 |
 | 5 | `ai-core` / server：tool calling、流式解析、代理转发、计量 |
@@ -452,7 +452,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 2. 脱敏 salt 为项目级；首版不支持导出 / 导入，不承诺跨机器一致。
 3. 本地自带 Key 的 IDE Agent 可用；官方代理走现有 AI 配额；MCP 本地只读不计费；脱敏导出本地可用。
 4. MCP 使用官方 SDK，固定版本；引入前评审许可证、依赖树和 VSIX 体积。
-5. 安全执行账本使用独立 SQLite，支持状态恢复和导出；不使用 Memento 或 SecretStorage。
+5. 安全执行账本使用 append-only JSONL 文件（`fsync` + 独占锁文件），支持状态恢复和导出；不使用 SQLite、Memento 或 SecretStorage。末尾半行视为崩溃残留并在下次写入前修复；中间行损坏直接拒绝读写。
 6. 首版 dry-run 仅单表 `UPDATE`、`DELETE`、`INSERT VALUES`；检测到触发器一律降级为静态预览。
 
 ## 13. CHANGELOG 模板
