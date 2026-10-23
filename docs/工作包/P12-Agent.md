@@ -385,6 +385,13 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - FK 闭包：单库、深度 / 行数上限、循环 / 跨库拒绝和导出顺序；
 - 活动日志与安全执行账本的字段、失败阻断和清理审计。
 
+已实现的测试位置：
+
+- `packages/agent-core/test/{policy,proposal,jsonlLedger,sanitizer,guard,readOnlySql,readOnlyRuntime}.test.ts`；
+- `packages/db-core/test/connection/sqlite/sqliteReadOnly.test.ts`（点命令绕过样本、只读打开、多行 / 字符串换行）；
+- `packages/db-core/test/integration/readOnlyReal.test.ts`（4a：连接级只读，MySQL / PG）；
+- `packages/agent-core/test/integration/readOnlyReal.test.ts`（4b：绕过静态检查直接写、序列、DDL、超时、会话可复用）。
+
 ### 真实库矩阵
 
 | 引擎 | 内容 |
@@ -433,11 +440,27 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 
 每阶段单独验证；引入新依赖（MCP SDK 等）前单独评审。
 
+进度（2026-10-23）：
+
+- **阶段 1–3 已完成**：`packages/agent-core` 的工具契约 / 风险分级 / Proposal 状态机（`c8e9cd9`）、append-only JSONL 安全执行账本（同提交）、Tool Result Sanitizer 与宿主调用校验（`24f7ea3`）。单元测试 94 个。
+- **阶段 4a 已完成**（`0674bc7`）：`ConnectionConfig.readOnly` 贯通到驱动；MySQL `SET SESSION TRANSACTION READ ONLY`、PostgreSQL `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`、SQLite `.open --readonly` + `PRAGMA query_only=ON`，设置失败即建连失败。SQLite 查询改为单行发送并拒绝点命令（原实现可被 CLI 的 `#` / `GO` / `[…]` 行规则绕过）。真库验证：CI run `39934631173` 的 integration job 跑了 `readOnlyReal.test.ts` 4 例（MySQL / PG），`sqliteReadOnly.test.ts` 11 例（本地与 CI）全部通过。
+- **阶段 4b 已完成**（`a0e4351` + `d20d58f`）：`checkReadOnlySql` 单语句 / 读形态 / 关键字与副作用函数黑名单；`runReadOnlyQuery` / `explainReadOnly` 每次调用进入只读事务（PG `BEGIN READ ONLY`、MySQL `START TRANSACTION READ ONLY`，SQLite 要求只读会话），结果经 Sanitizer。CI run `39944715726` 的 integration job 中 `Integration tests (agent-core)` 执行了 9 个用例（MySQL 3 / PG 4 / SQLite 2）并全部通过。同一 run 的 build (22) 暴露了 SQLite 驱动的既有竞态：`-bail` 下 CLI 报错退出时 stdin 的 EPIPE 可能先于 stderr 到达，调用方拿到 `write EPIPE` 而不是 SQL 错误。已在 `d20d58f` 修复（等进程 `close` 再结算，2 秒兜底），本地回归测试与 SQLite 真库用例连跑 20 次通过；**该修复尚未在 CI 复验**。
+- **未完成**：阶段 5 起（tool calling、IDE Agent、W2/W3、MCP、脱敏）以及阶段 10–11 的完整矩阵、i18n、VSIX smoke 与截图。
+
 4a 已知限制：
 
 - MySQL / PG 的会话级只读可被同一会话里的 `SET SESSION TRANSACTION READ WRITE` / `SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE` 改回。普通执行路径上客户端分类器把 `SET` 判为写并拦截，但这不是绝对边界；Agent / MCP 由 4b 的每次调用只读事务与语句白名单兜底。
 - SQLite `.mode tcl` 输出把存储值中的换行显示为 `\n`（既有行为，存储值正确）；结果解析器未还原，另行处理。
 - SQLite 驱动的安全性只依赖「发送文本不含换行、首字符不是 `.`」这一断言；词法识别错误只会导致语法错误或字面量变化，不会执行点命令。
+
+4b 已知限制：
+
+- 只接受单条语句；多语句、`SET` / `BEGIN` 等会话控制语句直接拒绝。
+- 黑名单按关键字 fail-closed：列名与关键字同名（如 `lock`、`set`）时必须加引号，否则会被拒绝。
+- 行数限制用 `SELECT * FROM (…) AS devbelt_q LIMIT n+1` 包装，只用于 `SELECT` / `WITH` / `VALUES`；`EXPLAIN` 不包装。
+- MySQL 的 `max_execution_time` 只对 `SELECT` 生效，其余只读语句依赖客户端超时与 `KILL QUERY`。
+- SQLite 不支持跨查询事务，因此 4b 要求会话由 4a 以只读方式打开；否则直接拒绝执行。
+- `EXPLAIN` 只返回原始计划行，规范化仍由调用方（Explain 面板 / 解析器）负责。
 
 ## 12. 风险与开放问题
 
