@@ -5,9 +5,15 @@ import { SQLite } from '../../../src/connection/sqlite/index';
 
 // 「无可用 sqlite3」场景需要确定性：自动探测走 spawnSync('sqlite3')，这里统一让它
 // 失败（ENOENT），使「not configured」路径不依赖测试机是否真的装了 sqlite3。
+// spawn 由各用例通过 nextProc 注入假进程，用来确定性地重放 stdin / stderr / close 的到达顺序。
+const cpMock = vi.hoisted(() => ({ nextProc: undefined as unknown }));
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
-  return { ...actual, spawnSync: () => ({ error: new Error('sqlite3 not found') }) };
+  return {
+    ...actual,
+    spawnSync: () => ({ error: new Error('sqlite3 not found') }),
+    spawn: () => cpMock.nextProc,
+  };
 });
 
 /**
@@ -173,6 +179,76 @@ describe('SQLite 无可用命令时显式失败', () => {
     const err = await new Promise<any>((resolve) => conn.connect(resolve));
     expect(err).toBeTruthy();
     expect(conn.isAlive()).toBe(false);
+  });
+});
+
+/**
+ * `-bail` 下语句失败 CLI 会立即退出，而驱动在语句后还会写 `.print` 标记：
+ * stdin 的 EPIPE 可能早于 stderr 的真实错误到达。驱动必须等进程 close 再结算，
+ * 让调用方拿到 SQL 错误，而不是 `write EPIPE`（CI 上偶发）。
+ */
+describe('SQLite 进程退出时的错误来源', () => {
+  class FakeStream extends EventEmitter {
+    writes: string[] = [];
+    write(chunk: string): boolean { this.writes.push(chunk); return true; }
+  }
+  class FakeProc extends EventEmitter {
+    stdin = new FakeStream();
+    stdout = new FakeStream();
+    stderr = new FakeStream();
+    killed = false;
+    exitCode: number | null = null;
+    signalCode: string | null = null;
+    removeAllListeners(): this { return this; }
+    kill(): boolean { this.killed = true; return true; }
+  }
+
+  function driverWith(proc: FakeProc): SQLite {
+    cpMock.nextProc = proc;
+    const sqlite = new SQLite('/tmp/x.db');
+    // The constructor's auto-detection runs through the mocked spawnSync; use the fake CLI name.
+    (sqlite as any).sqliteCommand = 'sqlite3';
+    return sqlite;
+  }
+
+  it('reports the stderr error when EPIPE arrives before stderr', async () => {
+    const proc = new FakeProc();
+    const sqlite = driverWith(proc);
+    const pending = sqlite.query('UPDATE t SET v = 0');
+    const assertion = expect(pending).rejects.toThrow(/attempt to write a readonly database/);
+    await new Promise((r) => setImmediate(r));
+    const epipe = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+    proc.stdin.emit('error', epipe);
+    proc.stderr.emit('data', Buffer.from('Runtime error near line 7: attempt to write a readonly database (8)\n'));
+    proc.emit('close', 1, null);
+    await assertion;
+  });
+
+  it('falls back to the stdin error when stderr stays empty', async () => {
+    const proc = new FakeProc();
+    const sqlite = driverWith(proc);
+    const pending = sqlite.query('SELECT 1');
+    const assertion = expect(pending).rejects.toThrow(/EPIPE/);
+    await new Promise((r) => setImmediate(r));
+    proc.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    proc.emit('close', 1, null);
+    await assertion;
+  });
+
+  it('settles with the stdin error if the process never reports close', async () => {
+    vi.useFakeTimers();
+    try {
+      const proc = new FakeProc();
+      const sqlite = driverWith(proc);
+      const pending = sqlite.query('SELECT 1');
+      const assertion = expect(pending).rejects.toThrow(/EPIPE/);
+      await vi.advanceTimersByTimeAsync(0);
+      proc.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+      await vi.advanceTimersByTimeAsync(2000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

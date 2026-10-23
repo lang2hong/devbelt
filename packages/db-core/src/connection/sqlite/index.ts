@@ -100,6 +100,9 @@ function splitLiteral(text: string): string {
   return `(${pieces.join(' || ')})`;
 }
 
+/** stdin 写失败后等待进程 'close'（以拿到 stderr 真实错误）的上限。 */
+const STDIN_ERROR_GRACE_MS = 2000;
+
 class SQLite {
   public readonly dbPath: string;
   public readonly readOnly: boolean;
@@ -227,10 +230,21 @@ class SQLite {
       if (this.proc === proc && this.current) this.current.stderr += data.toString();
     });
     proc.on('error', (err: Error) => { if (this.proc === proc) this.onExit(err); });
-    proc.on('close', () => { if (this.proc === proc) this.onExit(new Error('sqlite process exited unexpectedly')); });
+    // stdin 的 EPIPE 先记下、等 close 再结算：`-bail` 下 CLI 报错后立即退出，而驱动在语句后还会写
+    // `.print` 标记，于是 EPIPE 可能早于 stderr 的真实错误到达。'close' 在 stdout/stderr 都关闭后
+    // 才触发，此时 stderr 已读完，onExit 能用上 SQL 错误而不是 `write EPIPE`。
+    let stdinError: Error | undefined;
+    proc.on('close', () => {
+      if (this.proc === proc) this.onExit(stdinError ?? new Error('sqlite process exited unexpectedly'));
+    });
     // 子进程已退出后写 stdin 会异步 emit EPIPE；未处理会冒泡成 unhandled 'error' 事件
-    // （使 Vitest/进程判失败）。仅在仍为当前进程时交给 onExit 结算，避免陈旧进程误伤新查询。
-    proc.stdin!.on('error', (err: Error) => { if (this.proc === proc) this.onExit(err); });
+    // （使 Vitest/进程判失败），所以必须监听。close 未在合理时间内到达时兜底结算，避免挂起。
+    proc.stdin!.on('error', (err: Error) => {
+      if (this.proc !== proc || stdinError) return;
+      stdinError = err;
+      const timer = setTimeout(() => { if (this.proc === proc) this.onExit(err); }, STDIN_ERROR_GRACE_MS);
+      timer.unref?.();
+    });
 
     // 写 stdin 规避 unicode 路径问题（见 issues #32, #37）。
     // 先关 echo 再 .open，避免启动噪声混入第一条查询的输出窗口。
