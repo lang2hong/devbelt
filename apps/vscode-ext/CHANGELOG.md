@@ -4,6 +4,68 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.2.0] - 2026-10-23
+
+### English
+
+#### Added
+
+- **Visual EXPLAIN** for MySQL, PostgreSQL and SQLite: plan tree, node details, warning highlights, multi-statement tabs, raw-plan copy and a raw fallback when a structured plan is unavailable. Plain `EXPLAIN` only; statements are never executed.
+- **AI: Explain plan** from the plan panel, using a compact and bounded plan summary.
+- **Index suggestions** for tables the plan flags: equality → range → sort column order, existing-index and primary/unique-key checks, redundant prefix-index hints, and copyable DDL with confidence, reasons and risks. Never executed.
+- **Slow Queries** panel built from local query history: grouping by SQL template, sorting, connection/time/keyword filters, failure counts and one-click SQL or EXPLAIN.
+- **SQL diagnostics** for `.sql` editors: `UPDATE`/`DELETE` without `WHERE`, `DROP`/`TRUNCATE`/`ALTER`, `NOT IN (subquery)`, `SELECT *` and dialect mismatches, with per-rule severity settings.
+- **Data dictionary export** as Markdown or HTML (tables, columns, indexes, foreign keys), with no connection details in the output.
+- Settings: `devbelt.insights.historyLimit`, `devbelt.diagnostics.enabled`, `devbelt.diagnostics.rules`, `devbelt.dictionary.format`.
+
+#### Improved
+
+- Query history retention is configurable (10–1000, default 100) and failed executions are recorded.
+- Plan warnings only fire for large scans (≥ 1000 estimated rows or unknown size), so small tables no longer raise false alarms.
+
+#### Fixed
+
+- SQLite `EXPLAIN QUERY PLAN` returned no rows because the sqlite3 CLI rewrote it as an ASCII tree; the EXPLAIN panel and AI optimization now receive the plan.
+- Replacing the SQL while an EXPLAIN was running could briefly show the previous plan.
+- MySQL EXPLAIN could run against another database when the editor had no database context.
+- SQL errors during EXPLAIN were reported as "could not parse plan" instead of the real error.
+
+#### Known limitations
+
+- Column selectivity is not available, so index suggestions are rated medium at most.
+- Slow queries come from local history only; server-side statistics (`performance_schema`, `pg_stat_statements`) are not read yet.
+- Diagnostics that need schema metadata (implicit conversions, `NOT IN` with nullable columns) are not included yet.
+
+### 中文
+
+#### 新增
+
+- **可视化执行计划**：MySQL、PostgreSQL、SQLite 计划树、节点详情、告警高亮、多语句标签、原始计划复制，结构化计划不可用时回退显示原始输出。只执行普通 `EXPLAIN`，语句不会被执行。
+- **AI 解释计划**：在计划面板中把精简、有上限的计划摘要发给 AI 解释。
+- **索引建议**：只针对计划中有告警的表；按「等值 → 范围 → 排序」组合列，检查已有索引与主键/唯一键，提示冗余前缀索引；提供可复制的 DDL，并附置信度、理由与风险。不会自动执行。
+- **慢查询分析**：基于本地查询历史按 SQL 模板聚合，支持排序、按连接/时间/关键字过滤、失败计数，一键打开 SQL 或 EXPLAIN。
+- **SQL 诊断**：`.sql` 编辑器提示缺少 `WHERE` 的 `UPDATE`/`DELETE`、`DROP`/`TRUNCATE`/`ALTER`、`NOT IN (子查询)`、`SELECT *` 与方言不符的写法，可按规则调整级别。
+- **数据字典导出**：Markdown 或 HTML（表、列、索引、外键），输出不含任何连接信息。
+- 新增设置：`devbelt.insights.historyLimit`、`devbelt.diagnostics.enabled`、`devbelt.diagnostics.rules`、`devbelt.dictionary.format`。
+
+#### 改进
+
+- 查询历史保留条数可配置（10–1000，默认 100），并记录执行失败。
+- 计划告警只针对大表扫描（估计 ≥ 1000 行或行数未知），小表不再误报。
+
+#### 修复
+
+- SQLite `EXPLAIN QUERY PLAN` 被 sqlite3 命令行改写成 ASCII 树导致取不到结果；EXPLAIN 面板与 AI 优化现在能拿到计划。
+- EXPLAIN 执行中替换 SQL 时可能短暂显示上一条 SQL 的计划。
+- 编辑器没有库上下文时，MySQL EXPLAIN 可能在其他库上执行。
+- EXPLAIN 时的 SQL 错误被显示成「无法解析计划」，而不是真实报错。
+
+#### 已知限制
+
+- 无法获取列选择性，索引建议的置信度最高为「中」。
+- 慢查询只来自本地历史，暂不读取服务端统计（`performance_schema`、`pg_stat_statements`）。
+- 依赖表结构的诊断（隐式类型转换、`NOT IN` + 可空列）暂未提供。
+
 ## [0.1.0] - 2026-10-21
 
 ### English

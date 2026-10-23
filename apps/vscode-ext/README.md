@@ -52,6 +52,30 @@ Ask in natural language, explain or optimize SQL, and turn results into charts. 
 
 E2EE personal sync, SSH host-key verification, read-only protection and audit logs. / 端到端加密个人同步、SSH 主机密钥校验、只读保护与审计日志。
 
+### Visual EXPLAIN / 可视化执行计划
+
+![Execution plan tree with warnings and node details](resources/screenshots/07-explain.png)
+
+Plan tree, node details, warning highlights and AI explanation for MySQL, PostgreSQL and SQLite. / MySQL、PostgreSQL、SQLite 的计划树、节点详情、告警高亮与 AI 解释。
+
+### Slow queries / 慢查询分析
+
+![Slow queries aggregated from local history](resources/screenshots/08-slow-queries.png)
+
+Group local query history by SQL template and jump to the SQL or its plan. / 按 SQL 模板聚合本地查询历史，一键打开 SQL 或执行计划。
+
+### Index suggestions / 索引建议
+
+![Index suggestions with confidence, reasons and risks](resources/screenshots/09-index-suggestions.png)
+
+Copyable index DDL with confidence, reasons and risks — suggestions only, never executed. / 带置信度、理由与风险的可复制索引 DDL——仅为建议，从不执行。
+
+### Data dictionary / 数据字典
+
+![Data dictionary exported as HTML](resources/screenshots/10-dictionary.png)
+
+Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表、列、索引与外键导出为 Markdown 或 HTML。
+
 ## English
 
 ### Why DevBelt
@@ -71,6 +95,15 @@ E2EE personal sync, SSH host-key verification, read-only protection and audit lo
 - Multi-result grids with filters, sorting, paging and controlled inline editing.
 - Query history, audit log, scheduled backups, server dashboard and object search.
 - CSV, JSON, XML, XLSX and SQL import/export; database-to-database transfer.
+
+### Query insight
+
+- **Visual EXPLAIN** for MySQL (`FORMAT=JSON`), PostgreSQL (`FORMAT JSON`) and SQLite (`EXPLAIN QUERY PLAN`): plan tree, node details, warning highlights (large full scans, filesort, temporary tables, risky nested loops, missing indexes) and raw-plan copy. Plain `EXPLAIN` only — statements are planned, never executed.
+- **AI: Explain plan** sends a compact, bounded plan summary to AI Chat.
+- **Index suggestions** for flagged tables: equality → range → sort column order, existing-index and primary/unique-key checks, confidence plus reasons and risks. Copy the DDL; nothing is executed.
+- **Slow Queries** (`DevBelt: Slow Queries`): local query history grouped by SQL template, sorted by total/average/max time or runs, with failure counts and one-click SQL or EXPLAIN. Retention is configurable with `devbelt.insights.historyLimit`.
+- **SQL diagnostics** in `.sql` editors: `UPDATE`/`DELETE` without `WHERE`, `DROP`/`TRUNCATE`/`ALTER`, `NOT IN (subquery)`, `SELECT *` and dialect mismatches. Toggle with `devbelt.diagnostics.enabled`, tune per rule with `devbelt.diagnostics.rules`.
+- **Data dictionary**: database node → Data → Generate Data Dictionary, as Markdown or HTML, without any connection details.
 
 ### Schema and data
 
@@ -176,6 +209,15 @@ code --install-extension lang2hong.devbelt-db-client
 - 多结果表格、筛选排序、分页与受控行内编辑。
 - 查询历史、审计日志、定时备份、服务器仪表盘与对象搜索。
 - CSV、JSON、XML、XLSX、SQL 导入导出与库间数据传输。
+
+### 查询洞察
+
+- **可视化 EXPLAIN**：支持 MySQL（`FORMAT=JSON`）、PostgreSQL（`FORMAT JSON`）、SQLite（`EXPLAIN QUERY PLAN`），提供计划树、节点详情、告警高亮（大表全扫描、filesort、临时表、高风险嵌套循环、缺少索引）与原始计划复制。只执行普通 `EXPLAIN`，语句只做规划、不会执行。
+- **AI 解释计划**：把精简、有上限的计划摘要发给 AI Chat 解释。
+- **索引建议**：只针对计划中有告警的表；按「等值 → 范围 → 排序」组合列，检查已有索引与主键/唯一键，给出置信度、理由与风险。可复制 DDL，不会自动执行。
+- **慢查询分析**（`DevBelt: 慢查询分析`）：按 SQL 模板聚合本地查询历史，可按总/平均/最大耗时或次数排序，显示失败次数，一键打开 SQL 或 EXPLAIN。保留条数可用 `devbelt.insights.historyLimit` 调整。
+- **SQL 诊断**：`.sql` 编辑器内提示缺少 `WHERE` 的 `UPDATE`/`DELETE`、`DROP`/`TRUNCATE`/`ALTER`、`NOT IN (子查询)`、`SELECT *` 与方言不符的写法；`devbelt.diagnostics.enabled` 总开关，`devbelt.diagnostics.rules` 按规则调整级别。
+- **数据字典**：库节点 → 数据 → 生成数据字典，导出 Markdown 或 HTML，不包含任何连接信息。
 
 ### 结构与数据
 

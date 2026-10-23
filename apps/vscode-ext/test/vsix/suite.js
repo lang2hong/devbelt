@@ -20,7 +20,13 @@ const EXPECTED_COMMANDS = [
   'devbelt.runAllQueries',
   'devbelt.formatSql',
   'devbelt.explainQuery',
+  // 0.2.0 (P10 Insight)
+  'devbelt.slowQueries',
+  'devbelt.generateDictionary',
 ];
+
+/** Lazily loaded webview chunks that must ship in the vsix. */
+const EXPECTED_WEBVIEW_CHUNKS = ['ExplainView.js', 'SlowQueryView.js'];
 
 async function run() {
   const ext = vscode.extensions.getExtension(EXT_ID);
@@ -32,6 +38,11 @@ async function run() {
   //（此前只断言激活/命令，漏文件不会被发现）。
   const webviewEntry = path.join(ext.extensionPath, 'out', 'webview', 'index.js');
   assert.ok(fs.existsSync(webviewEntry), `packaged vsix is missing out/webview/index.js (${webviewEntry})`);
+
+  for (const chunk of EXPECTED_WEBVIEW_CHUNKS) {
+    const file = path.join(ext.extensionPath, 'out', 'webview', 'chunks', chunk);
+    assert.ok(fs.existsSync(file), `packaged vsix is missing out/webview/chunks/${chunk}`);
+  }
 
   const cmds = await vscode.commands.getCommands(true);
   for (const id of EXPECTED_COMMANDS) {

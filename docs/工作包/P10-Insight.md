@@ -1,6 +1,6 @@
 # P10 · Insight（0.2.0）
 
-> 状态：草案（2026-10-22）
+> 状态：代码已交付（0.2.0，2026-10-23）；PostgreSQL 真库、Clean Profile smoke、截图待补
 >
 > 目标版本：`0.2.0`
 >
@@ -349,17 +349,17 @@ Explain / SlowQuery / Dictionary 使用独立 webview mode 或独立 Panel：
 
 ### 发布门禁
 
-- [ ] typecheck / build / 全量测试
-- [ ] 三种引擎真实库计划解析
-- [ ] `EXPLAIN ANALYZE` 只读/生产保护测试
-- [ ] 索引建议 5 个固定用例
-- [ ] 诊断误报抽查
-- [ ] 数据字典大 Schema 导出
-- [ ] 中英文词条完整、无死键
-- [ ] 干净 Profile VSIX smoke test
-- [ ] Marketplace 截图：EXPLAIN、慢查询、索引建议、数据字典
-- [ ] CHANGELOG / README 更新
-- [ ] 无凭据进入日志/错误/遥测
+- [x] typecheck / build / 全量测试
+- [ ] 三种引擎真实库计划解析 —— SQLite 3.45、MySQL 8.0.36 已通过；**PostgreSQL 待 CI / 真实环境**
+- [x] `EXPLAIN ANALYZE` 只读/生产保护测试 —— 0.2.0 不提供 ANALYZE（只执行普通 EXPLAIN），只读/生产确认由 `confirmSqlExecution` 覆盖并有面板测试
+- [x] 索引建议 5 个固定用例（另有真实 MySQL 7 例）
+- [ ] 诊断误报抽查 —— 需要真实 `.sql` 文件样本，未执行
+- [ ] 数据字典大 Schema 导出 —— 真实库 20 表 / 186 列已验证；500+ 表规模未验证
+- [x] 中英文词条完整、无死键（catalog 测试）
+- [ ] 干净 Profile VSIX smoke test —— 本地无图形环境；CI `vsix-smoke` 已补 explain-core 构建与 P10 断言，**待在 CI 上执行**
+- [ ] Marketplace 截图：EXPLAIN、慢查询、索引建议、数据字典 —— README 已预留 07–10 号位，待补真实截图
+- [x] CHANGELOG / README 更新
+- [x] 无凭据进入日志/错误/遥测 —— 计划/字典/慢查询的下发与输出均不含连接凭据，有测试断言
 
 ## 10. 任务拆分
 

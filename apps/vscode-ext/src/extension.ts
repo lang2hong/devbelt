@@ -38,6 +38,8 @@ import { createSyncStatusBar } from './sync/syncStatusBar';
 import { createAuthStatusBar } from './sync/authStatusBar';
 import { HistoryStore, clampHistoryLimit } from './history/historyStore';
 import { SqlDiagnosticsProvider } from './diagnostics/sqlDiagnosticsProvider';
+import { ExplainPanel } from './explain/explainPanel';
+import { SlowQueryPanel } from './insights/slowQueryPanel';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
@@ -377,6 +379,12 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
         },
       ),
     ),
+  );
+
+  // P10：计划/慢查询面板在停用时关闭（ExplainPanel 释放其持有的连接）。
+  context.subscriptions.push(
+    { dispose: () => ExplainPanel.closeAll() },
+    { dispose: () => SlowQueryPanel.closeAll() },
   );
 
   // P10 S7：SQL 静态诊断（不连库；方言规则仅在文档绑定连接时启用）。
