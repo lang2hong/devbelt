@@ -126,6 +126,8 @@ export function sqlConnectionConfig(conn: SavedConnection, host: string, port: n
     connectTimeout: conn.connectTimeout,
     requestTimeout: conn.requestTimeout,
     dbPath: conn.dbPath,
+    // 只读在数据库层生效（见 ConnectionConfig.readOnly）；客户端拦截 confirmSqlExecution 仍保留。
+    readOnly: conn.readOnly === true,
     useConnectionString: conn.useConnectionString,
     connectionUrl: conn.connectionUrl,
     useSSL: conn.useSSL,

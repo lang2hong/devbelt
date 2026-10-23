@@ -14,7 +14,7 @@ export class SqliteConnection extends IConnection {
 
   constructor(config: ConnectionConfig, sqliteCommand?: string) {
     super(config);
-    this.sqlite = new SQLite(config.dbPath || '', sqliteCommand);
+    this.sqlite = new SQLite(config.dbPath || '', sqliteCommand, { readOnly: config.readOnly === true });
   }
 
   query(sql: string, callback?: QueryCallback): void | EventEmitter;

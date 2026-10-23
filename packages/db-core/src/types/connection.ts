@@ -73,6 +73,14 @@ export interface ConnectionConfig {
   clientKeyPath?: string;
   socketPath?: string;
 
+  /**
+   * 只读连接：在数据库层生效，不只依赖客户端 SQL 分类。
+   * MySQL `SET SESSION TRANSACTION READ ONLY`；PostgreSQL
+   * `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`；SQLite `.open --readonly`
+   * + `PRAGMA query_only=ON`。设置失败时建连失败，不降级为可写。
+   */
+  readOnly?: boolean;
+
   /** SQLite only */
   dbPath?: string;
   /** SQLite only：sqlite3 命令路径，缺省自动探测 */

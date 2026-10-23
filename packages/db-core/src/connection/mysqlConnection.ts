@@ -188,7 +188,22 @@ export class MysqlConnection extends IConnection {
     this.con.on('end', () => {
       this.dead = true;
     });
-    this.con.connect(callback);
+    this.con.connect((err) => {
+      if (err || !this.config.readOnly) {
+        callback(err);
+        return;
+      }
+      // 只读连接在服务端生效：此后会话内所有事务默认只读，写语句报 ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION。
+      // 设置失败必须建连失败，绝不降级为可写。
+      this.con.query('SET SESSION TRANSACTION READ ONLY', (setErr) => {
+        if (setErr) {
+          this.end();
+          callback(new Error(`Failed to enable read-only mode: ${setErr.message}`));
+          return;
+        }
+        callback(null);
+      });
+    });
   }
 
   beginTransaction(callback: (err: any) => void): void {

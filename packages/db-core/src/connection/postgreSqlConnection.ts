@@ -191,17 +191,32 @@ export class PostgreSqlConnection extends IConnection {
     this.client.connect((err: any) => {
       if (err) { callback(err); return; }
       this.connected = true;
+      const setups: string[] = [];
+      // 只读连接在服务端生效：会话内所有事务默认只读，写语句报 25006 read_only_sql_transaction。
+      if (this.config.readOnly) setups.push('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY');
       // schema → `SET search_path TO <带引号标识符>`（标准标识符引用，scs 无关；
       // 含空格/`.`/`"` 的合法 schema 也能生效）。非法 schema（控制字符）忽略，退回默认。
       if (this.config.schema) {
         try {
           const wrapped = `"${validateSchemaIdent(this.config.schema).replace(/"/g, '""')}"`;
           // 保留 public：装在 public 下的扩展函数（uuid_generate_v4/pgcrypto 等）仍需可解析。
-          this.client.query(`SET search_path TO ${wrapped}, public`, (e: any) => callback(e ?? null));
-          return;
+          setups.push(`SET search_path TO ${wrapped}, public`);
         } catch { /* 非法 schema：退回服务端默认 search_path */ }
       }
-      callback(null);
+      const run = (i: number): void => {
+        if (i >= setups.length) { callback(null); return; }
+        this.client.query(setups[i]!, (e: any) => {
+          if (!e) { run(i + 1); return; }
+          // 只读设置失败必须建连失败，绝不降级为可写。
+          if (this.config.readOnly && i === 0) {
+            this.end();
+            callback(new Error(`Failed to enable read-only mode: ${e.message}`));
+            return;
+          }
+          callback(e);
+        });
+      };
+      run(0);
     });
   }
 

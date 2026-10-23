@@ -421,7 +421,8 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | 1 | `agent-core`：工具契约、风险分级、Proposal 状态机、审计事件 |
 | 2 | 安全执行账本：append-only JSONL、`fsync`、锁文件、状态机、启动恢复 |
 | 3 | Tool Result Sanitizer 与宿主策略校验 |
-| 4 | 只读 Tool Runtime：只读事务、只读打开、受限 SQL 分类 |
+| 4a | db-core 数据库层只读：连接只读开关在服务端生效（MySQL / PG 会话级只读、SQLite `.open --readonly` + `PRAGMA query_only`）；SQLite 查询单行发送、拒绝点命令 |
+| 4b | 只读 Tool Runtime：每次调用 `BEGIN READ ONLY` … `ROLLBACK`、单语句、白名单 + 副作用函数/语法黑名单；接 4a、Sanitizer、guard |
 | 5 | `ai-core` / server：tool calling、流式解析、代理转发、计量 |
 | 6 | IDE 只读 Agent：计划、工具调用、取消、降级 |
 | 7 | W2/W3：dry-run、影响预览、Proposal 审批 UI、立即提交语义 |
@@ -431,6 +432,12 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | 11 | VSIX smoke、文档、截图、CHANGELOG |
 
 每阶段单独验证；引入新依赖（MCP SDK 等）前单独评审。
+
+4a 已知限制：
+
+- MySQL / PG 的会话级只读可被同一会话里的 `SET SESSION TRANSACTION READ WRITE` / `SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE` 改回。普通执行路径上客户端分类器把 `SET` 判为写并拦截，但这不是绝对边界；Agent / MCP 由 4b 的每次调用只读事务与语句白名单兜底。
+- SQLite `.mode tcl` 输出把存储值中的换行显示为 `\n`（既有行为，存储值正确）；结果解析器未还原，另行处理。
+- SQLite 驱动的安全性只依赖「发送文本不含换行、首字符不是 `.`」这一断言；词法识别错误只会导致语法错误或字面量变化，不会执行点命令。
 
 ## 12. 风险与开放问题
 

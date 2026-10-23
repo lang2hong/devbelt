@@ -1,6 +1,7 @@
 import * as child_process from 'child_process';
 import { randomBytes } from 'crypto';
 import { EOL } from 'os';
+import { scanSql } from '../../sql/lexer.js';
 import { ResultSetParser } from './resultSetParser.js';
 import { validateSqliteCommand, getSqliteBinariesPath } from './sqliteCommandValidation.js';
 import type { Result, ResultNew, ResultSet } from './common/index.js';
@@ -25,9 +26,83 @@ import type { Result, ResultNew, ResultSet } from './common/index.js';
  *
  * 查询串行化：单连接一次只跑一条语句（promise 队列），避免 stdin/输出交错。
  * 取消/进程崩溃/错误退出：拒绝在途查询并丢弃进程，下次查询重建。
+ *
+ * 点命令：查询文本经 stdin 交给 CLI。CLI 在语句边界之后的**下一行**若以 `.` 开头，
+ * 会把它当 shell 命令执行（`.shell`/`.system` 执行系统命令，`.output` 写文件，
+ * `.open` 换库，`.load` 载扩展）。CLI 判断「语句边界」用的是自己的按行状态机
+ * （`#` 开头的行整行跳过、`GO`/`/` 视为结束符、`[...]` 视为标识符），通用 SQL
+ * 词法器无法与之精确一致，因此不靠识别字符串来拦截，而是保证发送文本**只有一行**
+ * 且首字符不是 `.`（见 toSingleLine）。
+ *
+ * 只读：`readOnly` 时以 `.open --readonly` 打开，再 `PRAGMA query_only=ON`。
  */
+export class SqliteQueryShapeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SqliteQueryShapeError';
+  }
+}
+
+/**
+ * 把查询改写成单行后再交给 sqlite3 CLI。
+ *
+ * - 代码中的换行 → 空格；
+ * - 字符串 / 引用标识符中的换行 → `'…' || char(10) || '…'`（标识符中的换行直接拒绝）；
+ * - `--` 行注释、`/* *\/` 块注释 → 空格。
+ *
+ * 安全性只依赖最后的断言：输出不含 `\n` / `\r`，且首个非空白字符不是 `.`。
+ * 词法识别出错只会让 SQL 语法错误或改变字面量，不会让 CLI 执行点命令。
+ */
+export function toSingleLine(sql: string): string {
+  // The lexer reports `'it''s'` as two adjacent string segments; merge them so the
+  // literal is rewritten as one value.
+  const segments: Array<{ kind: string; start: number; end: number }> = [];
+  for (const seg of scanSql(sql, { hashComment: false, backslashEscapes: false })) {
+    const prev = segments[segments.length - 1];
+    if (prev && prev.kind === 'string' && seg.kind === 'string' && prev.end === seg.start) prev.end = seg.end;
+    else segments.push({ kind: seg.kind, start: seg.start, end: seg.end });
+  }
+  let out = '';
+  let pos = 0;
+  for (const seg of segments) {
+    out += flatten(sql.slice(pos, seg.start));
+    const text = sql.slice(seg.start, seg.end);
+    if (seg.kind === 'code' || seg.kind === 'execComment') out += flatten(text);
+    else if (seg.kind === 'comment') out += ' ';
+    else out += splitLiteral(text);
+    pos = seg.end;
+  }
+  out += flatten(sql.slice(pos));
+  if (/[\r\n]/.test(out)) throw new SqliteQueryShapeError('SQLite query must be sent as a single line');
+  if (/^\s*\./.test(out)) throw new SqliteQueryShapeError('SQLite query must not start with a sqlite3 shell dot-command');
+  return out;
+}
+
+function flatten(text: string): string {
+  return text.replace(/\r\n|\r|\n/g, ' ');
+}
+
+/** 字符串字面量中的换行改写为 `char(10)` / `char(13)` 拼接；非 `'` 引用（标识符）不允许换行。 */
+function splitLiteral(text: string): string {
+  if (!/[\r\n]/.test(text)) return text;
+  if (text[0] !== "'" || text.length < 2 || text[text.length - 1] !== "'") {
+    throw new SqliteQueryShapeError('SQLite identifiers and unterminated strings must not contain line breaks');
+  }
+  const body = text.slice(1, -1);
+  const parts = body.split(/(\r\n|\r|\n)/);
+  const pieces: string[] = [];
+  for (const part of parts) {
+    if (part === '\r\n') pieces.push('char(13, 10)');
+    else if (part === '\n') pieces.push('char(10)');
+    else if (part === '\r') pieces.push('char(13)');
+    else pieces.push(`'${part}'`);
+  }
+  return `(${pieces.join(' || ')})`;
+}
+
 class SQLite {
   public readonly dbPath: string;
+  public readonly readOnly: boolean;
   private sqliteCommand?: string;
   private proc?: child_process.ChildProcess;
   /** stdout 累积缓冲：可能跨 chunk、跨查询。 */
@@ -42,8 +117,9 @@ class SQLite {
   /** 串行队列：保证同一连接的语句不交错。 */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(dbPath: string, sqliteCommand?: string) {
+  constructor(dbPath: string, sqliteCommand?: string, options: { readOnly?: boolean } = {}) {
     this.dbPath = dbPath;
+    this.readOnly = options.readOnly === true;
     // 未显式配置 sqliteCommand 时自动探测：系统 sqlite3 →（后续）内置二进制回退。
     // 探测不到则置空，query() 会以「not configured」显式失败，绝不静默返回空结果。
     this.sqliteCommand = sqliteCommand ? validateSqliteCommand(sqliteCommand) : getSqliteBinariesPath();
@@ -71,7 +147,13 @@ class SQLite {
         + 'Install sqlite3 or set the "sqliteCommand" field on this connection.',
       ));
     }
-    const run = this.queue.then(() => this.exec(query), () => this.exec(query));
+    let line: string;
+    try {
+      line = toSingleLine(query);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+    const run = this.queue.then(() => this.exec(line), () => this.exec(line));
     this.queue = run.catch(() => {});
     return run;
   }
@@ -154,7 +236,9 @@ class SQLite {
     // 先关 echo 再 .open，避免启动噪声混入第一条查询的输出窗口。
     // 路径中的引号/换行已在 spawn 前拒绝，此处可安全单引号包裹。
     proc.stdin!.write(`.echo off${EOL}`);
-    proc.stdin!.write(`.open '${this.dbPath}'${EOL}`);
+    proc.stdin!.write(`.open ${this.readOnly ? '--readonly ' : ''}'${this.dbPath}'${EOL}`);
+    // query_only 再加一道：拒绝任何修改数据库文件的语句（含 ATTACH 后对附加库的写）。
+    if (this.readOnly) proc.stdin!.write(`PRAGMA query_only=ON;${EOL}`);
     proc.stdin!.write(`.echo on${EOL}`);
 
     this.proc = proc;

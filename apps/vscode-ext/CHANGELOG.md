@@ -4,6 +4,36 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [Unreleased]
+
+### English
+
+#### Changed
+
+- **Read-only SQL connections are now enforced by the database**, not only by client-side SQL checks: MySQL `SET SESSION TRANSACTION READ ONLY`, PostgreSQL `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, SQLite opened read-only with `PRAGMA query_only=ON`. Statements that previously slipped past the client check (for example `nextval()`, `SELECT … FOR SHARE`, SQLite `ATTACH`) now fail on read-only connections. On MySQL this also blocks creating temporary tables. If the read-only setting cannot be applied, the connection fails instead of opening as writable.
+
+#### Fixed
+
+- SQLite: SQL text could reach the `sqlite3` shell as a dot-command (for example a line starting with `.shell`). Queries are now sent as a single line and dot-commands are rejected. Multi-line SQL and line breaks inside string literals keep working.
+
+#### Known limitations
+
+- SQLite result cells show a stored line break as `\n`; the stored value is correct. This display behaviour is unchanged from earlier versions.
+
+### 中文
+
+#### 变更
+
+- **只读 SQL 连接改为在数据库层生效**，不再只依赖客户端 SQL 检查：MySQL 使用 `SET SESSION TRANSACTION READ ONLY`，PostgreSQL 使用 `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`，SQLite 以只读方式打开并设置 `PRAGMA query_only=ON`。过去能绕过客户端检查的语句（如 `nextval()`、`SELECT … FOR SHARE`、SQLite `ATTACH`）在只读连接上会报错；MySQL 上也无法再创建临时表。只读设置失败时建连失败，不会降级为可写。
+
+#### 修复
+
+- SQLite：SQL 文本可能被 `sqlite3` 命令行当作点命令执行（例如以 `.shell` 开头的行）。现在查询以单行发送并拒绝点命令；多行 SQL 和字符串中的换行不受影响。
+
+#### 已知限制
+
+- SQLite 结果中存储的换行显示为 `\n`，实际存储值正确；这一显示行为与之前版本相同。
+
 ## [0.2.0] - 2026-10-23
 
 ### English
