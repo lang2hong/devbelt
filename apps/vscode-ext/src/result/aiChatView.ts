@@ -55,6 +55,8 @@ import type { ExternalAiRequest } from '../ai/aiBridge.js';
 import type { QueryExecutor } from './queryExecutor.js';
 import { AgentRunner } from '../agent/runner.js';
 import { buildAgentTools, agentEngineOf, toModelTools } from '../agent/tools.js';
+import { buildWriteTools } from '../agent/writeTools.js';
+import { createAgentLedger } from '../agent/ledger.js';
 import { defineToolRegistry, guardToolCall } from '@devbelt/agent-core';
 import type {
   AiSaveModelAccessUp,
@@ -88,6 +90,8 @@ export interface AiChatViewDeps {
   /** 模型接入配置本地存储（同步实体真身）+ 厂商目录（服务端/内置兜底）。 */
   modelAccessStore: AiModelAccessStore;
   providerCatalog: ProviderCatalog;
+  /** 写操作审批账本（globalStorage 下，独立于 Memento）。 */
+  ledgerPath: string;
 }
 
 /**
@@ -470,6 +474,9 @@ export class AiChatView extends BaseWebView {
     const maxToolCalls = Math.max(1, Math.min(100, cfg.get<number>('agent.maxToolCalls', 24)));
     const timeoutSeconds = Math.max(10, Math.min(600, cfg.get<number>('agent.timeoutSeconds', 120)));
     const includeSample = cfg.get<boolean>('agent.includeSample', false);
+    const allowWrites = cfg.get<boolean>('agent.allowWrites', false);
+    const allowDdl = cfg.get<boolean>('agent.allowDdl', false);
+    const allowProduction = cfg.get<boolean>('agent.allowProduction', false);
     const engine = agentEngineOf(conn.dbType);
     const database = conn.dbType === DatabaseType.PG ? conn.database : (this.selectedScope ?? conn.database);
     const schema = conn.dbType === DatabaseType.PG ? this.selectedScope : undefined;
@@ -490,7 +497,7 @@ export class AiChatView extends BaseWebView {
           { skipHistory: true },
         );
       }
-      const tools = buildAgentTools({
+      const readTools = buildAgentTools({
         dbType: conn.dbType,
         ...(database ? { database } : {}),
         ...(schema ? { schema } : {}),
@@ -499,19 +506,52 @@ export class AiChatView extends BaseWebView {
         includeSample,
         maxRows: AI_SELECT_ROW_LIMIT,
       });
-      const registry = defineToolRegistry(tools.definitions);
+      const writeTools = buildWriteTools({
+        dbType: conn.dbType,
+        target: {
+          connectionId: conn.id,
+          ...(database ? { database } : {}),
+          ...(schema ? { schema } : {}),
+          dialect: engine,
+        },
+        connection: { readOnly: conn.readOnly === true, production: conn.environment === 'production' },
+        settings: { allowWrites, allowDdl, allowProduction },
+        openSession: async () => {
+          const opened = await this.deps.manager.openIsolatedSql(conn, database);
+          if (engine === 'PG' && schema) {
+            await opened.session.query.query(
+              `SET search_path TO ${opened.session.query.wrap(validateSchemaIdent(schema))}, public`,
+              undefined,
+              { skipHistory: true },
+            );
+          }
+          return { session: opened.session as never, close: opened.close };
+        },
+        confirm: (proposal, preview) => this.confirmWrite(conn, proposal, preview),
+        ledger: createAgentLedger(this.deps.ledgerPath),
+      });
+      const definitions = allowWrites || allowDdl
+        ? [...readTools.definitions, ...writeTools.definitions]
+        : readTools.definitions;
+      const registry = defineToolRegistry(definitions);
+      const executor = {
+        execute: (call: { function: { name: string } }, args: Record<string, unknown>, signal: AbortSignal) =>
+          writeTools.handles(call.function.name)
+            ? writeTools.execute(call.function.name, String(args.sql ?? ''), signal)
+            : readTools.execute(call as never, args, signal),
+      };
       const settings = {
         agentEnabled: true,
-        allowWrites: false,
-        allowDdl: false,
-        allowProduction: false,
+        allowWrites,
+        allowDdl,
+        allowProduction,
         mcpEnabled: false,
         mcpAllowedConnections: [] as string[],
       };
       const runner = new AgentRunner({
         model: config.model || 'default',
         ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
-        tools: toModelTools(tools.definitions),
+        tools: toModelTools(definitions),
         model_: {
           stream: (request) => {
             const stream = this.deps.service.streamChat(request, meta);
@@ -537,7 +577,7 @@ export class AiChatView extends BaseWebView {
           },
           settings,
         }),
-        executor: tools,
+        executor,
         maxSteps,
         maxToolCalls,
         timeoutMs: timeoutSeconds * 1000,
@@ -1036,6 +1076,22 @@ export class AiChatView extends BaseWebView {
       this.post({ type: 'contextDetail', context: null, error: true } as never);
       void err;
     }
+  }
+
+  /** 写操作批准：原生模态框，webview / 模型无法代点。 */
+  private async confirmWrite(conn: SavedConnection, proposal: { fullyQualifiedSql: string; target: { database?: string; schema?: string } }, preview: { dryRun: { outcome: string; affectedRows?: number }; irreversible: boolean; production: boolean }): Promise<boolean> {
+    const target = [proposal.target.database, proposal.target.schema].filter(Boolean).join('.');
+    const impact = preview.dryRun.outcome === 'rolled_back'
+      ? l10n('ai.agent.confirm.rows', { n: String(preview.dryRun.affectedRows ?? '?') })
+      : l10n('ai.agent.confirm.unknown');
+    const detail = [
+      `${conn.name}${target ? ` · ${target}` : ''}`,
+      proposal.fullyQualifiedSql,
+      impact,
+      preview.irreversible ? l10n('ai.agent.confirm.irreversible') : '',
+    ].filter(Boolean).join('\n\n');
+    const run = l10n('ai.agent.confirm.run');
+    return (await vscode.window.showWarningMessage(l10n('ai.agent.confirm.title'), { modal: true, detail }, run)) === run;
   }
 
   private abortStream(): void {

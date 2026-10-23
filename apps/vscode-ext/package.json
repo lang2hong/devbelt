@@ -2467,6 +2467,24 @@
           "description": "Send redacted row samples to the model in agent mode (off by default).",
           "markdownDescription": "Agent 模式是否向模型发送脱敏后的行样本（默认关闭）。"
         },
+        "devbelt.ai.agent.allowWrites": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the agent to propose DML. Each statement still needs explicit approval.",
+          "markdownDescription": "允许 Agent 提出 DML（INSERT/UPDATE/DELETE）。每条语句仍需在弹窗中确认。"
+        },
+        "devbelt.ai.agent.allowDdl": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the agent to propose DDL. Each statement still needs explicit approval.",
+          "markdownDescription": "允许 Agent 提出 DDL（CREATE/ALTER/DROP 等）。每条语句仍需在弹窗中确认。"
+        },
+        "devbelt.ai.agent.allowProduction": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow agent writes on connections marked production. Off by default.",
+          "markdownDescription": "允许在标记为生产环境的连接上执行 Agent 写操作（默认拒绝）。"
+        },
         "devbelt.ai.temperature": {
           "type": "number",
           "default": 0.2,

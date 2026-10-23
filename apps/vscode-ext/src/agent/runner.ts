@@ -21,6 +21,8 @@ export interface ToolOutcome {
   isError?: boolean;
   /** Short human-readable line for the step list. */
   summary?: string;
+  /** Stable rejection/failure code for the step list. */
+  errorCode?: string;
 }
 
 export interface AgentStep {
