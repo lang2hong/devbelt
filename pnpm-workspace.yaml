@@ -2,9 +2,8 @@ packages:
   - apps/*
   - packages/*
 
-# 安装脚本允许名单。两套字段覆盖不同 pnpm 版本：
-#  - allowBuilds：pnpm 10+/11 读取（CI 已固定 pnpm 9，故此前该名单在 CI 被忽略）；
-#  - 根 package.json 的 pnpm.onlyBuiltDependencies：pnpm 9 读取。
+# 安装脚本允许名单（唯一来源）。pnpm 版本由根 package.json 的 packageManager 锁定
+# （CI 的 pnpm/action-setup 与本地 corepack 都读取它），该版本读取本字段。
 # 未列出的依赖默认不允许执行 install 脚本（cpu-features/keytar/ssh2）。
 # 无安装脚本的依赖无需列出；此处只列确有脚本、且允许的包。
 allowBuilds:

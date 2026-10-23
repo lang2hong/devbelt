@@ -3,7 +3,7 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 COPY apps/server/package.json apps/server/
-RUN npm install -g pnpm && pnpm install --filter @devbelt/server
+RUN npm install -g pnpm@10.34.7 && pnpm install --frozen-lockfile --filter @devbelt/server
 COPY apps/server apps/server
 RUN pnpm --filter @devbelt/server run build
 
