@@ -140,10 +140,11 @@ onUnmounted(() => {
         :class="{ active: i === active }"
         :title="statement.sql"
         @click="selectStatement(i)"
-      >{{ t('wv.explain.statement', { n: i + 1 }) }}</button>
+      >{{ t('wv.explain.statement', { n: i + 1 }) }}<span v-if="statement.error" class="tab-failed" :aria-label="statement.error"> ⚠</span></button>
     </div>
 
     <template v-if="current">
+      <div v-if="current.error" class="error" role="alert">{{ current.error }}</div>
       <div v-if="currentPlan" class="warnings">
         <span v-if="currentPlan.warnings.length === 0" class="muted">{{ t('wv.explain.noWarnings') }}</span>
         <span
@@ -304,6 +305,7 @@ onUnmounted(() => {
 .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.18)); }
 .tab { padding: 4px 10px; font-size: 12px; border: none; background: none; color: var(--vscode-descriptionForeground, #888); border-bottom: 2px solid transparent; cursor: pointer; }
 .tab.active { color: var(--vscode-textLink-foreground, #4daafc); border-bottom-color: var(--vscode-focusBorder, #007fd4); }
+.tab-failed { color: var(--vscode-errorForeground, #f48771); }
 .warnings { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.18)); }
 .chip { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff); }
 .chip.warn-fullTableScan { background: var(--vscode-errorForeground, #f48771); }

@@ -21,7 +21,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 #### Improved
 
 - Query history retention is configurable (10–1000, default 100) and failed executions are recorded.
-- Plan warnings only fire for large scans (≥ 1000 estimated rows or unknown size), so small tables no longer raise false alarms.
+- Plan warnings only fire for large scans (≥ 1000 estimated rows or unknown size), so small MySQL/PostgreSQL tables no longer raise false alarms.
 
 #### Fixed
 
@@ -29,12 +29,19 @@ All notable changes to DevBelt DB Client are documented in this file.
 - Replacing the SQL while an EXPLAIN was running could briefly show the previous plan.
 - MySQL EXPLAIN could run against another database when the editor had no database context.
 - SQL errors during EXPLAIN were reported as "could not parse plan" instead of the real error.
+- Index suggestions were missing whenever the SQL used table aliases (MySQL and SQLite report aliases in their plans).
+- One failing statement in a multi-statement EXPLAIN no longer hides the plans of the others; it shows its own error.
+- On a PostgreSQL schema node, EXPLAIN now resolves unqualified tables in that schema (isolated session), matching the index-suggestion metadata.
+- The data dictionary for a PostgreSQL database node records the schema it exported.
+- `#` comments in `.sql` files without a bound connection are no longer reported as code.
 
 #### Known limitations
 
 - Column selectivity is not available, so index suggestions are rated medium at most.
 - Slow queries come from local history only; server-side statistics (`performance_schema`, `pg_stat_statements`) are not read yet.
 - Diagnostics that need schema metadata (implicit conversions, `NOT IN` with nullable columns) are not included yet.
+- SQLite `EXPLAIN QUERY PLAN` has no row estimates, so every plain table scan on SQLite is flagged regardless of size.
+- PostgreSQL plans are parser-tested and covered by CI integration tests; manual validation on a real PostgreSQL workload is still pending.
 
 ### 中文
 
@@ -51,7 +58,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 #### 改进
 
 - 查询历史保留条数可配置（10–1000，默认 100），并记录执行失败。
-- 计划告警只针对大表扫描（估计 ≥ 1000 行或行数未知），小表不再误报。
+- 计划告警只针对大表扫描（估计 ≥ 1000 行或行数未知），MySQL / PostgreSQL 小表不再误报。
 
 #### 修复
 
@@ -59,12 +66,19 @@ All notable changes to DevBelt DB Client are documented in this file.
 - EXPLAIN 执行中替换 SQL 时可能短暂显示上一条 SQL 的计划。
 - 编辑器没有库上下文时，MySQL EXPLAIN 可能在其他库上执行。
 - EXPLAIN 时的 SQL 错误被显示成「无法解析计划」，而不是真实报错。
+- SQL 使用表别名时没有索引建议（MySQL 与 SQLite 的计划里报告的是别名）。
+- 多语句 EXPLAIN 中某条失败时不再连带其他语句，失败的那条单独显示报错。
+- 在 PostgreSQL schema 节点上执行 EXPLAIN 时，未带前缀的表按该 schema 解析（独立会话），与索引建议读取的元数据一致。
+- PostgreSQL 库节点导出的数据字典会写明实际导出的 schema。
+- 未绑定连接的 `.sql` 文件中，`#` 注释不再被当作代码报出诊断。
 
 #### 已知限制
 
 - 无法获取列选择性，索引建议的置信度最高为「中」。
 - 慢查询只来自本地历史，暂不读取服务端统计（`performance_schema`、`pg_stat_statements`）。
 - 依赖表结构的诊断（隐式类型转换、`NOT IN` + 可空列）暂未提供。
+- SQLite 的 `EXPLAIN QUERY PLAN` 没有行数估计，SQLite 上的普通表扫描不论大小都会告警。
+- PostgreSQL 计划已有解析测试并由 CI 集成测试覆盖，真实 PostgreSQL 业务库上的人工验证尚未进行。
 
 ## [0.1.0] - 2026-10-21
 

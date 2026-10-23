@@ -24,6 +24,18 @@ export interface PredicateExtraction {
   predicates: ColumnPredicate[];
   /** True when OR was found in WHERE: equality advice for that clause is unreliable. */
   hasOr: boolean;
+  /**
+   * Alias (and table name) → real table name, lower-cased. MySQL and SQLite
+   * report aliases in their plans, so plan node names must be mapped through
+   * this before they can be matched against `tables`.
+   */
+  aliases: Record<string, string>;
+}
+
+/** Map a plan node object name (possibly an alias) to the real table name. */
+export function resolvePlanTable(name: string, aliases: Record<string, string>): string {
+  const key = unquote(name);
+  return Object.prototype.hasOwnProperty.call(aliases, key) ? aliases[key] : key;
 }
 
 const IDENT = String.raw`[A-Za-z_][\w$]*`;
@@ -76,6 +88,7 @@ function stripSubqueries(text: string): string {
 
 function resolveTables(fromBody: string): { tables: string[]; aliases: Map<string, string> } {
   const aliases = new Map<string, string>();
+  const explicit = new Set<string>();
   const tables: string[] = [];
   // The alias must not swallow the next JOIN keyword, or the joined table is missed.
   const notKeyword = String.raw`(?!(?:ON|USING|WHERE|JOIN|INNER|LEFT|RIGHT|FULL|OUTER|CROSS|NATURAL|STRAIGHT_JOIN|GROUP|ORDER|LIMIT|SET)\b)`;
@@ -87,9 +100,14 @@ function resolveTables(fromBody: string): { tables: string[]; aliases: Map<strin
     const table = unquote(m[2]);
     if (RESERVED.has(table)) continue;
     tables.push(table);
-    aliases.set(table, table);
     const alias = m[3] ? unquote(m[3]) : undefined;
-    if (alias && !RESERVED.has(alias)) aliases.set(alias, table);
+    // An explicit alias wins over a bare table name: in `FROM a b JOIN b c`,
+    // `b` refers to table a, and the plan reports `b` / `c`.
+    if (alias && !RESERVED.has(alias)) {
+      aliases.set(alias, table);
+      explicit.add(alias);
+    }
+    if (!explicit.has(table)) aliases.set(table, table);
   }
   return { tables: [...new Set(tables)], aliases };
 }
@@ -212,5 +230,5 @@ export function extractPredicates(sql: string): PredicateExtraction {
   columnList(clauseBody(masked, /\bGROUP\s+BY\b/i), 'group', aliases, tables, predicates);
   columnList(clauseBody(masked, /\bORDER\s+BY\b/i), 'order', aliases, tables, predicates);
 
-  return { tables, predicates, hasOr };
+  return { tables, predicates, hasOr, aliases: Object.fromEntries(aliases) };
 }

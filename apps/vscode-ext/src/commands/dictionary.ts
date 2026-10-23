@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DatabaseType } from '@devbelt/db-core';
 import { l10n } from '../i18n';
 import { pgSchemaFor } from '../utils/sql';
 import { collectDictionary } from '../docs/collectDictionary';
@@ -45,6 +46,17 @@ export function dictionaryLabels(): DictionaryLabels {
   };
 }
 
+/** PG `current_schema()`; undefined when it cannot be read (dictionary still exports). */
+export async function currentPgSchema(session: { query: { query: (sql: string, values?: unknown, opts?: { skipHistory?: boolean }) => Promise<{ rows?: unknown[] }> } }): Promise<string | undefined> {
+  try {
+    const res = await session.query.query('SELECT current_schema() AS s', undefined, { skipHistory: true });
+    const value = (res?.rows?.[0] as { s?: unknown } | undefined)?.s;
+    return typeof value === 'string' && value ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function safeFileStem(name: string): string {
   return name.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '') || 'database';
 }
@@ -85,10 +97,13 @@ export function registerDictionaryCommands(deps: Deps, sub: Sub): void {
       { location: vscode.ProgressLocation.Notification, title: l10n('dict.progress'), cancellable: true },
       async (progress, token) => {
         const session = await deps.manager.connectSql(conn, database);
+        // PG 库节点没有显式 schema：元数据按 current_schema() 读取，把它写进文档头，
+        // 否则读者不知道导出的是哪个 schema。
+        const effectiveSchema = schema ?? (conn.dbType === DatabaseType.PG ? await currentPgSchema(session) : undefined);
         let last = 0;
         return collectDictionary(session.metadata, {
           database,
-          ...(schema ? { schema } : {}),
+          ...(effectiveSchema ? { schema: effectiveSchema } : {}),
           dbType: String(conn.dbType),
           isCancelled: () => token.isCancellationRequested,
           onProgress: (done, total) => {

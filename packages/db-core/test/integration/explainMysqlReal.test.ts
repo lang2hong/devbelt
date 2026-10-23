@@ -108,6 +108,14 @@ describe.skipIf(!URL)('P10 EXPLAIN on real MySQL', () => {
     expect(advice.suggestions.map((s) => s.columns)).toEqual([['status']]);
   });
 
+  it('suggests indexes when the SQL uses table aliases (MySQL reports the alias in the plan)', async () => {
+    const sql = `SELECT o.id FROM \`${ORDERS}\` o WHERE o.status = 'paid'`;
+    const p = await plan(sql);
+    expect(flat(p.roots).find((n) => n.object === 'o')?.warnings).toContain('fullTableScan');
+    const advice = suggestIndexes({ plan: p, extraction: extractPredicates(sql), tables: [await advisorTable(ORDERS)] });
+    expect(advice.suggestions.map((s) => [s.table, s.columns])).toEqual([[ORDERS, ['status']]]);
+  });
+
   it('builds an equality → range composite and respects the existing index', async () => {
     const sql = `SELECT id FROM \`${ORDERS}\` WHERE status = 'paid' AND created_at >= '2026-06-01'`;
     const p = await plan(sql);

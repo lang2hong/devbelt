@@ -13,13 +13,17 @@ import type { IndexSuggestionView, RedundantIndexView } from '../result/protocol
 /** Upper bound on tables whose metadata is read for one statement. */
 export const MAX_ADVISED_TABLES = 5;
 
-/** Tables the plan flags (full scan / filesort), lower-cased, in plan order. */
-export function flaggedTables(plan: ExplainPlan): string[] {
+/**
+ * Tables the plan flags (full scan / filesort), lower-cased, in plan order.
+ * Plan node names may be aliases (MySQL/SQLite); `aliases` maps them back.
+ */
+export function flaggedTables(plan: ExplainPlan, aliases: Record<string, string> = {}): string[] {
   const out: string[] = [];
   const walk = (nodes: readonly ExplainPlanNode[]): void => {
     for (const node of nodes) {
       if (node.object && (node.warnings.includes('fullTableScan') || node.warnings.includes('filesort'))) {
-        const name = node.object.toLowerCase();
+        const key = node.object.toLowerCase();
+        const name = Object.prototype.hasOwnProperty.call(aliases, key) ? aliases[key] : key;
         if (!out.includes(name)) out.push(name);
       }
       walk(node.children);
@@ -50,7 +54,7 @@ export async function buildIndexSuggestions(
   ctx: SuggestionContext,
 ): Promise<{ suggestions: IndexSuggestionView[]; redundant: RedundantIndexView[] }> {
   const extraction = extractPredicates(sql);
-  const flagged = new Set(flaggedTables(plan));
+  const flagged = new Set(flaggedTables(plan, extraction.aliases));
   const targets = extraction.tables.filter((t) => flagged.has(t)).slice(0, MAX_ADVISED_TABLES);
   if (targets.length === 0) return { suggestions: [], redundant: [] };
 

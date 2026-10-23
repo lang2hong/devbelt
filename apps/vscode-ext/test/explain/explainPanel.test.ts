@@ -45,11 +45,17 @@ function makeManager(handler: Handler, metadata?: Record<string, unknown>) {
     const out = await handler(sql);
     return { rows: out ?? [] };
   });
+  const isolatedClose = vi.fn();
   const manager: any = {
     retain: vi.fn(),
     release: vi.fn(),
     scanOptionsFor: () => undefined,
     connectSql: vi.fn(async () => ({ query: { query, wrap: (s: string) => `\`${s}\`` }, ...(metadata ? { metadata } : {}) })),
+    openIsolatedSql: vi.fn(async () => ({
+      session: { query: { query, wrap: (s: string) => `"${s}"` }, ...(metadata ? { metadata } : {}) },
+      close: isolatedClose,
+    })),
+    isolatedClose,
   };
   return { manager, executed, query };
 }
@@ -336,6 +342,83 @@ describe('ExplainPanel', () => {
       ExplainPanel.open(manager, conn(), 'SELECT * FROM users WHERE id = 1');
       await mount(ExplainPanel.find('c1'));
       expect(metadata.getColumns).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('per-statement errors (L1)', () => {
+    it('shows the other statements when one statement fails', async () => {
+      const { manager } = makeManager((sql) => {
+        if (sql.startsWith('EXPLAIN') && sql.includes('nope')) throw new Error("Table 'app.nope' doesn't exist");
+        return [MYSQL_PLAN];
+      });
+      ExplainPanel.open(manager, conn(), 'SELECT * FROM users; SELECT * FROM nope');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      const plan = posts(view).find((m) => m.type === 'explainPlan');
+      expect(plan.statements).toHaveLength(2);
+      expect(plan.statements[0].plan).not.toBeNull();
+      expect(plan.statements[1]).toMatchObject({ sql: 'SELECT * FROM nope', plan: null, error: "Table 'app.nope' doesn't exist" });
+    });
+
+    it('reports a single error when every statement fails', async () => {
+      const { manager } = makeManager((sql) => {
+        if (sql.startsWith('EXPLAIN')) throw new Error('syntax error');
+        return [];
+      });
+      ExplainPanel.open(manager, conn(), 'SELECT 1; SELECT 2');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      expect(posts(view).some((m) => m.type === 'explainPlan')).toBe(false);
+      expect(posts(view).at(-1)).toEqual({ type: 'error', message: 'syntax error' });
+    });
+  });
+
+  describe('PostgreSQL schema (M3)', () => {
+    const PG_PLAN = [{ Plan: { 'Node Type': 'Seq Scan', 'Relation Name': 'orders', 'Plan Rows': 10 } }];
+
+    it('runs on an isolated session with search_path set to the schema, then closes it', async () => {
+      const { manager, executed } = makeManager(() => PG_PLAN);
+      ExplainPanel.open(manager, conn({ dbType: 'PG', database: 'shop' }), 'SELECT * FROM orders', 'shop', 'sales');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+
+      expect(manager.openIsolatedSql).toHaveBeenCalledTimes(1);
+      expect(manager.connectSql).not.toHaveBeenCalled();
+      expect(executed[0]).toBe('SET search_path TO "sales", public');
+      expect(executed).toContain('EXPLAIN (FORMAT JSON) SELECT * FROM orders');
+      expect(executed.some((sql) => /\b(BEGIN|ROLLBACK|SET LOCAL)\b/i.test(sql))).toBe(false);
+      expect(manager.isolatedClose).toHaveBeenCalledTimes(1);
+      expect(posts(view).find((m) => m.type === 'explainPlan').statements[0].plan.roots[0].object).toBe('orders');
+    });
+
+    it('closes the isolated session when EXPLAIN fails', async () => {
+      const { manager } = makeManager((sql) => {
+        if (sql.startsWith('EXPLAIN')) throw new Error('relation "orders" does not exist');
+        return [];
+      });
+      ExplainPanel.open(manager, conn({ dbType: 'PG' }), 'SELECT * FROM orders', 'shop', 'sales');
+      await mount(ExplainPanel.find('c1'));
+      expect(manager.isolatedClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the isolated session when setting search_path fails', async () => {
+      const { manager } = makeManager((sql) => {
+        if (sql.startsWith('SET search_path')) throw new Error('permission denied');
+        return PG_PLAN;
+      });
+      ExplainPanel.open(manager, conn({ dbType: 'PG' }), 'SELECT 1', 'shop', 'sales');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      expect(manager.isolatedClose).toHaveBeenCalledTimes(1);
+      expect(posts(view).at(-1)).toEqual({ type: 'error', message: 'permission denied' });
+    });
+
+    it('uses the shared session when no schema is given', async () => {
+      const { manager } = makeManager(() => PG_PLAN);
+      ExplainPanel.open(manager, conn({ dbType: 'PG' }), 'SELECT * FROM orders', 'shop');
+      await mount(ExplainPanel.find('c1'));
+      expect(manager.openIsolatedSql).not.toHaveBeenCalled();
+      expect(manager.connectSql).toHaveBeenCalledTimes(1);
     });
   });
 });

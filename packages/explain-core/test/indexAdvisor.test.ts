@@ -144,3 +144,29 @@ describe('suggestedIndexName', () => {
     expect(name.endsWith('_')).toBe(false);
   });
 });
+
+describe('suggestIndexes — aliases in plans', () => {
+  it('matches MySQL/SQLite plan nodes that report the alias', () => {
+    const r = advise("SELECT * FROM orders o WHERE o.status = 'paid'", plan(scan('o')), [
+      table('orders', [['id', { isPrimary: true }], 'status']),
+    ]);
+    expect(r.suggestions).toEqual([expect.objectContaining({ table: 'orders', columns: ['status'] })]);
+  });
+
+  it('maps join aliases on both sides', () => {
+    const r = advise(
+      'SELECT * FROM users u JOIN orders o ON o.user_id = u.id WHERE o.status = 1',
+      plan({ id: 'j', operation: 'Nested loop join', warnings: [], children: [scan('u', []), scan('o')] }),
+      [table('users', [['id', { isPrimary: true }]]), table('orders', ['id', 'user_id', 'status'])],
+    );
+    // Only the flagged side (orders via alias `o`) gets advice; equality and join columns combine.
+    expect(r.suggestions.map((s) => [s.table, s.columns])).toEqual([['orders', ['user_id', 'status']]]);
+  });
+
+  it('still matches plans that report the real table name', () => {
+    const r = advise("SELECT * FROM orders o WHERE o.status = 'paid'", plan(scan('orders')), [
+      table('orders', [['id', { isPrimary: true }], 'status']),
+    ]);
+    expect(r.suggestions).toHaveLength(1);
+  });
+});

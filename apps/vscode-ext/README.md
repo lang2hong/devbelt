@@ -98,7 +98,7 @@ Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表�
 
 ### Query insight
 
-- **Visual EXPLAIN** for MySQL (`FORMAT=JSON`), PostgreSQL (`FORMAT JSON`) and SQLite (`EXPLAIN QUERY PLAN`): plan tree, node details, warning highlights (large full scans, filesort, temporary tables, risky nested loops, missing indexes) and raw-plan copy. Plain `EXPLAIN` only — statements are planned, never executed.
+- **Visual EXPLAIN** for MySQL (`FORMAT=JSON`), PostgreSQL (`FORMAT JSON`) and SQLite (`EXPLAIN QUERY PLAN`): plan tree, node details, warning highlights (large full scans, filesort, temporary tables, risky nested loops, missing indexes) and raw-plan copy. Plain `EXPLAIN` only — statements are planned, never executed. PostgreSQL is covered by parser and CI integration tests; validation on a real PostgreSQL workload is pending.
 - **AI: Explain plan** sends a compact, bounded plan summary to AI Chat.
 - **Index suggestions** for flagged tables: equality → range → sort column order, existing-index and primary/unique-key checks, confidence plus reasons and risks. Copy the DDL; nothing is executed.
 - **Slow Queries** (`DevBelt: Slow Queries`): local query history grouped by SQL template, sorted by total/average/max time or runs, with failure counts and one-click SQL or EXPLAIN. Retention is configurable with `devbelt.insights.historyLimit`.
@@ -212,7 +212,7 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### 查询洞察
 
-- **可视化 EXPLAIN**：支持 MySQL（`FORMAT=JSON`）、PostgreSQL（`FORMAT JSON`）、SQLite（`EXPLAIN QUERY PLAN`），提供计划树、节点详情、告警高亮（大表全扫描、filesort、临时表、高风险嵌套循环、缺少索引）与原始计划复制。只执行普通 `EXPLAIN`，语句只做规划、不会执行。
+- **可视化 EXPLAIN**：支持 MySQL（`FORMAT=JSON`）、PostgreSQL（`FORMAT JSON`）、SQLite（`EXPLAIN QUERY PLAN`），提供计划树、节点详情、告警高亮（大表全扫描、filesort、临时表、高风险嵌套循环、缺少索引）与原始计划复制。只执行普通 `EXPLAIN`，语句只做规划、不会执行。PostgreSQL 已有解析测试与 CI 集成测试覆盖，真实业务库验证尚未进行。
 - **AI 解释计划**：把精简、有上限的计划摘要发给 AI Chat 解释。
 - **索引建议**：只针对计划中有告警的表；按「等值 → 范围 → 排序」组合列，检查已有索引与主键/唯一键，给出置信度、理由与风险。可复制 DDL，不会自动执行。
 - **慢查询分析**（`DevBelt: 慢查询分析`）：按 SQL 模板聚合本地查询历史，可按总/平均/最大耗时或次数排序，显示失败次数，一键打开 SQL 或 EXPLAIN。保留条数可用 `devbelt.insights.historyLimit` 调整。

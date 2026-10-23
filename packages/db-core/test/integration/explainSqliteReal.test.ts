@@ -67,6 +67,23 @@ describe.skipIf(!HAS_SQLITE)('P10 EXPLAIN on real SQLite', () => {
     expect(advice.suggestions.map((s) => s.columns)).toEqual([['status']]);
   });
 
+  it('suggests indexes when the SQL uses table aliases (SQLite reports the alias in the plan)', async () => {
+    const db = await open();
+    const sql = "SELECT o.id FROM orders o WHERE o.status = 'paid'";
+    const p = await plan(db, sql);
+    expect(flat(p.roots).find((n) => n.object === 'o')?.warnings).toEqual(['fullTableScan']);
+    const advice = suggestIndexes({
+      plan: p,
+      extraction: extractPredicates(sql),
+      tables: [{
+        name: 'orders',
+        columns: [{ name: 'id', isPrimary: true }, { name: 'user_id' }, { name: 'status' }, { name: 'created_at' }],
+        indexes: [{ name: 'idx_orders_user', columns: ['user_id'] }],
+      }],
+    });
+    expect(advice.suggestions.map((s) => [s.table, s.columns])).toEqual([['orders', ['status']]]);
+  });
+
   it('recognises index search, primary-key lookup and temp B-tree sort', async () => {
     const db = await open();
     const byIndex = flat((await plan(db, 'SELECT * FROM orders WHERE user_id = 1 ORDER BY created_at')).roots);

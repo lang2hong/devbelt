@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DatabaseType, validateIdent } from '@devbelt/db-core';
+import { DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from '../result/baseWebView';
@@ -182,6 +182,66 @@ export class ExplainPanel extends BaseWebView {
     this.manager.release(this.conn.id);
   }
 
+  /**
+   * EXPLAIN one statement. Structured format first; on failure the legacy
+   * EXPLAIN. If that also fails the statement itself is wrong and the error
+   * propagates to the caller (shown on that statement's tab).
+   */
+  private async explainStatement(
+    session: Awaited<ReturnType<ConnectionManager['connectSql']>>,
+    dialect: NonNullable<ReturnType<typeof dialectFor>>,
+    statement: string,
+    database: string | undefined,
+  ): Promise<ExplainStatementView> {
+    const request = buildExplainQuery(this.conn.dbType, statement);
+    let rows: unknown[];
+    let fallbackReason: string | undefined;
+    try {
+      const result = await session.query.query(request.sql);
+      rows = Array.isArray(result?.rows) ? result.rows : [];
+    } catch (structuredError) {
+      const result = await session.query.query(request.fallbackSql);
+      rows = Array.isArray(result?.rows) ? result.rows : [];
+      fallbackReason = (structuredError as Error)?.message ?? String(structuredError);
+    }
+
+    const display = rawForDisplay(dialect, rows);
+    if (fallbackReason !== undefined) {
+      return limitStatementPayload({
+        sql: statement,
+        plan: null,
+        fallback: { reason: fallbackReason, rows: display, text: rowsToText(rows) },
+      });
+    }
+
+    const parsed = parseExplainRows(dialect, rows);
+    if (!parsed.ok) {
+      return limitStatementPayload({
+        sql: statement,
+        plan: null,
+        fallback: { reason: parsed.error, rows: display, text: rowsToText(rows) },
+      });
+    }
+    let advice: Awaited<ReturnType<typeof buildIndexSuggestions>> = { suggestions: [], redundant: [] };
+    try {
+      advice = await buildIndexSuggestions(statement, parsed.plan, {
+        session,
+        dbType: this.conn.dbType,
+        ...(database ? { database } : {}),
+        ...(this.schema ? { schema: this.schema } : {}),
+      });
+    } catch (adviceError) {
+      // 建议是附加信息：失败只记诊断，不影响计划展示。
+      diagError('index suggestions failed', (adviceError as Error)?.message ?? String(adviceError));
+    }
+    return limitStatementPayload({
+      sql: statement,
+      plan: { ...parsed.plan, raw: display },
+      suggestions: advice.suggestions,
+      redundantIndexes: advice.redundant,
+    });
+  }
+
   private async run(): Promise<void> {
     if (this.running) {
       this.pendingRun = true;
@@ -190,6 +250,7 @@ export class ExplainPanel extends BaseWebView {
     // generation 在 open() 换 SQL 时也会递增：在途结果属于旧 SQL，直接丢弃。
     const generation = ++this.generation;
     const isCurrent = (): boolean => generation === this.generation && this.webviewReady;
+    let isolated: { close: () => void } | undefined;
     this.running = true;
     try {
       if (containsSecretSql(this.sql)) {
@@ -214,15 +275,33 @@ export class ExplainPanel extends BaseWebView {
       this.post({ type: 'explainRunning' });
       const scanOptions = this.manager.scanOptionsFor?.(this.conn);
       const statements = splitSqlStatements(this.sql, scanOptions);
-      const session = await this.manager.connectSql(this.conn, this.database);
-      // MySQL 会话被同连接的其它面板共享，可能已 USE 到别的库：每次都显式切回目标库。
       const database = this.database || this.conn.database;
+
+      // PG 指定了 schema：在**独立会话**上设置 search_path，使计划与索引建议的元数据
+      // 解析到同一 schema。不在共享会话上开事务 + SET LOCAL：用户可能在查询面板里
+      // 开着未提交的事务，我们的 BEGIN 会被忽略、ROLLBACK 会回滚掉用户的数据。
+      const pgSchema = this.conn.dbType === DatabaseType.PG && this.schema ? this.schema : undefined;
+      let session: Awaited<ReturnType<ConnectionManager['connectSql']>>;
+      if (pgSchema) {
+        const opened = await this.manager.openIsolatedSql(this.conn, this.database);
+        isolated = opened;
+        session = opened.session;
+        await session.query.query(
+          `SET search_path TO ${session.query.wrap(validateSchemaIdent(pgSchema))}, public`,
+          undefined,
+          { skipHistory: true },
+        );
+      } else {
+        session = await this.manager.connectSql(this.conn, this.database);
+      }
+      // MySQL 会话被同连接的其它面板共享，可能已 USE 到别的库：每次都显式切回目标库。
       if (database && this.conn.dbType === DatabaseType.MYSQL) {
         await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`);
       }
 
       const payloads: ExplainStatementView[] = [];
       let skippedDdl = false;
+      let failed = 0;
 
       for (const raw of statements) {
         const statement = raw.trim();
@@ -231,58 +310,15 @@ export class ExplainPanel extends BaseWebView {
           skippedDdl = true;
           continue;
         }
-
-        const request = buildExplainQuery(this.conn.dbType, statement);
-        let rows: unknown[];
-        let fallbackReason: string | undefined;
         try {
-          const result = await session.query.query(request.sql);
-          rows = Array.isArray(result?.rows) ? result.rows : [];
-        } catch (structuredError) {
-          // 旧版本/受限权限：JSON 格式不可用时退回普通 EXPLAIN。
-          // 普通 EXPLAIN 也失败说明是语句本身的问题（语法/表不存在），按错误抛出。
-          const result = await session.query.query(request.fallbackSql);
-          rows = Array.isArray(result?.rows) ? result.rows : [];
-          fallbackReason = (structuredError as Error)?.message ?? String(structuredError);
+          payloads.push(await this.explainStatement(session, dialect, statement, database));
+        } catch (statementError) {
+          // 单条失败（语法错/表不存在/SET 等无计划语句）只影响该条，其余语句照常展示。
+          const message = (statementError as Error)?.message ?? String(statementError);
+          diagError('explain failed', message);
+          payloads.push({ sql: statement, plan: null, error: message });
+          failed++;
         }
-
-        const display = rawForDisplay(dialect, rows);
-        if (fallbackReason !== undefined) {
-          payloads.push(limitStatementPayload({
-            sql: statement,
-            plan: null,
-            fallback: { reason: fallbackReason, rows: display, text: rowsToText(rows) },
-          }));
-          continue;
-        }
-
-        const parsed = parseExplainRows(dialect, rows);
-        if (!parsed.ok) {
-          payloads.push(limitStatementPayload({
-            sql: statement,
-            plan: null,
-            fallback: { reason: parsed.error, rows: display, text: rowsToText(rows) },
-          }));
-          continue;
-        }
-        let advice: Awaited<ReturnType<typeof buildIndexSuggestions>> = { suggestions: [], redundant: [] };
-        try {
-          advice = await buildIndexSuggestions(statement, parsed.plan, {
-            session,
-            dbType: this.conn.dbType,
-            ...(database ? { database } : {}),
-            ...(this.schema ? { schema: this.schema } : {}),
-          });
-        } catch (adviceError) {
-          // 建议是附加信息：失败只记诊断，不影响计划展示。
-          diagError('index suggestions failed', (adviceError as Error)?.message ?? String(adviceError));
-        }
-        payloads.push(limitStatementPayload({
-          sql: statement,
-          plan: { ...parsed.plan, raw: display },
-          suggestions: advice.suggestions,
-          redundantIndexes: advice.redundant,
-        }));
       }
 
       if (!isCurrent()) return;
@@ -293,6 +329,11 @@ export class ExplainPanel extends BaseWebView {
         });
         return;
       }
+      if (failed === payloads.length) {
+        // 全部失败：直接给出（第一条的）真实报错，不渲染空标签页。
+        this.post({ type: 'error', message: payloads[0].error ?? l10n('wv.explain.empty') });
+        return;
+      }
       this.lastStatements = payloads;
       this.post({ type: 'explainPlan', statements: payloads });
     } catch (error) {
@@ -300,6 +341,7 @@ export class ExplainPanel extends BaseWebView {
       diagError('explain failed', message);
       if (isCurrent()) this.post({ type: 'error', message });
     } finally {
+      isolated?.close();
       this.running = false;
       if (this.pendingRun && this.webviewReady) {
         this.pendingRun = false;

@@ -115,6 +115,8 @@ export interface ExplainStatementView {
   fallback?: ExplainFallbackView;
   /** 原始计划超过消息上限被省略（计划树仍完整）。 */
   rawTruncated?: boolean;
+  /** 本条语句 EXPLAIN 失败的报错（其余语句的计划照常展示）；有值时 plan 为 null。 */
+  error?: string;
   /** 索引建议（仅结构化计划；元数据读取失败时为空数组）。 */
   suggestions?: IndexSuggestionView[];
   redundantIndexes?: RedundantIndexView[];

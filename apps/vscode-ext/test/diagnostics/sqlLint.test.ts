@@ -109,4 +109,15 @@ describe('lintSql', () => {
     const sql = 'SELECT 1 # DELETE FROM t\n';
     expect(rules(sql, { scanOptions: dialectScanOptions(DatabaseType.MYSQL) })).toEqual([]);
   });
+
+  it('does not flag MySQL # comments in documents without a bound connection', () => {
+    expect(rules('SELECT 1; # DELETE FROM t\nSELECT 2')).toEqual([]);
+    // Code before the # on the same line is still checked.
+    expect(rules('DELETE FROM t # cleanup')).toEqual(['updateDeleteWithoutWhere']);
+  });
+
+  it('keeps PostgreSQL # operators visible when the connection is PG', () => {
+    // `#` is XOR in PG; the statement after it is still a DELETE without WHERE.
+    expect(rules('SELECT 1 # 2;\nDELETE FROM t', { dbType: DatabaseType.PG })).toEqual(['updateDeleteWithoutWhere']);
+  });
 });

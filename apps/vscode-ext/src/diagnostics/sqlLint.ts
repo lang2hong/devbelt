@@ -155,7 +155,13 @@ function lintStatement(masked: string, base: number, dbType: DatabaseType | unde
  */
 export function lintSql(text: string, options: LintOptions = {}): LintFinding[] {
   const scan = options.scanOptions ?? {};
-  const masked = maskSql(text, scan);
+  let masked = maskSql(text, scan);
+  if (!options.dbType && !scan.hashComment) {
+    // Unbound document: dialect unknown. `#` is a MySQL comment but a PG operator,
+    // so we do not change how statements are split; we only blank `# …` to the end
+    // of the line before matching, so `# DELETE FROM t` is not reported as code.
+    masked = masked.replace(/#[^\n]*/g, (m) => ' '.repeat(m.length));
+  }
   const findings: LintFinding[] = [];
   const emit: Emit = (rule, fallback, start, end, messageKey, args) => {
     const severity = resolveSeverity(rule, fallback, options.rules);

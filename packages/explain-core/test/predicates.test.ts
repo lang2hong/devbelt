@@ -60,4 +60,12 @@ describe('extractPredicates', () => {
   it('supports UPDATE statements', () => {
     expect(kinds("UPDATE accounts SET balance = 0 WHERE owner_id = 7")).toEqual(['accounts.owner_id:eq']);
   });
+
+  it('returns the alias map, letting an explicit alias shadow a bare table name', () => {
+    expect(extractPredicates('SELECT * FROM orders o JOIN users AS u ON u.id = o.user_id').aliases)
+      .toEqual({ o: 'orders', orders: 'orders', u: 'users', users: 'users' });
+    // `b` is an alias of `a` here, even though a table named `b` is also joined.
+    expect(extractPredicates('SELECT * FROM a b JOIN b c ON c.x = b.y').aliases)
+      .toMatchObject({ b: 'a', c: 'b', a: 'a' });
+  });
 });

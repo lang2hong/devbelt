@@ -1,4 +1,4 @@
-import type { ColumnPredicate, PredicateExtraction } from './predicates.js';
+import { resolvePlanTable, type ColumnPredicate, type PredicateExtraction } from './predicates.js';
 import type { ExplainPlan, ExplainPlanNode } from './types.js';
 
 export interface AdvisorColumn {
@@ -80,15 +80,18 @@ function lower(name: string): string {
   return name.toLowerCase();
 }
 
-/** Tables the plan flags as needing help, keyed by lower-cased name. */
-function planSignals(plan: ExplainPlan): Map<string, TableSignal> {
+/**
+ * Tables the plan flags as needing help, keyed by lower-cased real table name.
+ * Plan node names may be aliases (MySQL/SQLite), so they go through `aliases`.
+ */
+function planSignals(plan: ExplainPlan, aliases: Record<string, string>): Map<string, TableSignal> {
   const signals = new Map<string, TableSignal>();
   let planFilesort = false;
   const walk = (nodes: readonly ExplainPlanNode[]): void => {
     for (const node of nodes) {
       if (node.warnings.includes('filesort')) planFilesort = true;
       if (node.object && (node.warnings.includes('fullTableScan') || node.warnings.includes('filesort'))) {
-        const key = lower(node.object);
+        const key = resolvePlanTable(node.object, aliases);
         const s = signals.get(key) ?? { fullScan: false, filesort: false };
         if (node.warnings.includes('fullTableScan')) s.fullScan = true;
         if (node.warnings.includes('filesort')) s.filesort = true;
@@ -183,7 +186,7 @@ function buildCandidate(
 export function suggestIndexes(input: IndexAdvisorInput): IndexAdvice {
   const maxColumns = input.maxColumns ?? 3;
   const maxPerTable = input.maxPerTable ?? 2;
-  const signals = planSignals(input.plan);
+  const signals = planSignals(input.plan, input.extraction.aliases ?? {});
   const suggestions: IndexSuggestion[] = [];
   const redundant: RedundantIndex[] = [];
 

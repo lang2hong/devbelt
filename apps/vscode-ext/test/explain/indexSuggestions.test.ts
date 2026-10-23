@@ -27,6 +27,10 @@ function metadata(dialect: { createIndexSql: (...a: any[]) => string }, tables: 
 }
 
 describe('flaggedTables', () => {
+  it('maps alias node names back to real tables', () => {
+    expect(flaggedTables(plan(scan('o'), scan('u', [])), { o: 'orders', u: 'users' })).toEqual(['orders']);
+  });
+
   it('lists tables with full scans or filesort once, in plan order', () => {
     const p = plan(
       { id: 'j', operation: 'Nested Loop', warnings: [], children: [scan('orders'), scan('users', []), scan('orders')] },
@@ -131,5 +135,22 @@ describe('buildIndexSuggestions', () => {
     });
     expect(r.suggestions).toEqual([]);
     expect(r.redundant).toEqual([{ table: 'orders', index: 'idx_a', coveredBy: 'idx_a_b' }]);
+  });
+
+  it('suggests indexes when the SQL and the plan use table aliases', async () => {
+    const md = metadata(new MysqlDialect(), {
+      orders: { columns: [col('id', { isPrimary: true }), col('user_id'), col('status')] },
+      users: { columns: [col('id', { isPrimary: true })] },
+    });
+    const r = await buildIndexSuggestions(
+      "SELECT o.id FROM orders o JOIN users u ON u.id = o.user_id WHERE o.status = 'paid'",
+      plan({ id: 'j', operation: 'Nested loop join', warnings: [], children: [scan('o'), scan('u', [])] }),
+      { session: { metadata: md as any }, dbType: DatabaseType.MYSQL, database: 'app' },
+    );
+    expect(md.getColumns.mock.calls.map((c) => c[0])).toEqual(['orders']);
+    expect(r.suggestions).toEqual([
+      expect.objectContaining({ table: 'orders', columns: ['user_id', 'status'] }),
+    ]);
+    expect(r.suggestions[0].sql).toBe('CREATE INDEX `idx_orders_user_id_status` ON `app`.`orders` (`user_id`, `status`)');
   });
 });
