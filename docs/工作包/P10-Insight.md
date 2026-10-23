@@ -388,6 +388,8 @@ Explain / SlowQuery / Dictionary 使用独立 webview mode 或独立 Panel：
 阶段 10 起待实施。
 
 > 0.2.0 发布后复查（2026-10-23）修复：H1 表别名导致索引建议缺失（计划节点名经 `extractPredicates().aliases` 映射回真实表名，MySQL / SQLite 真库别名用例通过）；M3 PG schema 节点上的 EXPLAIN 改在独立会话设置 `search_path`（不在共享会话开事务，避免回滚用户未提交事务）；L1 多语句中单条失败只影响该条；L2 PG 库节点数据字典写明 `current_schema()`；L3 未绑定连接文档里的 `#` 注释不再误报；M1/M2 CHANGELOG / README 补充 SQLite 无行数估计、PostgreSQL 待真实业务库验证。
+>
+> CI（run 39891513870，`c12c2c4`）：build (20/22)、integration（db-core 55 文件含 explainMysqlReal 8 例 / explainSqliteReal 5 例 / pgReal / pgMultiSchemaReal；server 95 文件）、e2e、vsix-smoke 全部通过。注意：`pgReal` / `pgMultiSchemaReal` 不覆盖 EXPLAIN；**PostgreSQL EXPLAIN 真库测试（`explainPgReal.test.ts`）仍待编写**，目前只有 fixture 解析测试。
 
 ## 11. 风险与开放问题
 

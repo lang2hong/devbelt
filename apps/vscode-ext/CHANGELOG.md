@@ -41,7 +41,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - Slow queries come from local history only; server-side statistics (`performance_schema`, `pg_stat_statements`) are not read yet.
 - Diagnostics that need schema metadata (implicit conversions, `NOT IN` with nullable columns) are not included yet.
 - SQLite `EXPLAIN QUERY PLAN` has no row estimates, so every plain table scan on SQLite is flagged regardless of size.
-- PostgreSQL plans are parser-tested and covered by CI integration tests; manual validation on a real PostgreSQL workload is still pending.
+- PostgreSQL EXPLAIN is covered by fixture-based parser tests only; it has not yet been validated against a real PostgreSQL database.
 
 ### 中文
 
@@ -78,7 +78,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - 慢查询只来自本地历史，暂不读取服务端统计（`performance_schema`、`pg_stat_statements`）。
 - 依赖表结构的诊断（隐式类型转换、`NOT IN` + 可空列）暂未提供。
 - SQLite 的 `EXPLAIN QUERY PLAN` 没有行数估计，SQLite 上的普通表扫描不论大小都会告警。
-- PostgreSQL 计划已有解析测试并由 CI 集成测试覆盖，真实 PostgreSQL 业务库上的人工验证尚未进行。
+- PostgreSQL EXPLAIN 目前只有基于 fixture 的解析测试，尚未在真实 PostgreSQL 数据库上验证。
 
 ## [0.1.0] - 2026-10-21
 
