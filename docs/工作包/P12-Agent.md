@@ -23,7 +23,7 @@ DevBelt 现有 AI 能力是“副驾驶”：生成、解释、优化、诊断�
 
 0.3.0 把三块能力作为**一个集合**交付：
 
-1. **IDE 内 Agent**：查 Schema → 生成 SQL → dry-run → 展示影响 → 批准 → 执行 / 回滚；
+1. **IDE 内 Agent**：查 Schema → 生成 SQL → dry-run → 展示影响 → 批准 → 执行（撤销需新的反向 SQL Proposal）；
 2. **MCP Server**：把只读 Schema / 查询 / EXPLAIN 能力提供给外部 AI 客户端；
 3. **脱敏 / 子集化**：PII 识别、确定性脱敏、外键完整性、导出。
 
@@ -49,7 +49,7 @@ DevBelt 现有 AI 能力是“副驾驶”：生成、解释、优化、诊断�
 - IDE 内 Agent 支持多步调查、只读执行、写操作审批、结果汇总和中途取消。
 - MCP Server 默认关闭、默认只读，仅监听 loopback HTTP，逐客户端短期令牌授权。
 - 脱敏导出支持规则化 PII 处理、确定性结果、有限 FK 闭包和预览。
-- 所有工具调用可审计：谁、在哪个连接 / 库 / schema、调了什么、谁批准、影响多少行；T2/T3 的安全执行账本必须持久化成功。
+- 所有工具调用可审计：谁、在哪个连接 / 库 / schema、调了什么、谁批准、影响多少行；W2/W3 的安全执行账本必须持久化成功。
 
 ## 4. 非目标
 
@@ -80,11 +80,11 @@ DevBelt 现有 AI 能力是“副驾驶”：生成、解释、优化、诊断�
 
 1. 用户要求修改数据或结构。
 2. Agent 生成候选 SQL，并调用受限 dry-run / 影响预览。
-3. UI 展示：目标连接、库 / schema、SQL、预计影响行数、脱敏样本、风险级别、是否可回滚及不可隔离副作用。
-4. 用户逐条批准；批准生成一次性的 `proposalId + approvalNonce`。生产连接默认拒绝，只读连接直接拦截。
+3. UI 展示：目标连接、库 / schema、完全限定后的 SQL、预计影响行数、脱敏样本、风险级别、dry-run 结果及不可隔离副作用。
+4. 用户逐条批准；宿主生成一次性的 `proposalId + approvalNonce`，nonce 不下发模型、Webview 或 MCP。生产连接默认拒绝，只读连接直接拦截。
 5. 执行时校验 proposal 的 SQL hash、连接、database、schema、方言和过期状态；任何不匹配都拒绝执行。
-6. 执行后展示实际影响行数；仅在当前执行仍处于可回滚事务内时提供回滚入口。
-6. 全过程写入审计。
+6. 正式执行成功后立即提交，不提供执行后回滚；需要撤销时生成反向 SQL，作为新的 Proposal 重新审批。
+7. 全过程写入安全执行账本。
 
 ### 5.3 MCP 外部客户端
 
@@ -99,7 +99,7 @@ DevBelt 现有 AI 能力是“副驾驶”：生成、解释、优化、诊断�
 1. 用户选择表、行范围、列和脱敏规则。
 2. 预览前 N 行脱敏结果。
 3. 选择导出格式（SQL / CSV）和目标位置。
-4. 校验外键完整性；按依赖顺序导出或明确提示约束处理方式。
+4. 按有限 FK 闭包校验完整性；按可排序的依赖顺序导出，无法证明时拒绝。
 5. 导出完成后写审计；不把未脱敏数据写入日志。
 
 ## 6. 功能规格
@@ -108,19 +108,28 @@ DevBelt 现有 AI 能力是“副驾驶”：生成、解释、优化、诊断�
 
 统一定义工具，不允许 Agent 或 MCP 直接拼接任意执行路径。
 
+模型可见工具（`ModelToolRegistry`）：
+
 | 工具 | 风险级别 | 说明 |
 |---|---|---|
-| `list_connections` | T0 | 只返回连接 ID、显示名、引擎；不返回凭据 |
-| `list_schemas` | T0 | 库 / schema 列表 |
-| `list_tables` | T0 | 表 / 视图列表 |
-| `describe_table` | T0 | 列、索引、外键、注释 |
-| `explain_query` | T0 | 只读 EXPLAIN，不执行语句 |
-| `run_read_only_query` | T1 | 只读查询；限行数、限超时 |
-| `propose_write` | T2 | 生成写 SQL 并做 dry-run / 影响预览，不执行 |
-| `apply_write` | T2 | 执行已批准的写 SQL |
-| `propose_ddl` | T3 | 生成 DDL 并做静态检查，不执行 |
-| `apply_ddl` | T3 | 执行已批准的 DDL |
-| `export_masked` | T2 | 脱敏 / 子集化导出 |
+| `list_connections` | R0 | 只返回 MCP 白名单内的 opaque 连接标识、显示名和引擎；不返回内部 SavedConnection ID 或凭据 |
+| `list_schemas` | R0 | 库 / schema 列表 |
+| `list_tables` | R0 | 表 / 视图列表 |
+| `describe_table` | R0 | 列、索引、外键、注释 |
+| `explain_query` | R0 | 普通 EXPLAIN，不执行语句；拒绝 `EXPLAIN ANALYZE` |
+| `run_read_only_query` | R1 | 受限只读查询；数据库层只读事务，限行数、限超时 |
+| `propose_write` | W2 | 生成写 SQL 并做受限 dry-run / 影响预览，不执行 |
+| `propose_ddl` | W3 | 生成 DDL 并做静态检查，不执行 |
+| `export_masked` | R2 | 脱敏 / 子集化导出；需要独立导出审批 |
+
+宿主可信执行器（`TrustedExecutor`，不注册为模型工具，MCP 不可见）：
+
+| 操作 | 说明 |
+|---|---|
+| `approveProposal` | 只能由宿主 UI 触发，生成一次性 nonce |
+| `executeApprovedProposal` | 校验 nonce、SQL hash 和目标绑定后执行 |
+
+`apply_write` / `apply_ddl` 不是模型可调用工具；模型只能 propose，不能直接执行。
 
 工具元数据至少包含：名称、描述、参数 schema、风险级别、支持的引擎、是否需要审批、是否允许 MCP、审计字段。
 
@@ -132,42 +141,53 @@ DevBelt 现有 AI 能力是“副驾驶”：生成、解释、优化、诊断�
 
 | 级别 | 内容 | IDE 内 | MCP |
 |---|---|---|---|
-| T0 | 元数据、EXPLAIN | 设置级授权 | 默认允许（连接在白名单内） |
-| T1 | 只读查询 | 设置级授权；生产不自动 | 默认允许；限行数 / 超时 |
-| T2 | 写 DML、导出 | 逐条批准 | 默认禁止，可显式开启只读以外的工具 |
-| T3 | DDL、破坏性操作 | 逐条批准；生产默认拒绝 | 默认禁止，建议不开放 |
+| R0 | 元数据、普通 EXPLAIN | 设置级授权 | 默认允许（连接在白名单内） |
+| R1 | 受限只读查询 | 设置级授权；生产不自动 | 默认允许；数据库层只读事务 + 行数 / 超时限制 |
+| R2 | 数据导出 / 外发 | 独立导出审批 | 默认禁止 |
+| W2 | 写 DML | 逐条 Proposal 审批 | 不开放 |
+| W3 | DDL / 破坏性操作 | 逐条 Proposal 审批；生产默认拒绝 | 不开放 |
 
-审批必须展示：连接、库 / schema、SQL、风险级别、预计影响、是否可回滚、dry-run 结果和不可隔离副作用。
+MCP 与 Agent 的只读执行不能只依赖 SQL 关键字：PostgreSQL 使用 `BEGIN READ ONLY`；MySQL 使用 `START TRANSACTION READ ONLY`；SQLite 以只读方式打开数据库。显式拒绝 `EXPLAIN ANALYZE`、数据修改 CTE、`SELECT ... INTO OUTFILE`、`FOR UPDATE`、有副作用函数 / 序列和过程调用；无法证明只读时 fail-closed，不降级执行。
 
-T2/T3 必须先创建不可变 `Proposal`：
+审批必须展示：连接、库 / schema、完全限定 SQL、风险级别、预计影响、dry-run 是否成功及其回滚结果、不可隔离副作用，以及“正式执行后不提供回滚”。
+
+W2/W3 必须先创建不可变 `Proposal`：
 
 ```text
 proposalId, approvalNonce, connectionId, database, schema, dialect,
-normalizedSql, sqlHash, riskTier, estimatedImpact, dryRunResult,
-createdAt, expiresAt, status
+normalizedSql, fullyQualifiedSql, sqlHash, riskClass, estimatedImpact,
+dryRunResult, createdAt, expiresAt, status
 ```
 
-批准只对该 proposal 生效。`apply_write` / `apply_ddl` 必须校验一次性 `proposalId + approvalNonce`、SQL hash、连接 / database / schema / 方言、未过期、未撤销、未执行，并在执行前重新检查只读和生产门禁。批准、拒绝、执行开始和执行结果分别记入安全执行账本。
+批准只对该 proposal 生效。`TrustedExecutor.executeApprovedProposal` 必须校验一次性 `proposalId + approvalNonce`、SQL hash、连接 / database / schema / 方言、未过期、未撤销、未执行，并在执行前重新检查只读和生产门禁。approvalNonce 只存在于扩展宿主，不下发模型、Webview 或 MCP。批准、拒绝、执行开始和执行结果分别记入安全执行账本。
 
-现有 `confirmSqlExecution` 只在 critical 风险或生产写时弹确认，普通非生产写不会提示；Agent 的 T2/T3 不能依赖它作为唯一审批，需要新增逐条审批层。
+现有 `confirmSqlExecution` 只在 critical 风险或生产写时弹确认，普通非生产写不会提示；Agent 的 W2/W3 不能依赖它作为唯一审批，需要新增逐条审批层。
 
 只读自动执行沿用 `devbelt.ai.autoRunReadOnlySql`（默认 `true`）：这是设置级授权，不是逐条弹窗；生产连接、写语句和 DDL 不受此开关影响。
 
 ### 6.3 执行底座
 
 - 每次 Agent 会话使用独立 SQL session（`openIsolatedSql`），不污染编辑器、结果面板和其他 Agent 会话。
-- 工具调用串行执行；同一会话内保持事务状态一致。
+- PostgreSQL 的 `openIsolatedSql` 当前会把 `search_path` 置为 `pg_catalog`。Agent 必须使用完全限定的对象名，并在 Proposal 中记录绑定 schema；切换 database / schema 后旧 Proposal 全部失效。
+- 同一 Agent 会话内工具调用串行；不同独立连接可并行，写操作对同一目标另有排他锁或审批 token。
 - 取消：取消当前工具调用，不调用会影响共享连接的全局取消。
 - 超时：沿用 `devbelt.sql.queryTimeoutSeconds`，工具可设置更短上限。
 - 行数上限：只读查询和预览必须有上限；超出截断并标记。
 
+#### 正式执行
+
+- 审批通过后，在独立 session 中执行；成功后立即提交。
+- 不提供执行后回滚；需要撤销时重新生成反向 SQL，作为新的 Proposal 再次审批。
+- 执行前必须先持久化 `EXECUTING`；持久化失败则不执行。
+- 执行结果持久化 `SUCCEEDED` / `FAILED`；数据库已提交但终态写入失败时标记 `UNKNOWN`，提示人工核查，不谎称失败。
+
 #### dry-run 与影响预览
 
-| 引擎 | DML dry-run | DDL dry-run | 回滚 |
+| 引擎 | DML dry-run | DDL dry-run | dry-run 回滚 / 正式执行 |
 |---|---|---|---|
-| PostgreSQL | 仅 allowlist DML 在独立事务内试执行后 `ROLLBACK`；设置锁等待上限 | 默认静态预览；仅经引擎 allowlist 的事务型 DDL 可试执行 | DML / 多数 DDL 可回滚，但不能隔离事务外副作用 |
-| MySQL | 仅 InnoDB allowlist DML 在独立事务内试执行后 `ROLLBACK`；设置 `innodb_lock_wait_timeout` | 不执行；只做静态检查与 SQL 预览 | DML 可回滚；DDL 隐式提交，不可回滚 |
-| SQLite | 仅 allowlist DML 作为整批 `BEGIN; …; ROLLBACK` 执行（现有连接不支持跨查询事务回调） | 不执行；只做静态检查 | 受整批事务限制 |
+| PostgreSQL | 仅 allowlist DML 在独立只读事务外的事务内试执行后 `ROLLBACK`；设置锁等待上限 | 默认静态预览；仅经引擎 allowlist 的事务型 DDL 可试执行 | dry-run 可回滚，但不能隔离事务外副作用；正式执行立即提交 |
+| MySQL | 仅 InnoDB allowlist DML 在独立事务内试执行后 `ROLLBACK`；设置 `innodb_lock_wait_timeout` | 不执行；只做静态检查与 SQL 预览 | dry-run DML 可回滚；DDL 隐式提交，不可回滚；正式执行立即提交 |
+| SQLite | 仅 allowlist DML 作为整批 `BEGIN; …; ROLLBACK` 执行（现有连接不支持跨查询事务回调） | 不执行；只做静态检查 | dry-run 受整批事务限制；正式执行立即提交 |
 
 影响估计：
 
@@ -184,10 +204,11 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - Agent 循环：计划 → 工具调用 → 观察结果 → 继续或结束；最多步数、最多工具调用次数、总超时可配置。
 - 计划与每次工具调用在 UI 中可见；用户可以中途停止。
 - 模型必须支持 tool calling；不支持时降级为现有单轮 AI，并明确提示。
-- 写操作只能通过 `propose_write` / `apply_write` 两步完成，不能由模型直接执行。
-- Agent 不得在用户未批准时执行 T2/T3；不得绕过只读 / 生产 / 风险门禁。
+- 模型只能调用 `propose_write` / `propose_ddl`；`apply_write` / `apply_ddl` 只由宿主 `TrustedExecutor` 执行，不注册为模型工具。
+- Agent 不得在用户未批准时执行 W2/W3；不得绕过只读 / 生产 / 风险门禁。
 - 结果汇总只引用已执行工具的真实输出，不编造执行结果。
-- 工具回传模型前必须经过 `ToolResultSanitizer`：T0 只发受预算限制的规范化元数据；T1 默认只发列名、行数、截断标记和统计摘要；行样本必须显式开启、脱敏并受行 / 字段 / 字符预算限制；EXPLAIN 只发规范化计划摘要。
+- 工具回传模型前必须经过 `ToolResultSanitizer`：R0 只发受预算限制的规范化元数据；R1 默认只发列名、行数、截断标记和统计摘要；行样本必须显式开启、脱敏并受行 / 字段 / 字符预算限制；EXPLAIN 只发规范化计划摘要。
+- Sanitizer 只做数据最小化，不是授权控制。每次工具调用都由宿主重新校验工具白名单、目标绑定和审批状态；即使模型受提示注入影响，宿主策略仍拒绝越权。
 - Schema 注释、表名、查询结果和工具错误均视为不可信数据，封装为不可执行 data envelope；它们不能改变工具白名单、审批策略或连接选择。
 
 ### 6.5 MCP Server
@@ -196,9 +217,12 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - 传输：仅 loopback HTTP，监听 `127.0.0.1` 的动态端口；不监听 IPv6 / 公网地址。
 - 鉴权：每个客户端单独短期令牌，存 SecretStorage；令牌绑定客户端、允许的工具和连接白名单，可轮换、过期和撤销；令牌不写入日志。
 - 生命周期：扩展停用、连接白名单变更、用户关闭 MCP 或令牌撤销时立即停止或拒绝后续请求；动态端口和配置片段不持久化到工作区。
-- 工具白名单：默认只开放 T0 / T1；T2 / T3 默认不开放。
+- 工具白名单：MCP 只注册 R0 / R1；W2 / W3 不注册、不提供开关。
+- 只读执行：PostgreSQL `BEGIN READ ONLY`、MySQL `START TRANSACTION READ ONLY`、SQLite 只读方式打开；拒绝 `EXPLAIN ANALYZE`、数据修改 CTE、`SELECT ... INTO OUTFILE`、`FOR UPDATE`、有副作用函数 / 序列和过程调用。
 - 连接白名单：用户显式选择允许 MCP 访问的连接；生产连接默认不允许。
 - 限制：最大行数、超时、并发、每客户端速率限制。
+- 网络防护：校验 `Host` 与 `Origin`，拒绝 DNS rebinding 和浏览器跨站请求；令牌只允许 `Authorization` header，不接受 URL query；限制请求体大小、Content-Type、空闲连接和总请求超时；token 比较使用恒定时间实现。
+- 唯一标识：`list_connections` 只返回白名单内的 opaque 连接标识，不返回内部 SavedConnection ID。
 - 审计：每次调用记录客户端、工具、连接、库 / schema、耗时、行数、状态；不记录结果行和凭据。
 - 外部客户端不能读取 SecretStorage、连接密码、SSH 私钥或完整连接串。
 
@@ -212,9 +236,10 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 
 #### 确定性
 
-- 同一项目 + 同一规则 + 同一输入产生同一输出；
-- 哈希使用项目级 salt（SecretStorage），不把 salt 写入导出文件或日志；
-- 需要保持格式时（如手机号），脱敏结果保持可读格式但不保留原始信息。
+- 映射域定义为 `projectSalt + logicalDomain + normalizedInput → maskedValue`；同一项目、同一规则、同一映射域和同一输入产生同一输出；
+- 同一 PK/FK 关系必须共享 logicalDomain；哈希使用项目级 salt（SecretStorage），不把 salt 写入导出文件或日志；
+- 固定 `NULL`、空字符串和大小写归一化规则；需要保持格式时（如手机号），脱敏结果保持可读格式但不保留原始信息；
+- 首版不支持跨机器 salt 导入 / 导出，因此不承诺跨机器脱敏结果一致。
 
 #### 子集化与外键
 
@@ -222,6 +247,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - 仅单库、已声明 FK 的有限深度闭包；用户选择单向 / 双向闭包，必须设置最大深度和最大行数；超限即停止，不导出部分未知闭包；
 - 支持复合键；循环、自引用、跨库 / 未声明关系或无法排序的依赖默认拒绝并说明原因，不承诺完整性；
 - 导出顺序按可排序的 FK 依赖排序；
+- 导出前验证 NOT NULL、长度、唯一键、复合键和外键；冲突或约束不满足时停止导出，不写入部分结果；
 - 不自动删除或修改源库数据。
 
 #### 预览与导出
@@ -236,7 +262,10 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 审计分为两层：
 
 - **活动日志**：沿用现有 `AuditLogger`，它存 VS Code Memento、上限固定 1000、写入失败只告警，可清理；仅用于本地可见活动，不可作为安全关键审计依据。
-- **安全执行账本**：记录 T2/T3 proposal、批准 / 拒绝和执行状态，使用独立本地持久化存储；账本写入失败时必须阻断 T2/T3，不得报告执行成功。MCP 调用也必须持久化，不能静默跳过。
+- **安全执行账本**：记录 W2/W3 proposal、批准 / 拒绝和执行状态，使用独立本地 SQLite 持久化；账本写入失败时必须阻断 W2/W3。MCP 调用也必须持久化，不能静默跳过。
+- 状态机：`PROPOSED → APPROVED → EXECUTING → SUCCEEDED / FAILED / UNKNOWN`。执行前必须先持久化 `EXECUTING`；启动时把遗留 `EXECUTING` 恢复为 `UNKNOWN`。
+- 数据库已提交但终态写入失败时，报告 `UNKNOWN` 并要求人工核查；不得声称执行失败或可回滚。
+- 该账本是 fail-closed 本地执行账本，不是不可篡改审计，也不提供跨设备一致性。
 
 安全执行账本新增字段：
 
@@ -245,8 +274,10 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | `surface` | `agent` / `mcp` / `masking` |
 | `clientId` | MCP 客户端标识（Agent 为空） |
 | `tool` | 工具名 |
-| `riskTier` | T0–T3 |
+| `riskClass` | R0 / R1 / R2 / W2 / W3 |
 | `decision` | `auto` / `approved` / `rejected` / `blocked` |
+| `proposalId` | 关联的 Proposal；启动恢复和重复执行检测使用 |
+| `state` | `PROPOSED` / `APPROVED` / `EXECUTING` / `SUCCEEDED` / `FAILED` / `UNKNOWN` |
 | `connectionId` / `database` / `schema` | 目标 |
 | `sqlHash` | SQL 哈希；可选脱敏 SQL |
 | `estimatedRows` / `affectedRows` | 影响估计 / 实际 |
@@ -264,14 +295,15 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 
 | 模块 | 职责 |
 |---|---|
-| `packages/agent-core`（新） | 工具契约、风险分级、审批模型、Agent 循环、审计事件类型；不依赖 vscode |
+| `packages/agent-core`（新） | 工具契约、模型工具 / 可信执行器分层、风险分级、Proposal 状态机、Agent 循环、审计事件类型；不依赖 vscode |
 | `packages/mcp-server`（新） | loopback HTTP MCP 协议适配、客户端短期令牌、工具 / 连接白名单、限流；通过宿主适配器调用工具 |
-| `apps/vscode-ext/src/agent/` | IDE 内 Agent、Proposal 审批 UI、计划展示、取消 |
+| `apps/vscode-ext/src/agent/` | IDE 内 Agent、Proposal 审批 UI、计划展示、取消；TrustedExecutor 接线 |
 | `apps/vscode-ext/src/mcp/` | loopback 服务生命周期、动态端口、客户端令牌、连接白名单、审计接线 |
-| `apps/vscode-ext/src/masking/` | 脱敏规则、预览、FK 闭包、导出 |
+| `apps/vscode-ext/src/masking/` | 脱敏规则、映射域、预览、有限 FK 闭包、约束校验、导出 |
 | `packages/ai-core` | 扩展 tool calling：请求 `tools` / `tool_choice`，解析 `tool_calls` 与流式增量 |
 | `apps/server` | 代理转发 `tools` / `tool_calls`，计量包含工具调用 token；不记录对话内容 |
-| `apps/vscode-ext/src/utils/auditLogger.ts` | 审计字段扩展与查询 |
+| `apps/vscode-ext/src/utils/auditLogger.ts` | 活动日志字段扩展与查询 |
+| `apps/vscode-ext/src/agent/executionLedger.ts`（新） | 独立 SQLite 安全执行账本、状态机、启动恢复、导出 |
 
 ### 7.2 关键依赖与限制
 
@@ -281,8 +313,10 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - MCP SDK 引入前需评审依赖体积、许可证和 Node 版本兼容性；
 - loopback HTTP 仍面临同机恶意进程风险，短期令牌必须最小权限、不可出现在日志或工作区文件；
 - SQLite CLI 不支持参数化查询，Agent / MCP 的带值 SQL 只能走严格受限的方言转义或拒绝；
-- SQLite 连接不支持跨查询事务，dry-run 必须按整批事务实现；
-- MySQL DDL 隐式提交，不能承诺回滚。
+- PostgreSQL `openIsolatedSql` 默认 `search_path = pg_catalog`，Agent 必须完全限定对象名；
+- SQLite 连接不支持跨查询事务，dry-run 必须按整批事务实现；正式执行立即提交；
+- MySQL DDL 隐式提交，不能承诺回滚；正式执行不提供执行后回滚；
+- 安全执行账本使用独立 SQLite，需与业务库文件隔离并单独备份。
 
 ### 7.3 命令与配置
 
@@ -299,29 +333,28 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | `devbelt.agent.enabled` | `false` | Agent 总开关 |
-| `devbelt.agent.allowWrites` | `false` | 是否允许 T2 工具 |
-| `devbelt.agent.allowDdl` | `false` | 是否允许 T3 工具 |
+| `devbelt.agent.allowWrites` | `false` | 是否允许 W2 工具 |
+| `devbelt.agent.allowDdl` | `false` | 是否允许 W3 工具 |
 | `devbelt.agent.allowProduction` | `false` | 是否允许生产连接执行写 |
 | `devbelt.agent.maxSteps` | `12` | 单次任务最大步数 |
 | `devbelt.mcp.enabled` | `false` | MCP 总开关 |
-| `devbelt.mcp.readOnly` | `true` | 是否只开放 T0/T1 |
 | `devbelt.mcp.allowedConnections` | `[]` | 允许 MCP 访问的连接 |
 | `devbelt.masking.previewRows` | `20` | 脱敏预览行数 |
 
 ### 7.4 协议
 
 - Agent 与 Webview 之间使用强类型消息：计划、工具调用、审批请求、结果、错误、取消。
-- 审批请求必须包含可读 SQL、目标、风险级别、影响估计和回滚说明。
+- 审批请求必须包含可读且完全限定的 SQL、目标、风险级别、影响估计、dry-run 结果，以及“正式执行后不提供回滚”的说明。
 - MCP 使用标准 MCP 消息；工具参数和返回值做 schema 校验，拒绝未知字段；仅接受 loopback 令牌认证的请求。
 - 任何协议都不得下发密码、token、私钥或完整连接串。
 
 ## 8. 安全与隐私
 
 - Agent / MCP 默认关闭；写 / DDL 默认关闭；生产写默认拒绝。
-- 工具只能通过白名单访问数据库，模型不能构造任意连接。
-- 所有 T2/T3 操作逐条审批，审批内容不可被模型篡改。
-- MCP 默认只读、仅 loopback HTTP、逐客户端短期令牌、连接白名单、速率限制。
-- 提示注入防护：Schema 注释、表名、查询结果都视为不可信输入，经 Tool Result Sanitizer 处理，不能改变工具白名单或审批策略。
+- 工具只能通过白名单访问数据库，模型不能构造任意连接；目标绑定由宿主注入，不接受模型传入。
+- 所有 W2/W3 操作逐条审批，审批内容不可被模型篡改；approvalNonce 只在宿主内。
+- MCP 只开放 R0 / R1、仅 loopback HTTP、逐客户端短期令牌、连接白名单、速率限制和网络防护。
+- 提示注入防护：Schema 注释、表名、查询结果都视为不可信输入，经 Tool Result Sanitizer 处理；Sanitizer 不是授权控制，宿主每次调用重新校验白名单和审批。
 - 结果数据默认不发送给模型；需要样本时必须显式开启并脱敏。
 - 脱敏 salt 存 SecretStorage；导出文件、日志、审计不含 salt。
 - 审计不记录结果行和参数值。
@@ -339,13 +372,16 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 ### 单元测试
 
 - Tool Registry：工具元数据、参数校验、风险级别、引擎支持；
-- 审批策略：T0–T3、生产、只读、MCP 白名单；
+- 审批策略：R0 / R1 / R2 / W2 / W3、生产、只读、MCP 白名单；
 - Agent 循环：最大步数、取消、超时、工具失败、模型不支持 tool calling；
 - dry-run：allowlist DML 回滚、影响估计的受支持 / 未知分支、锁超时、触发器降级、DDL 静态预览；
-- Proposal：一次性 nonce、SQL / target hash 绑定、过期、撤销、重复执行拒绝；
-- Tool Result Sanitizer：数据预算、样本脱敏、注入 data envelope；
-- MCP：loopback 限制、短期令牌、工具白名单、连接白名单、速率限制、参数校验、撤销；
-- 脱敏：规则、确定性、格式保持、salt 不泄漏、PII 原样导出显式确认、预览；
+- Proposal：一次性 nonce、SQL / target hash 绑定、过期、撤销、重复执行拒绝、nonce 不下发模型 / Webview / MCP；
+- 正式执行：成功即提交、不提供执行后回滚、反向 SQL 需重新审批；
+- 安全账本：PROPOSED / APPROVED / EXECUTING / SUCCEEDED / FAILED / UNKNOWN、启动恢复、终态写入失败报告 UNKNOWN；
+- Tool Result Sanitizer：数据预算、样本脱敏、注入 data envelope；宿主策略不依赖 Sanitizer；
+- MCP：loopback 限制、Host / Origin 校验、短期令牌、工具白名单、连接白名单、速率限制、参数校验、撤销、opaque 连接 ID；
+- 只读执行：三种引擎的只读事务 / 只读打开、拒绝 `EXPLAIN ANALYZE` / 数据修改 CTE / INTO OUTFILE / FOR UPDATE；
+- 脱敏：规则、映射域、确定性、格式保持、salt 不泄漏、PII 原样导出显式确认、约束校验、预览；
 - FK 闭包：单库、深度 / 行数上限、循环 / 跨库拒绝和导出顺序；
 - 活动日志与安全执行账本的字段、失败阻断和清理审计。
 
@@ -353,9 +389,9 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 
 | 引擎 | 内容 |
 |---|---|
-| MySQL 8（CI 验证库） | allowlist InnoDB DML dry-run + 回滚、影响估计、触发器降级、DDL 静态预览、Agent proposal、MCP 只读 |
-| PostgreSQL 16（CI 验证库） | allowlist DML / DDL dry-run、事务回滚、schema、MCP 只读 |
-| SQLite | 整批 allowlist dry-run、带值 SQL 拒绝 / 受限转义、导出、脱敏 |
+| MySQL 8（CI 验证库） | allowlist InnoDB DML dry-run + 回滚、影响估计、触发器降级、DDL 静态预览、Agent proposal、MCP 只读事务 |
+| PostgreSQL 16（CI 验证库） | allowlist DML / DDL dry-run、只读事务、完全限定名、schema、MCP 只读 |
+| SQLite | 整批 allowlist dry-run、只读打开、带值 SQL 拒绝 / 受限转义、导出、脱敏 |
 | 脱敏 | 三引擎的 FK 闭包、确定性、预览 |
 
 真实库测试沿用各引擎现有环境变量和安全库守卫，不连接 `db_client` 或生产库。
@@ -368,7 +404,7 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - 凭据：日志、审计、导出、MCP 响应中不出现密码、token、私钥；
 - 生产门禁：生产连接写操作和 dry-run 被拒绝；
 - dry-run 失败不留下部分写入，已知触发器 / 外部副作用降级；
-- 安全执行账本写入失败时 T2/T3 不执行。
+- 安全执行账本写入失败时 W2/W3 不执行。
 
 ### 手工 UI
 
@@ -382,15 +418,17 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 
 | 阶段 | 任务 |
 |---|---|
-| 1 | `agent-core`：工具契约、风险分级、审批模型、审计事件 |
-| 2 | `ai-core` / server：tool calling 请求、流式解析、代理转发、计量 |
-| 3 | 执行底座：独立会话、dry-run、影响估计、引擎差异 |
-| 4 | IDE 内 Agent：计划、工具调用、审批 UI、取消、降级 |
-| 5 | MCP Server：loopback HTTP、短期令牌、白名单、限流、审计 |
-| 6 | 脱敏 / 子集化：规则、确定性、有限 FK 闭包、预览、导出 |
-| 7 | 活动日志与安全执行账本、Proposal UI |
-| 8 | 真实库矩阵、安全测试、i18n |
-| 9 | VSIX smoke、文档、截图、CHANGELOG |
+| 1 | `agent-core`：工具契约、风险分级、Proposal 状态机、审计事件 |
+| 2 | 安全执行账本：独立 SQLite、状态机、启动恢复 |
+| 3 | Tool Result Sanitizer 与宿主策略校验 |
+| 4 | 只读 Tool Runtime：只读事务、只读打开、受限 SQL 分类 |
+| 5 | `ai-core` / server：tool calling、流式解析、代理转发、计量 |
+| 6 | IDE 只读 Agent：计划、工具调用、取消、降级 |
+| 7 | W2/W3：dry-run、影响预览、Proposal 审批 UI、立即提交语义 |
+| 8 | MCP Server：loopback HTTP、短期令牌、白名单、限流、审计 |
+| 9 | 脱敏 / 子集化：映射域、约束校验、有限 FK 闭包、预览、导出 |
+| 10 | 真实库矩阵、安全测试、i18n |
+| 11 | VSIX smoke、文档、截图、CHANGELOG |
 
 每阶段单独验证；引入新依赖（MCP SDK 等）前单独评审。
 
@@ -401,21 +439,21 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 | 模型 tool calling 能力不一致 | 能力探测 + 降级为单轮 AI；不支持时不启用 Agent |
 | MySQL DDL 不可回滚 | 不执行 DDL dry-run；明确提示；生产默认拒绝 |
 | dry-run 持锁或触发事务外副作用 | allowlist、锁等待上限、超时、触发器降级、生产默认不 dry-run 写 |
-| Agent 误执行写操作 | T2/T3 一次性 Proposal 逐条审批；SQL / target hash 绑定；模型不能直接调用执行工具 |
-| MCP 暴露数据 | 默认关闭、只读、loopback HTTP、短期令牌、连接白名单、审计 |
-| 提示注入或工具结果泄漏 | Tool Result Sanitizer、数据预算、脱敏样本、工具白名单和审批策略不由模型控制 |
-| 脱敏不彻底或闭包膨胀 | PII 原样导出显式确认、规则预览、确定性、有限 FK 闭包与上限 |
-| 安全账本写入失败 | 阻断 T2/T3；活动日志不得作为安全执行依据 |
+| Agent 误执行写操作 | W2/W3 一次性 Proposal 逐条审批；SQL / target hash 绑定；模型只能 propose，执行仅在 TrustedExecutor |
+| MCP 暴露数据或只读绕过 | 只开放 R0/R1、数据库层只读事务、拒绝副作用语句、loopback HTTP、短期令牌、连接白名单、审计 |
+| 提示注入或工具结果泄漏 | Tool Result Sanitizer、数据预算、脱敏样本；宿主每次调用重新校验白名单和审批 |
+| 脱敏不彻底、约束冲突或闭包膨胀 | 映射域、约束校验、PII 原样导出显式确认、规则预览、确定性、有限 FK 闭包与上限 |
+| 安全账本写入失败或数据库已提交 | 执行前持久化 EXECUTING；终态失败报告 UNKNOWN；不谎称失败或可回滚 |
 | 范围过大 | 按阶段交付；每阶段可独立验收 |
 
-开放问题（评审时决定）：
+已定稿的决策：
 
-1. Agent 循环放客户端还是服务端？服务端代理是否需要保存工具调用状态？
-2. 脱敏 salt 是项目级还是工作区级？是否需要导出 / 导入 salt 以保持跨机器一致？
-3. Agent / MCP 是否受付费权益控制？
-4. 是否引入 MCP 官方 SDK，还是实现最小协议子集？
-5. 安全执行账本使用 VS Code SecretStorage、globalState 外的本地文件，还是独立 SQLite；如何支持可验证导出？
-6. 首版 DML dry-run allowlist 是否只接受单表 `UPDATE` / `DELETE` / `INSERT VALUES`，并一律在检测到触发器时降级？
+1. Agent 循环在扩展宿主；服务端只做无状态模型代理，不保存工具调用状态。
+2. 脱敏 salt 为项目级；首版不支持导出 / 导入，不承诺跨机器一致。
+3. 本地自带 Key 的 IDE Agent 可用；官方代理走现有 AI 配额；MCP 本地只读不计费；脱敏导出本地可用。
+4. MCP 使用官方 SDK，固定版本；引入前评审许可证、依赖树和 VSIX 体积。
+5. 安全执行账本使用独立 SQLite，支持状态恢复和导出；不使用 Memento 或 SecretStorage。
+6. 首版 dry-run 仅单表 `UPDATE`、`DELETE`、`INSERT VALUES`；检测到触发器一律降级为静态预览。
 
 ## 13. CHANGELOG 模板
 
@@ -427,12 +465,12 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 #### Added
 - Agent mode: schema inspection, SQL generation, dry-run, impact preview and approval-based execution.
 - MCP server: read-only schema, query and EXPLAIN tools with per-client tokens and audit.
-- Masking and subsetting export: PII rules, deterministic masking and FK-preserving export.
+- Masking and subsetting export: PII rules, deterministic masking and bounded FK-aware export.
 
 ### 中文
 
 #### 新增
 - Agent 模式：Schema 检查、SQL 生成、dry-run、影响预览与基于审批的执行。
 - MCP Server：只读 Schema、查询与 EXPLAIN 工具，逐客户端令牌与审计。
-- 脱敏 / 子集化导出：PII 规则、确定性脱敏与外键完整性导出。
+- 脱敏 / 子集化导出：PII 规则、确定性脱敏与有界外键完整性导出。
 ```
