@@ -18,6 +18,7 @@
   "cmd.formatSql": "格式化 SQL",
   "cmd.showHistory": "查看历史",
   "cmd.slowQueries": "慢查询分析",
+  "cmd.generateDictionary": "生成数据字典",
   "cmd.updateCell": "更新单元格",
   "cmd.explorerMenu": "更多操作",
   "cmd.authenticator": "验证器",

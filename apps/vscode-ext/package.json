@@ -311,6 +311,11 @@
         "category": "DevBelt"
       },
       {
+        "command": "devbelt.generateDictionary",
+        "title": "%cmd.generateDictionary%",
+        "category": "DevBelt"
+      },
+      {
         "command": "devbelt.updateCell",
         "title": "%cmd.updateCell%",
         "category": "DevBelt"
@@ -941,6 +946,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "devbelt.generateDictionary",
+          "when": "false"
+        },
         {
           "command": "devbelt.authenticator.add",
           "when": "false"
@@ -2183,6 +2192,11 @@
           "command": "devbelt.scheduleBackup",
           "when": "view == devbelt.explorer && viewItem =~ /^database\\.(MYSQL|PG)$/",
           "group": "4_data"
+        },
+        {
+          "command": "devbelt.generateDictionary",
+          "when": "view == devbelt.explorer && viewItem =~ /^database\\./",
+          "group": "5_tools"
         }
       ]
     },
@@ -2313,6 +2327,13 @@
             "dialectMismatch": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] }
           },
           "additionalProperties": false
+        },
+        "devbelt.dictionary.format": {
+          "type": "string",
+          "enum": ["markdown", "html"],
+          "default": "markdown",
+          "description": "Default format offered first when generating a data dictionary.",
+          "markdownDescription": "生成数据字典时默认优先的格式（`markdown` / `html`）。"
         },
         "devbelt.insights.historyLimit": {
           "type": "number",

@@ -18,6 +18,7 @@
   "cmd.formatSql": "Format SQL",
   "cmd.showHistory": "Show History",
   "cmd.slowQueries": "Slow Queries",
+  "cmd.generateDictionary": "Generate Data Dictionary",
   "cmd.updateCell": "Update Cell",
   "cmd.explorerMenu": "More Actions",
   "cmd.authenticator": "Authenticator",
