@@ -170,6 +170,14 @@ jobs:
           DEVBELT_DB_TEST_REDIS_TLS_CA: ${{ github.workspace }}/.ci-certs/ca.crt
         run: pnpm -C packages/db-core test
 
+      # P12：Agent 只读 Tool Runtime 的真库验证（MySQL 8 / PG 16；SQLite 用 runner 自带 sqlite3）。
+      - name: Integration tests (agent-core)
+        env:
+          DEVBELT_DB_TEST_MYSQL_URL: mysql://root:ci-root-pass@127.0.0.1:3306
+          DEVBELT_DB_TEST_MYSQL_DB: devbelt_db_verify
+          DEVBELT_DB_TEST_PG_URL: postgres://postgres:ci-pg-pass@127.0.0.1:5432/devbelt_db_verify
+        run: pnpm -C packages/agent-core test
+
       # Cluster：3 节点（host network，避免容器 IP 通告导致 natMap 不生效）。
       - name: Start Redis Cluster (3 nodes)
         run: |

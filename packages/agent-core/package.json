@@ -28,10 +28,14 @@
     "test": "pnpm -C ../db-core build && pnpm -C ../ai-core build && vitest run"
   },
   "dependencies": {
-    "@devbelt/ai-core": "workspace:*"
+    "@devbelt/ai-core": "workspace:*",
+    "@devbelt/db-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/pg": "^8.23.1",
+    "mysql2": "^3.24.5",
+    "pg": "^8.23.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   }

@@ -268,10 +268,22 @@ importers:
       '@devbelt/ai-core':
         specifier: workspace:*
         version: link:../ai-core
+      '@devbelt/db-core':
+        specifier: workspace:*
+        version: link:../db-core
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.43
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      mysql2:
+        specifier: ^3.24.5
+        version: 3.24.5(@types/node@20.19.43)
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -2610,9 +2622,6 @@ packages:
     peerDependencies:
       pg: '>=8.0'
 
-  pg-protocol@1.15.0:
-    resolution: {integrity: sha512-cq9sECI5s0+uPUXjbz8ioyPJni6RzsRib0US67i5IoTZKw8fNeYlVE7u8F4dG7vEJJtc5wdD1K189lCCUwqWTQ==}
-
   pg-protocol@1.16.1:
     resolution: {integrity: sha512-p9VOFMiHB/ZbJATetbg+99PxssTVSQRnyuPSQ67mN1+1KBOjZaZ83ZQzltnxPhJwSsC3nwVjJ10DVJlerbFzLg==}
 
@@ -4075,7 +4084,7 @@ snapshots:
   '@types/pg@8.23.1':
     dependencies:
       '@types/node': 20.19.43
-      pg-protocol: 1.15.0
+      pg-protocol: 1.16.1
       pg-types: 2.2.0
 
   '@types/pngjs@6.0.5':
@@ -5486,8 +5495,6 @@ snapshots:
   pg-pool@3.14.0(pg@8.23.1):
     dependencies:
       pg: 8.23.1
-
-  pg-protocol@1.15.0: {}
 
   pg-protocol@1.16.1: {}
 

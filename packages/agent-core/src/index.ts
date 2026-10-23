@@ -87,3 +87,15 @@ export type {
 
 export { RESERVED_ARGUMENTS, guardToolCall, validateArguments } from './guard.js';
 export type { GuardDenyReason, GuardResult, ToolCallRequest } from './guard.js';
+
+export { checkReadOnlySql, scanOptionsForEngine } from './readOnlySql.js';
+export type { ReadOnlySqlCheck, ReadOnlySqlRejectReason } from './readOnlySql.js';
+
+export { explainReadOnly, runReadOnlyQuery } from './readOnlyRuntime.js';
+export type {
+  ReadOnlyQuerySession,
+  ReadOnlyRunResult,
+  ReadOnlySessionTarget,
+  RunReadOnlyOptions,
+  RuntimeRejectReason,
+} from './readOnlyRuntime.js';
