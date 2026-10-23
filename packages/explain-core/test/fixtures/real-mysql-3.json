@@ -1,0 +1,3 @@
+{
+  "EXPLAIN": "{\"query_block\":{\"select_id\":1,\"cost_info\":{\"query_cost\":\"0.55\"},\"ordering_operation\":{\"using_filesort\":false,\"table\":{\"table_name\":\"t1\",\"access_type\":\"index\",\"key\":\"PRIMARY\",\"used_key_parts\":[\"c1\",\"c2\"],\"key_length\":\"1029\",\"rows_examined_per_scan\":3,\"rows_produced_per_join\":1,\"filtered\":\"33.33\",\"backward_index_scan\":true,\"cost_info\":{\"read_cost\":\"0.45\",\"eval_cost\":\"0.10\",\"prefix_cost\":\"0.55\",\"data_read_per_join\":\"1K\"},\"used_columns\":[\"c1\",\"c2\",\"c3\",\"c4\"],\"attached_condition\":\"(`db`.`t1`.`c3` = 1)\"}}}}"
+}

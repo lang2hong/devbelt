@@ -126,7 +126,11 @@ class SQLite {
       throw new Error('SQLite database path must not contain a quote, newline, or carriage return');
     }
 
-    const args = ['-bail', '-header', '-nullvalue', 'NULL', '-cmd', '.mode tcl'];
+    // `.explain off`：sqlite3 CLI 默认拦截 `EXPLAIN QUERY PLAN` 改打印 ASCII 树
+    // （`QUERY PLAN\n|--SCAN t`），不走 `.mode tcl`，解析器拿到 0 行 —— SQLite 上的
+    // EXPLAIN 面板/AI 优化因此恒为空。关闭后 EQP 按普通结果集返回 id/parent/notused/detail。
+    // 只影响 EXPLAIN 的特殊处理，普通 SELECT 输出不变。
+    const args = ['-bail', '-header', '-nullvalue', 'NULL', '-cmd', '.explain off', '-cmd', '.mode tcl'];
     const proc = child_process.spawn(this.sqliteCommand as string, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });

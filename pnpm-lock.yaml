@@ -307,6 +307,9 @@ importers:
         specifier: ^2.3.3
         version: 2.3.3
     devDependencies:
+      '@devbelt/explain-core':
+        specifier: workspace:*
+        version: link:../explain-core
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.43

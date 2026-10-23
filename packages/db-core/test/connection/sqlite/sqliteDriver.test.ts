@@ -31,6 +31,17 @@ function one(res: unknown): { fields: { name: string }[]; rows: Record<string, s
 }
 
 describe.skipIf(!HAS_SQLITE)('SQLite 常驻进程驱动', () => {
+  it('EXPLAIN QUERY PLAN 返回 id/parent/notused/detail 结果集（不被 CLI 改写成 ASCII 树）', async () => {
+    const db = open();
+    await db.query('CREATE TABLE t(a, b)');
+    await db.query('CREATE INDEX ia ON t(a)');
+    const r = one(await db.query('EXPLAIN QUERY PLAN SELECT * FROM t WHERE a = 1 ORDER BY b'));
+    expect(r.fields.map((f) => f.name)).toEqual(['id', 'parent', 'notused', 'detail']);
+    expect(r.rows.map((row) => row.detail)).toEqual(['SEARCH t USING INDEX ia (a=?)', 'USE TEMP B-TREE FOR ORDER BY']);
+    // 普通查询输出不受 `.explain off` 影响。
+    expect(one(await db.query('SELECT 1 AS x')).rows).toEqual([{ x: '1' }]);
+  });
+
   it('同一进程连续执行多条语句，结果正确', async () => {
     const db = open();
     const r1 = one(await db.query('SELECT 1 AS a, \'x\' AS b, NULL AS c'));
