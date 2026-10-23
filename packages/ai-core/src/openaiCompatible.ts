@@ -1,5 +1,5 @@
 import type { AiProvider } from './provider.js';
-import type { ChatRequest, ChatResponse, ChatStreamChunk } from './chat.js';
+import type { ChatRequest, ChatResponse, ChatStreamChunk, ToolCall, ToolCallDelta } from './chat.js';
 import type { TokenUsage } from './usage.js';
 import { parseSse } from './sse.js';
 import {
@@ -64,12 +64,19 @@ export class OpenAICompatibleProvider implements AiProvider {
         throw new AiProtocolError('AI response is not valid JSON', err);
       }
       const content = extractContent(body);
-      if (content === undefined) {
+      const message = extractMessage(body);
+      const toolCalls = parseToolCalls(message?.tool_calls);
+      if (content === undefined && toolCalls.length === 0) {
         throw new AiProtocolError('AI response is missing choices[0].message.content');
       }
       const raw = body as Record<string, unknown>;
       const model = typeof raw.model === 'string' ? raw.model : request.model;
-      return { content, usage: mapUsage(raw.usage), model };
+      return {
+        content: content ?? '',
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        usage: mapUsage(raw.usage),
+        model,
+      };
     } catch (err) {
       throw mapError(err, handle);
     } finally {
@@ -94,10 +101,16 @@ export class OpenAICompatibleProvider implements AiProvider {
         const choice = Array.isArray(choices) ? (choices[0] as Record<string, unknown> | undefined) : undefined;
         const deltaRaw = choice?.delta as Record<string, unknown> | undefined;
         const delta = typeof deltaRaw?.content === 'string' && deltaRaw.content.length > 0 ? deltaRaw.content : undefined;
+        const toolCalls = parseToolCallDeltas(deltaRaw?.tool_calls);
         const finishReason = normalizeFinishReason(choice?.finish_reason);
         const usage = mapUsage(parsed.usage);
-        if (delta !== undefined || finishReason !== undefined || usage !== undefined) {
-          yield { delta, finishReason, usage };
+        if (delta !== undefined || toolCalls.length > 0 || finishReason !== undefined || usage !== undefined) {
+          yield {
+            delta,
+            ...(toolCalls.length > 0 ? { toolCalls } : {}),
+            finishReason,
+            usage,
+          };
         }
       }
     } catch (err) {
@@ -133,9 +146,17 @@ export class OpenAICompatibleProvider implements AiProvider {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json', ...this.defaultHeaders };
       if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
-      const payload: Record<string, unknown> = { model: request.model, messages: request.messages, stream };
+      const payload: Record<string, unknown> = {
+        model: request.model,
+        messages: toUpstreamMessages(request.messages),
+        stream,
+      };
       if (request.temperature !== undefined) payload.temperature = request.temperature;
       if (request.maxTokens !== undefined) payload.max_tokens = request.maxTokens;
+      if (request.tools !== undefined && request.tools.length > 0) {
+        payload.tools = request.tools;
+        if (request.toolChoice !== undefined) payload.tool_choice = request.toolChoice;
+      }
       if (stream && request.streamOptions?.includeUsage) payload.stream_options = { include_usage: true };
       const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -190,11 +211,67 @@ async function toHttpError(response: Response): Promise<AiError> {
   return new AiNetworkError(`AI request failed (HTTP ${status})${snippet ? `: ${snippet}` : ''}`, status);
 }
 
-function extractContent(body: unknown): string | undefined {
+function extractMessage(body: unknown): Record<string, unknown> | undefined {
   const choices = (body as Record<string, unknown> | null)?.choices;
   const choice = Array.isArray(choices) ? (choices[0] as Record<string, unknown> | undefined) : undefined;
-  const message = choice?.message as Record<string, unknown> | undefined;
+  return choice?.message as Record<string, unknown> | undefined;
+}
+
+function extractContent(body: unknown): string | undefined {
+  const message = extractMessage(body);
   return typeof message?.content === 'string' ? message.content : undefined;
+}
+
+/** Serialize internal messages into the OpenAI wire shape (snake_case fields). */
+function toUpstreamMessages(messages: ChatRequest['messages']): Array<Record<string, unknown>> {
+  return messages.map((m) => {
+    const hasToolCalls = m.toolCalls !== undefined && m.toolCalls.length > 0;
+    return {
+      role: m.role,
+      // Assistant tool-call messages carry no text; send null rather than "".
+      content: m.role === 'assistant' && hasToolCalls && m.content === '' ? null : m.content,
+      ...(hasToolCalls ? { tool_calls: m.toolCalls } : {}),
+      ...(m.toolCallId !== undefined ? { tool_call_id: m.toolCallId } : {}),
+    };
+  });
+}
+
+export function parseToolCalls(raw: unknown): ToolCall[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ToolCall[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const fn = (entry as Record<string, unknown>).function as Record<string, unknown> | undefined;
+    const id = (entry as Record<string, unknown>).id;
+    const name = fn?.name;
+    const args = fn?.arguments;
+    if (typeof id !== 'string' || typeof name !== 'string') continue;
+    const argsText = typeof args === 'string' ? args : args === undefined ? '' : JSON.stringify(args);
+    out.push({ id, type: 'function', function: { name, arguments: argsText } });
+  }
+  return out;
+}
+
+export function parseToolCallDeltas(raw: unknown): ToolCallDelta[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ToolCallDelta[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const fn = e.function as Record<string, unknown> | undefined;
+    const index = typeof e.index === 'number' && Number.isInteger(e.index) && e.index >= 0 ? e.index : undefined;
+    if (index === undefined) continue;
+    const delta: ToolCallDelta = {
+      index,
+      ...(typeof e.id === 'string' && e.id.length > 0 ? { id: e.id } : {}),
+      ...(typeof fn?.name === 'string' && fn.name.length > 0 ? { function: { name: fn.name } } : {}),
+    };
+    if (typeof fn?.arguments === 'string' && fn.arguments.length > 0) {
+      delta.function = { ...delta.function, arguments: fn.arguments };
+    }
+    out.push(delta);
+  }
+  return out;
 }
 
 function mapUsage(raw: unknown): TokenUsage | undefined {

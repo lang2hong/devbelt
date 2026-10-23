@@ -131,7 +131,7 @@ describe('AiProxyService.validate', () => {
   it('拒绝非对象 / 空 messages / 非法 role / 超长内容', () => {
     expect(() => service.validate(null)).toThrowError(/JSON object/);
     expect(() => service.validate({ messages: [] })).toThrowError(/non-empty/);
-    expect(() => service.validate({ messages: [{ role: 'tool', content: 'x' }] })).toThrowError(/role/);
+    expect(() => service.validate({ messages: [{ role: 'function', content: 'x' }] })).toThrowError(/role/);
     expect(() => service.validate({ messages: [{ role: 'user', content: '' }] })).toThrowError(/content/);
     expect(() => service.validate({ messages: [{ role: 'user', content: 'x'.repeat(60_001) }] })).toThrowError(/60000/);
     expect(() =>
@@ -158,6 +158,68 @@ describe('AiProxyService.validate', () => {
     expect(() => service.validate({ messages: [{ role: 'user', content: 'x' }], feature: 'evil' })).toThrowError(
       /feature/,
     );
+  });
+
+  it('接受工具定义、tool_choice 与工具消息', () => {
+    const tools = [{
+      type: 'function',
+      function: { name: 'describe_table', description: 'd', parameters: { type: 'object', properties: {} } },
+    }];
+    const out = service.validate({
+      messages: [
+        { role: 'user', content: 'u' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'c1', type: 'function', function: { name: 'describe_table', arguments: '{}' } }] },
+        { role: 'tool', content: '{"ok":true}', toolCallId: 'c1' },
+      ],
+      tools,
+      toolChoice: { type: 'function', function: { name: 'describe_table' } },
+    });
+    expect(out.tools).toEqual(tools);
+    expect(out.toolChoice).toEqual({ type: 'function', function: { name: 'describe_table' } });
+    expect(out.messages[2]).toMatchObject({ role: 'tool', toolCallId: 'c1' });
+  });
+
+  it('拒绝非法的工具定义、tool_choice 和工具消息', () => {
+    const tool = (over: Record<string, unknown> = {}) => ({
+      type: 'function',
+      function: { name: 'describe_table', parameters: { type: 'object' }, ...over },
+    });
+    const base = (extra: Record<string, unknown>) => ({ messages: [{ role: 'user', content: 'u' }], ...extra });
+
+    expect(() => service.validate(base({ tools: 'x' }))).toThrowError(/tools must be an array/);
+    expect(() => service.validate(base({ tools: [tool({ name: 'bad name!' })] }))).toThrowError(/name is invalid/);
+    expect(() => service.validate(base({ tools: [tool(), tool()] }))).toThrowError(/duplicate tool name/);
+    expect(() => service.validate(base({ tools: [tool({ parameters: [] })] }))).toThrowError(/parameters must be an object/);
+    expect(() => service.validate(base({ tools: Array.from({ length: 33 }, (_, i) => tool({ name: `t${i}` })) }))).toThrowError(/at most 32/);
+    expect(() => service.validate(base({ tools: [tool({ description: 'd'.repeat(1025) })] }))).toThrowError(/description/);
+    expect(() => service.validate(base({ toolChoice: 'always' }))).toThrowError(/toolChoice/);
+    expect(() => service.validate(base({ tools: [tool()], toolChoice: { type: 'function', function: { name: 'other' } } })))
+      .toThrowError(/unknown tool/);
+    expect(() => service.validate({
+      messages: [{ role: 'tool', content: 'x' }],
+    })).toThrowError(/toolCallId is required/);
+    expect(() => service.validate({
+      messages: [{ role: 'user', content: 'x', toolCallId: 'c1' }],
+    })).toThrowError(/only allowed on tool/);
+    expect(() => service.validate({
+      messages: [{ role: 'user', content: 'x', toolCalls: [{ id: 'c', type: 'function', function: { name: 'n', arguments: '' } }] }],
+    })).toThrowError(/only allowed on assistant/);
+    expect(() => service.validate({
+      messages: [{ role: 'assistant', content: '' }],
+    })).toThrowError(/content must be a non-empty/);
+    expect(() => service.validate({
+      messages: [{ role: 'assistant', content: '', toolCalls: [{ id: 'c', type: 'function', function: { name: 'n', arguments: 'x'.repeat(16_001) } }] }],
+    })).toThrowError(/arguments/);
+  });
+
+  it('prompt 估算计入工具定义与工具参数', () => {
+    const messages = [
+      { role: 'assistant' as const, content: '', toolCalls: [{ id: 'c1', type: 'function' as const, function: { name: 'describe_table', arguments: '{"table":"orders"}' } }] },
+      { role: 'tool' as const, content: '{"rows":1}', toolCallId: 'c1' },
+    ];
+    const tools = [{ type: 'function' as const, function: { name: 'describe_table', parameters: { type: 'object' } } }];
+    expect(estimatePromptTokens(messages, tools)).toBeGreaterThan(estimatePromptTokens(messages));
+    expect(estimatePromptTokens(messages)).toBeGreaterThan(estimatePromptTokens([{ role: 'tool', content: '{"rows":1}' }]));
   });
 });
 
@@ -223,6 +285,30 @@ describe('AiProxyService 并发闸门（013）', () => {
 });
 
 describe('AiProxyService.forward（parse-and-forward）', () => {
+  it('把工具定义与工具消息按上游格式透传', async () => {
+    const events = ['{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}'];
+    const { calls, fetchImpl } = recordingFetch(new Response(sseText(events), { status: 200 }));
+    const { quota } = quotaStub();
+    const { service } = buildService({ fetchImpl, quota });
+    const body = service.validate({
+      messages: [
+        { role: 'user', content: 'u' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'c1', type: 'function', function: { name: 'describe_table', arguments: '{}' } }] },
+        { role: 'tool', content: '{"ok":true}', toolCallId: 'c1' },
+      ],
+      tools: [{ type: 'function', function: { name: 'describe_table', parameters: { type: 'object' } } }],
+      toolChoice: 'auto',
+    });
+    const res = new FakeRes();
+    await service.forward({ userId: 7, body, reservation: RESERVATION, res: res.asServerResponse() });
+    const payload = JSON.parse(String(calls[0].init.body)) as Record<string, unknown>;
+    expect(payload.tools).toEqual([{ type: 'function', function: { name: 'describe_table', parameters: { type: 'object' } } }]);
+    expect(payload.tool_choice).toBe('auto');
+    const messages = payload.messages as Array<Record<string, unknown>>;
+    expect(messages[1]).toMatchObject({ role: 'assistant', content: null, tool_calls: [{ id: 'c1' }] });
+    expect(messages[2]).toMatchObject({ role: 'tool', tool_call_id: 'c1' });
+  });
+
   it('原样转发事件 + 强制 stream_options.include_usage + finish usage 权威结算 + 审计', async () => {
     const events = [
       '{"choices":[{"delta":{"content":"你好"},"finish_reason":null}]}',

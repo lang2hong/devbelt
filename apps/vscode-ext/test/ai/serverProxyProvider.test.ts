@@ -273,4 +273,36 @@ describe('ServerProxyProvider', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(calls).toHaveLength(2);
   });
+
+  it('工具调用：请求体带 tools / toolChoice，流式透传增量，chat() 聚合完整调用', async () => {
+    const events = [
+      '{"choices":[{"delta":{"content":""}}]}',
+      '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"describe_","arguments":""}}]}}]}',
+      '{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"table\\""}}]}}]}',
+      '{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\\"orders\\"}"}}]}}]}',
+      '{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":20,"completion_tokens":5,"total_tokens":25}}',
+      '[DONE]',
+    ];
+    const tools = [{ type: 'function' as const, function: { name: 'describe_table', parameters: { type: 'object' } } }];
+    const request = { model: 'm1', messages: [{ role: 'user' as const, content: 'hi' }], tools, toolChoice: 'auto' as const };
+
+    const first = recordingFetch(new Response(sseText(events), { status: 200 }));
+    const chunks: any[] = [];
+    for await (const chunk of provider(first.fetchImpl).chatStream(request)) chunks.push(chunk);
+    expect(chunks.flatMap((c) => c.toolCalls ?? []).map((c: any) => [c.index, c.id, c.function?.name, c.function?.arguments]))
+      .toEqual([
+        [0, 'c1', 'describe_', undefined],
+        [0, undefined, undefined, '{"table"'],
+        [0, undefined, undefined, ':"orders"}'],
+      ]);
+    const payload = JSON.parse(String(first.calls[0]!.init.body)) as Record<string, unknown>;
+    expect(payload.tools).toEqual(tools);
+    expect(payload.toolChoice).toBe('auto');
+
+    const second = recordingFetch(new Response(sseText(events), { status: 200 }));
+    const res = await provider(second.fetchImpl).chat(request);
+    expect(res.content).toBe('');
+    expect(res.toolCalls).toEqual([{ id: 'c1', type: 'function', function: { name: 'describe_', arguments: '{"table":"orders"}' } }]);
+    expect(res.usage).toEqual({ promptTokens: 20, completionTokens: 5, totalTokens: 25 });
+  });
 });

@@ -9,6 +9,7 @@ import {
   AiRateLimitedError,
   AiTimeoutError,
   parseSse,
+  parseToolCallDeltas,
 } from '@devbelt/ai-core';
 import { AiLoginRequiredError } from './aiErrors.js';
 
@@ -75,11 +76,25 @@ export class ServerProxyProvider implements AiProvider {
   async chat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
     let content = '';
     let usage: TokenUsage | undefined;
+    const calls = new Map<number, { id?: string; name: string; args: string }>();
     for await (const chunk of this.chatStream(request, signal)) {
       if (chunk.delta) content += chunk.delta;
       if (chunk.usage) usage = chunk.usage;
+      for (const part of chunk.toolCalls ?? []) {
+        const current = calls.get(part.index) ?? { name: '', args: '' };
+        calls.set(part.index, {
+          ...(part.id ? { id: part.id } : current.id ? { id: current.id } : {}),
+          name: part.function?.name ? current.name + part.function.name : current.name,
+          args: part.function?.arguments ? current.args + part.function.arguments : current.args,
+        });
+      }
     }
-    return { content, usage, model: request.model };
+    const toolCalls = [...calls.entries()]
+      .sort(([a], [b]) => a - b)
+      .flatMap(([, c]) => (c.id && c.name
+        ? [{ id: c.id, type: 'function' as const, function: { name: c.name, arguments: c.args } }]
+        : []));
+    return { content, ...(toolCalls.length > 0 ? { toolCalls } : {}), usage, model: request.model };
   }
 
   async *chatStream(request: ChatRequest, signal?: AbortSignal): AsyncIterable<ChatStreamChunk> {
@@ -117,6 +132,8 @@ export class ServerProxyProvider implements AiProvider {
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
             ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
             ...(request.feature !== undefined ? { feature: request.feature } : {}),
+            ...(request.tools !== undefined && request.tools.length > 0 ? { tools: request.tools } : {}),
+            ...(request.toolChoice !== undefined ? { toolChoice: request.toolChoice } : {}),
           }),
           signal: controller.signal,
         });
@@ -152,13 +169,20 @@ export class ServerProxyProvider implements AiProvider {
         const choice = Array.isArray(choices) ? (choices[0] as Record<string, unknown> | undefined) : undefined;
         const deltaRaw = choice?.delta as Record<string, unknown> | undefined;
         const delta = typeof deltaRaw?.content === 'string' && deltaRaw.content.length > 0 ? deltaRaw.content : undefined;
+        const toolCalls = parseToolCallDeltas(deltaRaw?.tool_calls);
         // 推理模型：DashScope/DeepSeek 用 reasoning_content，部分网关用 reasoning。
         const reasoningRaw = deltaRaw?.reasoning_content ?? deltaRaw?.reasoning;
         const reasoning = typeof reasoningRaw === 'string' && reasoningRaw.length > 0 ? reasoningRaw : undefined;
         const finishReason = normalizeFinishReason(choice?.finish_reason);
         const usage = mapUsage(parsed.usage);
-        if (delta !== undefined || reasoning !== undefined || finishReason !== undefined || usage !== undefined) {
-          yield { delta, ...(reasoning !== undefined ? { reasoning } : {}), finishReason, usage };
+        if (delta !== undefined || toolCalls.length > 0 || reasoning !== undefined || finishReason !== undefined || usage !== undefined) {
+          yield {
+            delta,
+            ...(toolCalls.length > 0 ? { toolCalls } : {}),
+            ...(reasoning !== undefined ? { reasoning } : {}),
+            finishReason,
+            usage,
+          };
         }
       }
     } catch (err) {

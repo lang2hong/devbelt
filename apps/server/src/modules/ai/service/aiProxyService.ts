@@ -1,5 +1,6 @@
 import type { ServerResponse } from 'node:http';
 import { estimateTokens, type TokenUsage } from '@devbelt/ai-core';
+import type { ToolCall, ToolChoice, ToolDefinition } from '@devbelt/ai-core';
 import { AiBillingService, billingTokens, costCents, type EffectiveUpstream } from './aiBillingService.js';
 import { AiConcurrencyExceededError } from '../domain/errors.js';
 import { parseSse } from '@devbelt/ai-core/sse';
@@ -19,6 +20,13 @@ export const MAX_COMPLETION_TOKENS = 4096;
 const MAX_MESSAGES = 64;
 const MAX_MESSAGE_CHARS = 60_000;
 const MAX_TOTAL_CHARS = 120_000;
+const MAX_TOOLS = 32;
+const MAX_TOOL_SCHEMA_BYTES = 16_384;
+const MAX_TOOLS_BYTES = 65_536;
+const MAX_TOOL_CALLS_PER_MESSAGE = 16;
+const MAX_TOOL_ARGUMENT_CHARS = 16_000;
+const MAX_TOOL_DESCRIPTION_CHARS = 1024;
+const TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const UPSTREAM_TIMEOUT_MS = 60_000;
 const AUDIT_REASON_CHARS = 500;
 
@@ -35,8 +43,10 @@ const AI_FEATURES = [
 export type AiFeatureName = (typeof AI_FEATURES)[number];
 
 export interface AiChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
 }
 
 /** 校验并归一化后的代理请求（model/stream/stream_options 由服务端强制，不透传）。 */
@@ -46,6 +56,8 @@ export interface ValidatedChatRequest {
   /** 已收敛到 [1, MAX_COMPLETION_TOKENS]。 */
   maxTokens: number;
   feature: AiFeatureName;
+  tools?: ToolDefinition[];
+  toolChoice?: ToolChoice;
 }
 
 export interface AiProxyOptions {
@@ -114,22 +126,47 @@ export class AiProxyService {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
         throw new ValidationError(`messages[${i}] must be an object`);
       }
-      const { role, content } = entry as Record<string, unknown>;
-      if (role !== 'system' && role !== 'user' && role !== 'assistant') {
-        throw new ValidationError(`messages[${i}].role must be system|user|assistant`);
+      const { role, content, toolCalls, toolCallId } = entry as Record<string, unknown>;
+      if (role !== 'system' && role !== 'user' && role !== 'assistant' && role !== 'tool') {
+        throw new ValidationError(`messages[${i}].role must be system|user|assistant|tool`);
       }
-      if (typeof content !== 'string' || content.length === 0) {
+      if (typeof content !== 'string') {
+        throw new ValidationError(`messages[${i}].content must be a string`);
+      }
+      const calls = parseToolCalls(toolCalls, i);
+      if (role === 'tool') {
+        if (typeof toolCallId !== 'string' || toolCallId.length === 0) {
+          throw new ValidationError(`messages[${i}].toolCallId is required for tool messages`);
+        }
+      } else if (toolCallId !== undefined) {
+        throw new ValidationError(`messages[${i}].toolCallId is only allowed on tool messages`);
+      }
+      if (calls.length > 0 && role !== 'assistant') {
+        throw new ValidationError(`messages[${i}].toolCalls is only allowed on assistant messages`);
+      }
+      // Empty content is allowed only where the payload is carried by tool fields.
+      if (content.length === 0 && calls.length === 0 && role !== 'tool') {
         throw new ValidationError(`messages[${i}].content must be a non-empty string`);
       }
       if (content.length > MAX_MESSAGE_CHARS) {
         throw new ValidationError(`messages[${i}].content exceeds ${MAX_MESSAGE_CHARS} characters`);
       }
       totalChars += content.length;
-      return { role, content };
+      if (typeof toolCallId === 'string') totalChars += toolCallId.length;
+      for (const call of calls) totalChars += call.function.name.length + call.function.arguments.length;
+      return {
+        role,
+        content,
+        ...(calls.length > 0 ? { toolCalls: calls } : {}),
+        ...(typeof toolCallId === 'string' ? { toolCallId } : {}),
+      };
     });
     if (totalChars > MAX_TOTAL_CHARS) {
       throw new ValidationError(`messages total length exceeds ${MAX_TOTAL_CHARS} characters`);
     }
+
+    const tools = parseTools(body.tools);
+    const toolChoice = parseToolChoice(body.toolChoice, tools);
 
     let temperature: number | undefined;
     if (body.temperature !== undefined) {
@@ -155,7 +192,14 @@ export class AiProxyService {
       feature = body.feature as AiFeatureName;
     }
 
-    return { messages, temperature, maxTokens, feature };
+    return {
+      messages,
+      temperature,
+      maxTokens,
+      feature,
+      ...(tools.length > 0 ? { tools } : {}),
+      ...(toolChoice !== undefined ? { toolChoice } : {}),
+    };
   }
 
   /**
@@ -180,7 +224,7 @@ export class AiProxyService {
   private async beginWithSlot(userId: number, body: ValidatedChatRequest): Promise<AiReservation> {
     const upstream = await this.effectiveUpstream();
     this.assertConfigured(upstream);
-    const estimatedPromptTokens = estimatePromptTokens(body.messages);
+    const estimatedPromptTokens = estimatePromptTokens(body.messages, body.tools);
     // 预占按计费 token：prompt × 系数；输出上限 × k × 系数（与结算同口径，并发保护不失效）。
     const weighted = billingTokens(estimatedPromptTokens, body.maxTokens, upstream.weight, upstream.multiplier);
     return this.opts.quota.reserve(userId, {
@@ -424,13 +468,23 @@ export class AiProxyService {
   private upstreamPayload(body: ValidatedChatRequest, upstream: EffectiveUpstream): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       model: upstream.model,
-      messages: body.messages,
+      messages: body.messages.map((m) => ({
+        role: m.role,
+        // Assistant tool-call messages carry no text; the wire format uses null.
+        content: m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0 && m.content === '' ? null : m.content,
+        ...(m.toolCalls && m.toolCalls.length > 0 ? { tool_calls: m.toolCalls } : {}),
+        ...(m.toolCallId !== undefined ? { tool_call_id: m.toolCallId } : {}),
+      })),
       stream: true,
       // 强制携带：否则 OpenAI/DashScope 流式默认不返回 usage，无法对账。
       stream_options: { include_usage: true },
       max_tokens: body.maxTokens,
     };
     if (body.temperature !== undefined) payload.temperature = body.temperature;
+    if (body.tools !== undefined && body.tools.length > 0) {
+      payload.tools = body.tools;
+      if (body.toolChoice !== undefined) payload.tool_choice = body.toolChoice;
+    }
     return payload;
   }
 
@@ -448,9 +502,101 @@ export class AiProxyService {
 }
 
 /** prompt 估算：CJK 1 字符 ≈ 1 token、其余 4 字符 ≈ 1 token + 每消息/整体少量结构开销。 */
-export function estimatePromptTokens(messages: readonly AiChatMessage[]): number {
-  const content = messages.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-  return content + messages.length * 4 + 16;
+export function estimatePromptTokens(messages: readonly AiChatMessage[], tools?: readonly ToolDefinition[]): number {
+  const content = messages.reduce((sum, m) => {
+    let n = sum + estimateTokens(m.content);
+    if (m.toolCallId) n += estimateTokens(m.toolCallId);
+    for (const call of m.toolCalls ?? []) n += estimateTokens(call.function.name) + estimateTokens(call.function.arguments);
+    return n;
+  }, 0);
+  const toolTokens = tools && tools.length > 0 ? estimateTokens(JSON.stringify(tools)) : 0;
+  return content + toolTokens + messages.length * 4 + 16;
+}
+
+function parseToolCalls(raw: unknown, messageIndex: number): ToolCall[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new ValidationError(`messages[${messageIndex}].toolCalls must be an array`);
+  if (raw.length > MAX_TOOL_CALLS_PER_MESSAGE) {
+    throw new ValidationError(`messages[${messageIndex}].toolCalls exceeds ${MAX_TOOL_CALLS_PER_MESSAGE} entries`);
+  }
+  return raw.map((entry, j) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ValidationError(`messages[${messageIndex}].toolCalls[${j}] must be an object`);
+    }
+    const e = entry as Record<string, unknown>;
+    const fn = e.function as Record<string, unknown> | undefined;
+    if (typeof e.id !== 'string' || e.id.length === 0 || e.id.length > 128) {
+      throw new ValidationError(`messages[${messageIndex}].toolCalls[${j}].id is invalid`);
+    }
+    if (e.type !== 'function') throw new ValidationError(`messages[${messageIndex}].toolCalls[${j}].type must be function`);
+    if (!fn || typeof fn.name !== 'string' || !TOOL_NAME_RE.test(fn.name)) {
+      throw new ValidationError(`messages[${messageIndex}].toolCalls[${j}].function.name is invalid`);
+    }
+    if (typeof fn.arguments !== 'string' || fn.arguments.length > MAX_TOOL_ARGUMENT_CHARS) {
+      throw new ValidationError(`messages[${messageIndex}].toolCalls[${j}].function.arguments is invalid`);
+    }
+    return { id: e.id, type: 'function' as const, function: { name: fn.name, arguments: fn.arguments } };
+  });
+}
+
+function parseTools(raw: unknown): ToolDefinition[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new ValidationError('tools must be an array');
+  if (raw.length === 0) return [];
+  if (raw.length > MAX_TOOLS) throw new ValidationError(`tools must contain at most ${MAX_TOOLS} entries`);
+  const parsed: ToolDefinition[] = [];
+  const names = new Set<string>();
+  let totalBytes = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ValidationError(`tools[${i}] must be an object`);
+    }
+    const e = entry as Record<string, unknown>;
+    const fn = e.function as Record<string, unknown> | undefined;
+    if (e.type !== 'function') throw new ValidationError(`tools[${i}].type must be function`);
+    if (!fn || typeof fn.name !== 'string' || !TOOL_NAME_RE.test(fn.name)) {
+      throw new ValidationError(`tools[${i}].function.name is invalid`);
+    }
+    if (names.has(fn.name)) throw new ValidationError(`duplicate tool name: ${fn.name}`);
+    names.add(fn.name);
+    if (fn.description !== undefined && (typeof fn.description !== 'string' || fn.description.length > MAX_TOOL_DESCRIPTION_CHARS)) {
+      throw new ValidationError(`tools[${i}].function.description is invalid`);
+    }
+    if (!fn.parameters || typeof fn.parameters !== 'object' || Array.isArray(fn.parameters)) {
+      throw new ValidationError(`tools[${i}].function.parameters must be an object`);
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(fn.parameters), 'utf8');
+    if (bytes > MAX_TOOL_SCHEMA_BYTES) throw new ValidationError(`tools[${i}].function.parameters exceeds ${MAX_TOOL_SCHEMA_BYTES} bytes`);
+    totalBytes += bytes;
+    parsed.push({
+      type: 'function',
+      function: {
+        name: fn.name,
+        ...(fn.description !== undefined ? { description: fn.description as string } : {}),
+        parameters: fn.parameters as Record<string, unknown>,
+      },
+    });
+  }
+  if (totalBytes > MAX_TOOLS_BYTES) throw new ValidationError(`tools total size exceeds ${MAX_TOOLS_BYTES} bytes`);
+  return parsed;
+}
+
+function parseToolChoice(raw: unknown, tools: readonly ToolDefinition[]): ToolChoice | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === 'auto' || raw === 'none' || raw === 'required') return raw;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ValidationError('toolChoice must be auto|none|required or a function object');
+  }
+  const e = raw as Record<string, unknown>;
+  const fn = e.function as Record<string, unknown> | undefined;
+  if (e.type !== 'function' || !fn || typeof fn.name !== 'string' || !TOOL_NAME_RE.test(fn.name)) {
+    throw new ValidationError('toolChoice.function.name is invalid');
+  }
+  if (tools.length === 0 || !tools.some((t) => t.function.name === fn.name)) {
+    throw new ValidationError(`toolChoice references an unknown tool: ${fn.name}`);
+  }
+  return { type: 'function', function: { name: fn.name } };
 }
 
 async function mapUpstreamHttpError(response: Response): Promise<DomainError> {
@@ -473,7 +619,19 @@ function extractDelta(parsed: Record<string, unknown>): string | undefined {
   const choices = parsed.choices;
   const choice = Array.isArray(choices) ? (choices[0] as Record<string, unknown> | undefined) : undefined;
   const delta = choice?.delta as Record<string, unknown> | undefined;
-  return typeof delta?.content === 'string' && delta.content.length > 0 ? delta.content : undefined;
+  const parts: string[] = [];
+  if (typeof delta?.content === 'string' && delta.content.length > 0) parts.push(delta.content);
+  // Tool-call deltas are output too; count names and argument fragments so the
+  // fallback estimate does not under-bill when the upstream sends no usage.
+  const calls = delta?.tool_calls;
+  if (Array.isArray(calls)) {
+    for (const call of calls) {
+      const fn = (call as Record<string, unknown> | null)?.function as Record<string, unknown> | undefined;
+      if (typeof fn?.name === 'string' && fn.name.length > 0) parts.push(fn.name);
+      if (typeof fn?.arguments === 'string' && fn.arguments.length > 0) parts.push(fn.arguments);
+    }
+  }
+  return parts.length > 0 ? parts.join('') : undefined;
 }
 
 function mapUsage(raw: unknown): TokenUsage | undefined {
