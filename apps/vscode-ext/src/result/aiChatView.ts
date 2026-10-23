@@ -53,6 +53,9 @@ import { AiSqlRegistry } from '../ai/aiSqlRegistry.js';
 import { assembleOptimizeMessages, injectBusinessRules, type RefinePayload } from '../ai/nl2sqlRunner.js';
 import type { ExternalAiRequest } from '../ai/aiBridge.js';
 import type { QueryExecutor } from './queryExecutor.js';
+import { AgentRunner } from '../agent/runner.js';
+import { buildAgentTools, agentEngineOf, toModelTools } from '../agent/tools.js';
+import { defineToolRegistry, guardToolCall } from '@devbelt/agent-core';
 import type {
   AiSaveModelAccessUp,
   AiTestModelAccessUp,
@@ -109,6 +112,10 @@ export class AiChatView extends BaseWebView {
   private replyBinding?: ReplyBinding;
   private activeSessionId?: string;
   private activeStream?: AiMutableStream<ChatStreamChunk>;
+  /** Agent 模式的开关（顶栏；初始值来自设置）。 */
+  private agentMode = false;
+  /** Agent 运行的中止控制器（停止 / 关闭面板 / 切换连接时中止）。 */
+  private activeAgent?: AbortController;
   /** 最近一次成功拉取的配额快照；用于计算单轮积分消耗。 */
   private lastQuota: AiQuotaState | null = null;
   /** 流序号：新请求/中止后旧流的迟到 chunk 一律丢弃。 */
@@ -176,6 +183,10 @@ export class AiChatView extends BaseWebView {
         return;
       case 'abort':
         this.abortStream();
+        this.abortAgent();
+        return;
+      case 'setAgentMode':
+        this.agentMode = msg.enabled === true;
         return;
       case 'newChat':
         this.cancelAllRuns();
@@ -205,6 +216,7 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'selectConnection': {
+        this.abortAgent();
         this.selectedConnId = msg.connId ?? undefined;
         await this.deps.memento.update(LAST_CONN_KEY, this.selectedConnId);
         this.selectedScope = this.selectedConnId
@@ -375,6 +387,7 @@ export class AiChatView extends BaseWebView {
     super.onDispose();
     this.cancelAllRuns();
     this.abortStream();
+    this.abortAgent();
     if (AiChatView.current === this) AiChatView.current = undefined;
   }
 
@@ -430,11 +443,144 @@ export class AiChatView extends BaseWebView {
     const messages = this.composeMessages(session, schemaText);
     const conn = this.selectedConnection();
     const database = this.selectedScope ?? conn?.database;
+    if (this.agentMode && conn && isRelationalDbType(conn.dbType)) {
+      await this.runAgent(session, messages, conn);
+      return;
+    }
     await this.runRequest(session, messages, {
       feature: 'chat',
       ...(conn ? { connName: conn.name } : {}),
       ...(database ? { database } : {}),
     }, conn?.dbType);
+  }
+
+  /**
+   * Agent 模式：在独立只读会话上运行多步工具调用。
+   * 连接 / 库 / schema 在此固定；切换连接会中止（见 selectConnection）。
+   */
+  private async runAgent(session: AiChatSession, messages: ChatMessage[], conn: SavedConnection): Promise<void> {
+    this.abortStream();
+    this.abortAgent();
+    const controller = new AbortController();
+    this.activeAgent = controller;
+    const streamId = ++this.streamSeq;
+    const config = readAiConfig();
+    const cfg = vscode.workspace.getConfiguration('devbelt');
+    const maxSteps = Math.max(1, Math.min(50, cfg.get<number>('agent.maxSteps', 12)));
+    const maxToolCalls = Math.max(1, Math.min(100, cfg.get<number>('agent.maxToolCalls', 24)));
+    const timeoutSeconds = Math.max(10, Math.min(600, cfg.get<number>('agent.timeoutSeconds', 120)));
+    const includeSample = cfg.get<boolean>('agent.includeSample', false);
+    const engine = agentEngineOf(conn.dbType);
+    const database = conn.dbType === DatabaseType.PG ? conn.database : (this.selectedScope ?? conn.database);
+    const schema = conn.dbType === DatabaseType.PG ? this.selectedScope : undefined;
+    const meta: AiRequestMeta = {
+      feature: 'chat',
+      ...(conn.name ? { connName: conn.name } : {}),
+      ...(database ? { database } : {}),
+    };
+
+    let isolated: Awaited<ReturnType<ConnectionManager['openIsolatedSql']>> | undefined;
+    let assistant = '';
+    try {
+      isolated = await this.deps.manager.openIsolatedSql(conn, database);
+      if (engine === 'PG' && schema) {
+        await isolated.session.query.query(
+          `SET search_path TO ${isolated.session.query.wrap(validateSchemaIdent(schema))}, public`,
+          undefined,
+          { skipHistory: true },
+        );
+      }
+      const tools = buildAgentTools({
+        dbType: conn.dbType,
+        ...(database ? { database } : {}),
+        ...(schema ? { schema } : {}),
+        session: isolated.session as never,
+        readOnlySession: conn.readOnly === true,
+        includeSample,
+        maxRows: AI_SELECT_ROW_LIMIT,
+      });
+      const registry = defineToolRegistry(tools.definitions);
+      const settings = {
+        agentEnabled: true,
+        allowWrites: false,
+        allowDdl: false,
+        allowProduction: false,
+        mcpEnabled: false,
+        mcpAllowedConnections: [] as string[],
+      };
+      const runner = new AgentRunner({
+        model: config.model || 'default',
+        ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+        tools: toModelTools(tools.definitions),
+        model_: {
+          stream: (request) => {
+            const stream = this.deps.service.streamChat(request, meta);
+            this.activeStream = stream;
+            return (async function* () {
+              try {
+                for await (const chunk of stream) yield chunk;
+              } finally {
+                stream.abort();
+              }
+            })();
+          },
+        },
+        guard: (toolName, args) => guardToolCall(registry, {
+          surface: 'agent',
+          toolName,
+          args,
+          connectionId: conn.id,
+          connection: {
+            dialect: engine,
+            production: conn.environment === 'production',
+            readOnly: conn.readOnly === true,
+          },
+          settings,
+        }),
+        executor: tools,
+        maxSteps,
+        maxToolCalls,
+        timeoutMs: timeoutSeconds * 1000,
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (this.streamSeq !== streamId) return;
+          if (event.type === 'text') {
+            assistant += event.delta;
+            this.post({ type: 'chunk', sessionId: session.id, delta: event.delta } as never);
+          } else if (event.type === 'step-start') {
+            this.post({ type: 'agentStep', sessionId: session.id, step: { index: event.index, tool: event.tool, status: 'running' } } as never);
+          } else {
+            this.post({ type: 'agentStep', sessionId: session.id, step: event.step } as never);
+          }
+        },
+      });
+
+      const result = await runner.run(messages);
+      if (this.streamSeq !== streamId) return;
+      assistant = result.content;
+      if (assistant) {
+        session.messages.push({ role: 'assistant', content: assistant });
+        this.saveSession(session);
+      }
+      const aborted = result.stopReason === 'aborted';
+      this.post({
+        type: 'finish',
+        sessionId: session.id,
+        ...(aborted ? { aborted: true } : {}),
+        ...(assistant ? { content: assistant } : {}),
+        agentStopReason: result.stopReason,
+        ...(result.degraded ? { agentDegraded: true } : {}),
+        ...(result.error ? { error: { code: 'AI_AGENT_ERROR', message: result.error } } : {}),
+      } as never);
+    } catch (err) {
+      if (this.streamSeq !== streamId) return;
+      const message = err instanceof Error ? err.message : String(err);
+      this.post({ type: 'finish', sessionId: session.id, error: { code: 'AI_AGENT_ERROR', message } } as never);
+    } finally {
+      isolated?.close();
+      if (this.activeAgent === controller) this.activeAgent = undefined;
+      if (this.streamSeq === streamId) this.activeStream = undefined;
+    }
   }
 
   /**
@@ -898,6 +1044,12 @@ export class AiChatView extends BaseWebView {
     this.activeStream = undefined;
   }
 
+  private abortAgent(): void {
+    this.activeAgent?.abort();
+    this.activeAgent = undefined;
+    this.activeStream?.abort();
+  }
+
   /** 组装请求消息：按引擎固定 system + 上下文块 +（域上下文/默认指令）user 区块 + 近 N 条历史。 */
   private composeMessages(session: AiChatSession, schemaText?: string): ChatMessage[] {
     const engineConn = this.selectedConnection();
@@ -950,6 +1102,7 @@ export class AiChatView extends BaseWebView {
       isLoggedIn: this.deps.auth.isLoggedIn(),
       includeColumnComments: readAiConfig().includeColumnComments,
       autoRunReadOnlySql: vscode.workspace.getConfiguration('devbelt').get<boolean>('ai.autoRunReadOnlySql', true),
+      agentEnabled: this.agentMode,
       context,
       sessions: this.sessionSummaries(),
       connections: this.deps.connectionStore.list().map((conn) => ({ id: conn.id, name: conn.name })),

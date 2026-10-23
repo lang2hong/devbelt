@@ -2320,17 +2320,65 @@
           "description": "Per-rule severity overrides: off | hint | info | warning | error.",
           "markdownDescription": "按规则覆盖级别：`off` / `hint` / `info` / `warning` / `error`。规则：`updateDeleteWithoutWhere`（UPDATE/DELETE 缺少 WHERE）、`dangerousDdl`（DROP/TRUNCATE/ALTER）、`notInSubquery`（NOT IN 子查询的 NULL 陷阱）、`selectStar`（SELECT *）、`dialectMismatch`（与绑定连接方言不符的写法）。",
           "properties": {
-            "updateDeleteWithoutWhere": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
-            "dangerousDdl": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
-            "notInSubquery": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
-            "selectStar": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] },
-            "dialectMismatch": { "type": "string", "enum": ["off", "hint", "info", "warning", "error"] }
+            "updateDeleteWithoutWhere": {
+              "type": "string",
+              "enum": [
+                "off",
+                "hint",
+                "info",
+                "warning",
+                "error"
+              ]
+            },
+            "dangerousDdl": {
+              "type": "string",
+              "enum": [
+                "off",
+                "hint",
+                "info",
+                "warning",
+                "error"
+              ]
+            },
+            "notInSubquery": {
+              "type": "string",
+              "enum": [
+                "off",
+                "hint",
+                "info",
+                "warning",
+                "error"
+              ]
+            },
+            "selectStar": {
+              "type": "string",
+              "enum": [
+                "off",
+                "hint",
+                "info",
+                "warning",
+                "error"
+              ]
+            },
+            "dialectMismatch": {
+              "type": "string",
+              "enum": [
+                "off",
+                "hint",
+                "info",
+                "warning",
+                "error"
+              ]
+            }
           },
           "additionalProperties": false
         },
         "devbelt.dictionary.format": {
           "type": "string",
-          "enum": ["markdown", "html"],
+          "enum": [
+            "markdown",
+            "html"
+          ],
           "default": "markdown",
           "description": "Default format offered first when generating a data dictionary.",
           "markdownDescription": "生成数据字典时默认优先的格式（`markdown` / `html`）。"
@@ -2382,6 +2430,42 @@
           "default": true,
           "description": "Automatically run read-only SQL blocks in AI Chat replies (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN only; never on production connections; writes and DDL are never auto-run).",
           "markdownDescription": "AI 对话回复中的只读 SQL 块（仅 SELECT/WITH/SHOW/DESCRIBE/EXPLAIN）自动执行并内联展示结果。生产连接不自动执行；写与 DDL 永不自动执行。关闭后保留手动「Run in chat」按钮。"
+        },
+        "devbelt.ai.agent.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Agent mode in AI Chat: inspect schema, run read-only SQL and EXPLAIN step by step. Never writes.",
+          "markdownDescription": "AI Chat 的 Agent 模式：查结构、跑只读 SQL 与 EXPLAIN，逐步展示。只读，不写库。"
+        },
+        "devbelt.ai.agent.maxSteps": {
+          "type": "number",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum model turns per agent task.",
+          "markdownDescription": "单个 Agent 任务的最大模型轮数（1–50）。"
+        },
+        "devbelt.ai.agent.maxToolCalls": {
+          "type": "number",
+          "default": 24,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum tool calls per agent task.",
+          "markdownDescription": "单个 Agent 任务的最大工具调用次数（1–100）。"
+        },
+        "devbelt.ai.agent.timeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 10,
+          "maximum": 600,
+          "description": "Wall-clock limit for one agent task, in seconds.",
+          "markdownDescription": "单个 Agent 任务的总时长上限（秒，10–600）。"
+        },
+        "devbelt.ai.agent.includeSample": {
+          "type": "boolean",
+          "default": false,
+          "description": "Send redacted row samples to the model in agent mode (off by default).",
+          "markdownDescription": "Agent 模式是否向模型发送脱敏后的行样本（默认关闭）。"
         },
         "devbelt.ai.temperature": {
           "type": "number",
@@ -2544,7 +2628,8 @@
     "chart.js": "^4.4.0",
     "jsqr": "^1.4.0",
     "pngjs": "^7.0.0",
-    "ssh2": "^1.16.1"
+    "ssh2": "^1.16.1",
+    "@devbelt/agent-core": "workspace:*"
   },
   "devDependencies": {
     "@devbelt/ai-core": "workspace:*",

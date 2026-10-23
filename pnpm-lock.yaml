@@ -186,6 +186,9 @@ importers:
 
   apps/vscode-ext:
     dependencies:
+      '@devbelt/agent-core':
+        specifier: workspace:*
+        version: link:../../packages/agent-core
       '@devbelt/db-host':
         specifier: workspace:*
         version: link:../../packages/db-host

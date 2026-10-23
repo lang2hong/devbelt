@@ -109,6 +109,9 @@ const selectedConnId = ref<string | undefined>(undefined);
 const input = ref('');
 const includeColumnComments = ref(true);
 const autoRunReadOnlySql = ref(true);
+const agentEnabled = ref(false);
+const agentSteps = ref<Array<{ index: number; tool: string; status: 'running' | 'ok' | 'error'; summary?: string; durationMs?: number; errorCode?: string }>>([]);
+const agentNotice = ref('');
 const editingIndex = ref<number | null>(null);
 const suggestions = computed(() => [
   t('wv.ai.suggest.explain'),
@@ -227,6 +230,7 @@ onMounted(() => {
         sessions.value = Array.isArray(msg.sessions) ? msg.sessions : [];
         includeColumnComments.value = !!msg.includeColumnComments;
         autoRunReadOnlySql.value = msg.autoRunReadOnlySql !== false;
+        agentEnabled.value = msg.agentEnabled === true;
         activeSessionId.value = msg.activeSessionId || undefined;
         selectedConnId.value = msg.context?.connId;
         editingIndex.value = null;
@@ -258,6 +262,23 @@ onMounted(() => {
         if (msg.reasoning) streaming.value.reasoning += msg.reasoning;
         streaming.value.content += msg.delta ?? '';
         break;
+      case 'agentStep': {
+        if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
+        const step = msg.step;
+        if (!step || typeof step.index !== 'number') break;
+        const at = agentSteps.value.findIndex((s) => s.index === step.index);
+        const next = {
+          index: step.index,
+          tool: String(step.tool ?? ''),
+          status: step.status === 'running' || step.status === 'error' ? step.status : 'ok' as const,
+          ...(typeof step.summary === 'string' ? { summary: step.summary } : {}),
+          ...(typeof step.durationMs === 'number' ? { durationMs: step.durationMs } : {}),
+          ...(typeof step.errorCode === 'string' ? { errorCode: step.errorCode } : {}),
+        };
+        if (at >= 0) agentSteps.value[at] = next;
+        else agentSteps.value.push(next);
+        break;
+      }
       case 'finish': {
         if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
         // host 传权威最终版（保留字补引后的 ```sql 块）时以它为准替换流式缓冲，
@@ -266,6 +287,10 @@ onMounted(() => {
         const reasoning = streaming.value?.reasoning ?? '';
         const usage = msg.usage && typeof msg.usage === 'object' ? msg.usage as AiMessageUsage : undefined;
         streaming.value = null;
+        if (msg.agentDegraded) agentNotice.value = t('wv.ai.agent.degraded');
+        else if (msg.agentStopReason === 'max_steps') agentNotice.value = t('wv.ai.agent.stop.max_steps');
+        else if (msg.agentStopReason === 'max_tool_calls') agentNotice.value = t('wv.ai.agent.stop.max_tool_calls');
+        else if (msg.agentStopReason === 'timeout') agentNotice.value = t('wv.ai.agent.stop.timeout');
         if (content || reasoning) messages.value.push({ role: 'assistant', content, ...(reasoning ? { reasoning } : {}), ...(usage ? { usage } : {}) });
         if (msg.error) messages.value.push({ role: 'assistant', content: msg.error.message, error: true, ...(!content && !reasoning && usage ? { usage } : {}) });
         // 自动执行仅限正常完成：Stop 中断（aborted）后的半截/完整 SQL 不跑，
@@ -460,6 +485,8 @@ onUnmounted(() => {
 function send(): void {
   const text = input.value.trim();
   if (!text || generating.value) return;
+  agentSteps.value = [];
+  agentNotice.value = '';
   const editIndex = editingIndex.value;
   if (editIndex !== null) {
     // 编辑旧用户消息：本地从该条起截断，宿主同步截断后重发。
@@ -480,6 +507,8 @@ function send(): void {
 /** 重新生成最后一条 assistant（失败消息即重试）。 */
 function regenerate(): void {
   if (generating.value) return;
+  agentSteps.value = [];
+  agentNotice.value = '';
   let lastAssistant = -1;
   for (let i = messages.value.length - 1; i >= 0; i -= 1) {
     if (messages.value[i]!.role === 'assistant') { lastAssistant = i; break; }
@@ -636,6 +665,13 @@ function openContextDetail(): void {
         :title="t('wv.ai.autoRun.hint')"
         @click="post({ type: 'openSettings' })"
       >{{ autoRunReadOnlySql ? t('wv.ai.autoRun.on') : t('wv.ai.autoRun.off') }}</button>
+      <button
+        class="ai-btn ai-auto-run"
+        :class="{ on: agentEnabled }"
+        :title="selectedConnId ? t('wv.ai.agent.hint') : t('wv.ai.agent.needConnection')"
+        :disabled="!selectedConnId"
+        @click="agentEnabled = !agentEnabled; post({ type: 'setAgentMode', enabled: agentEnabled })"
+      >{{ agentEnabled ? t('wv.ai.agent.on') : t('wv.ai.agent.off') }}</button>
       <span class="ai-spacer"></span>
       <button v-if="generating" class="ai-btn" @click="stop">{{ t('wv.ai.stop') }}</button>
     </div>
@@ -696,11 +732,13 @@ function openContextDetail(): void {
           :streaming="streaming"
           :db-type="context?.dbType"
           :suggestions="suggestions"
+          :agent-steps="agentSteps"
           @copy="copyMessage"
           @suggest="useSuggestion"
           @regenerate="regenerate"
           @edit="editMessage"
         />
+        <div v-if="agentNotice" class="ai-agent-notice">{{ agentNotice }}</div>
         <div v-if="editingIndex !== null" class="ai-edit-banner">
           <span>{{ t('wv.ai.editBanner', { n: editingIndex + 1 }) }}</span>
           <button class="ai-btn" @click="cancelEdit">{{ t('wv.ai.cancelEdit') }}</button>
@@ -871,5 +909,11 @@ function openContextDetail(): void {
   border-radius: 8px;
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
+}
+.ai-agent-notice {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  border-top: 1px solid var(--vscode-panel-border);
 }
 </style>

@@ -70,6 +70,8 @@ export interface AiInitDown {
   includeColumnComments: boolean;
   /** 只读 SQL 是否自动执行（webview 顶栏显示状态，避免静默行为）。 */
   autoRunReadOnlySql: boolean;
+  /** Agent 模式是否开启（顶栏开关的初始值）。 */
+  agentEnabled?: boolean;
   context: AiContextState;
   sessions: AiSessionSummary[];
   activeSessionId?: string;
@@ -89,6 +91,9 @@ export interface AiFinishDown {
   type: 'finish';
   sessionId: string;
   aborted?: boolean;
+  /** Agent 模式：停止原因与降级提示（普通聊天不填）。 */
+  agentStopReason?: string;
+  agentDegraded?: boolean;
   error?: { code: string; message: string };
   /**
    * 权威最终正文（P9 保留字补引）：host 收流后对 ```sql 块做过本地修正的版本。
@@ -236,6 +241,20 @@ export interface AiToolRunningDown {
   blockRef: AiBlockRef;
 }
 
+/** Agent 模式的一步工具调用（进行中 / 完成）。 */
+export interface AiAgentStepDown {
+  type: 'agentStep';
+  sessionId: string;
+  step: {
+    index: number;
+    tool: string;
+    status: 'running' | 'ok' | 'error';
+    summary?: string;
+    durationMs?: number;
+    errorCode?: string;
+  };
+}
+
 export type AiDownMessage =
   | AiInitDown
   | AiChunkDown
@@ -252,6 +271,7 @@ export type AiDownMessage =
   | AiModelAccessTestDown
   | AiToolResultDown
   | AiToolRunningDown
+  | AiAgentStepDown
   | AiTableOptionsDown
   | AiTableNoteDown
   | AiColumnSampleDown;
@@ -362,6 +382,7 @@ export type AiUpMessage =
   | { type: 'regenerate'; sessionId: string }
   | { type: 'editAndResend'; sessionId: string; messageIndex: number; text: string }
   | { type: 'abort' }
+  | { type: 'setAgentMode'; enabled: boolean }
   | { type: 'newChat' }
   | { type: 'renameChat'; sessionId: string; title: string }
   | { type: 'deleteChat'; sessionId: string }

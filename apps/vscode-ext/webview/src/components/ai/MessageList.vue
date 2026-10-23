@@ -8,6 +8,8 @@ import type { AiMessageUsage } from '../../../../src/ai/aiSessionStore';
 const props = defineProps<{
   messages: Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string; error?: boolean; usage?: AiMessageUsage; blockResults?: Record<number, AiToolResultPayload>; blockRunning?: Record<number, AiRunningPayload> }>;
   streaming: { content: string; reasoning: string } | null;
+  /** Agent 模式的步骤（运行中显示在流式气泡上方）。 */
+  agentSteps?: Array<{ index: number; tool: string; status: 'running' | 'ok' | 'error'; summary?: string; durationMs?: number; errorCode?: string }>;
   /** 当前连接引擎（用于代码块按引擎决定是否显示运行按钮）。 */
   dbType?: string;
   /** 空状态建议问题；点击只填入输入框。 */
@@ -22,6 +24,11 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const stepStatusKey = {
+  running: 'wv.ai.agent.step.running',
+  ok: 'wv.ai.agent.step.ok',
+  error: 'wv.ai.agent.step.error',
+} as const;
 const scroller = ref<HTMLElement | null>(null);
 const content = ref<HTMLElement | null>(null);
 
@@ -88,6 +95,14 @@ onBeforeUnmount(() => observer?.disconnect());
           @regenerate="emit('regenerate')"
           @edit="emit('edit', index, message.content)"
         />
+        <div v-if="streaming && props.agentSteps && props.agentSteps.length" class="ai-agent-steps">
+          <div v-for="step in props.agentSteps" :key="step.index" class="ai-agent-step" :class="step.status">
+            <span class="ai-agent-step-dot"></span>
+            <span class="ai-agent-step-name">{{ step.index }}. {{ step.tool }}</span>
+            <span class="ai-agent-step-status">{{ t(stepStatusKey[step.status]) }}</span>
+            <span v-if="step.summary" class="ai-agent-step-summary">{{ step.summary }}</span>
+          </div>
+        </div>
         <MessageBubble
           v-if="streaming"
           :message="{ role: 'assistant', content: streaming.content, reasoning: streaming.reasoning }"
@@ -170,4 +185,30 @@ onBeforeUnmount(() => observer?.disconnect());
   cursor: pointer;
   font-size: 12px;
 }
+
+.ai-agent-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 6px 2px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+.ai-agent-step {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.ai-agent-step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--vscode-descriptionForeground);
+}
+.ai-agent-step.running .ai-agent-step-dot { background: var(--vscode-progressBar-background, #0e70c0); }
+.ai-agent-step.ok .ai-agent-step-dot { background: var(--vscode-testing-iconPassed, #2ea043); }
+.ai-agent-step.error .ai-agent-step-dot { background: var(--vscode-errorForeground, #f48771); }
+.ai-agent-step-name { color: var(--vscode-foreground); }
+.ai-agent-step-summary { opacity: 0.8; }
 </style>
