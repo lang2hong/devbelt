@@ -61,3 +61,29 @@ export type {
 
 export { JsonlExecutionLedger } from './jsonlLedger.js';
 export type { JsonlLedgerOptions, LoadReport } from './jsonlLedger.js';
+
+export {
+  DEFAULT_METADATA_BUDGET,
+  DEFAULT_QUERY_BUDGET,
+  DEFAULT_TEXT_LIMIT,
+  redactSecrets,
+  sanitizeMetadata,
+  sanitizePlanSummary,
+  sanitizeQueryResult,
+  sanitizeToolError,
+} from './sanitizer.js';
+export type {
+  MetadataBudget,
+  MetadataColumnInput,
+  MetadataColumnView,
+  MetadataTableInput,
+  MetadataTableView,
+  QueryBudget,
+  QueryColumnSummary,
+  QueryResultView,
+  SanitizeQueryOptions,
+  ToolResultEnvelope,
+} from './sanitizer.js';
+
+export { RESERVED_ARGUMENTS, guardToolCall, validateArguments } from './guard.js';
+export type { GuardDenyReason, GuardResult, ToolCallRequest } from './guard.js';

@@ -264,6 +264,10 @@ importers:
         version: 3.5.41(typescript@5.9.3)
 
   packages/agent-core:
+    dependencies:
+      '@devbelt/ai-core':
+        specifier: workspace:*
+        version: link:../ai-core
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
