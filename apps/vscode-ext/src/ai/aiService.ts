@@ -120,8 +120,10 @@ export class AiService {
     const config = this.getConfig();
     const status: AiProviderStatus = {
       mode: config.provider,
-      model: config.model,
-      baseUrl: config.baseUrl,
+      // server-proxy 的上游模型由服务端决定，本地 `devbelt.ai.model` 与该模式无关；
+      // 透出去只会在面板上显示一个并不生效（甚至是上次自带 Key 模式残留）的模型名。
+      model: config.provider === 'server-proxy' ? '' : config.model,
+      baseUrl: config.provider === 'server-proxy' ? '' : config.baseUrl,
       available: true,
     };
     if (config.provider === 'server-proxy') {

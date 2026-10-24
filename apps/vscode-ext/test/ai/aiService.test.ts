@@ -180,6 +180,24 @@ describe('AiService（双 provider 路由）', () => {
     ).rejects.toBeInstanceOf(AiAbortError);
   });
 
+  it('describeProvider：server-proxy 不透出本地模型（模型由服务端决定）', async () => {
+    const byokModel = new AiService({
+      keyStore: keyStoreWith('k'),
+      auth: authLike({ loggedIn: true }),
+      serverUrl: 's',
+      getConfig: () => config({ provider: 'server-proxy', model: 'deepseek-v4.1-flash' }),
+    });
+    await expect(byokModel.describeProvider()).resolves.toMatchObject({ mode: 'server-proxy', model: '', baseUrl: '' });
+
+    const byok = new AiService({
+      keyStore: keyStoreWith('k'),
+      auth: authLike({ loggedIn: true }),
+      serverUrl: 's',
+      getConfig: () => config({ provider: 'openai-compatible', baseUrl: 'https://ai.test/v1', model: 'm1' }),
+    });
+    await expect(byok.describeProvider()).resolves.toMatchObject({ mode: 'openai-compatible', model: 'm1' });
+  });
+
   it('describeProvider：登录缺失 / API Key 缺失 / 未配置 三类 reason', async () => {
     const proxy = new AiService({
       keyStore: keyStoreWith(),

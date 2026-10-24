@@ -242,6 +242,8 @@ onMounted(() => {
         if (!session || !session.id) {
           resetMessages([]);
           activeSessionId.value = undefined;
+          // 会话被删除/不存在：生成态也要复位，否则输入框一直禁用。
+          streaming.value = null;
           break;
         }
         activeSessionId.value = session.id;
@@ -299,6 +301,13 @@ onMounted(() => {
         const skipAutoRun = skipAutoRunOnce;
         skipAutoRunOnce = false;
         if (content && !msg.error && !msg.aborted && !skipAutoRun) autoRunSqlBlocks(content);
+        break;
+      }
+      case 'error': {
+        // Host 侧未捕获异常的统一兜底：没收到 finish 时也要退出生成态。
+        streaming.value = null;
+        const message = String(msg.message ?? '');
+        if (message) messages.value.push({ role: 'assistant', content: message, error: true });
         break;
       }
       case 'modelAccess': {

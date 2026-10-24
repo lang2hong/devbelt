@@ -169,7 +169,7 @@ function onSelect(event: Event): void {
 <template>
   <div class="ai-context-bar">
     <div class="ai-context-row">
-      <span class="ai-badge">{{ providerLabel }}</span>
+      <span class="ai-badge" :title="showQuota ? t('wv.ai.provider.modelByServer') : ''">{{ providerLabel }}</span>
       <button v-if="provider?.model" class="ai-model ai-model-btn" :title="t('wv.ai.modelAccess')" @click="emit('openModelAccess')">{{ provider.model }}</button>
       <span v-if="providerHint" class="ai-hint">{{ providerHint }}</span>
     </div>

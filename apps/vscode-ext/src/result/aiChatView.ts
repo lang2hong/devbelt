@@ -124,6 +124,8 @@ export class AiChatView extends BaseWebView {
   private lastQuota: AiQuotaState | null = null;
   /** 流序号：新请求/中止后旧流的迟到 chunk 一律丢弃。 */
   private streamSeq = 0;
+  /** 正在生成的会话：删除该会话 / 新建会话时据此中止在途回复。 */
+  private runningSessionId?: string;
 
   private constructor(private readonly deps: AiChatViewDeps) {
     super(VIEW_TYPE, l10n('ai.title'), vscode.ViewColumn.Active, undefined, getAiChatHtml);
@@ -186,14 +188,18 @@ export class AiChatView extends BaseWebView {
         await this.onEditAndResend(msg.sessionId, msg.messageIndex, msg.text);
         return;
       case 'abort':
-        this.abortStream();
-        this.abortAgent();
+        // 用户点「停止」：只中止在途请求，不递增 streamSeq。
+        // 递增会让 runRequest / runAgent 的收尾被当成「旧运行」丢弃 → 永远收不到
+        // finish，面板停在「思考中」且「重新生成」一直被 generating 拦住。
+        this.stopCurrentRun();
         return;
       case 'setAgentMode':
         this.agentMode = msg.enabled === true;
         return;
       case 'newChat':
         this.cancelAllRuns();
+        // 旧会话的在途回复不该继续烧额度；它会以 finish(aborted) 正常收尾。
+        this.stopCurrentRun();
         this.activeSessionId = this.deps.sessions.create(this.selectedConnId).id;
         this.pushSessionList();
         this.pushActiveSession();
@@ -204,6 +210,8 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'deleteChat': {
+        // 删除正在生成的会话：先中止回复，否则收尾时 saveSession 会把刚删的会话写回去。
+        if (this.runningSessionId === msg.sessionId) this.stopCurrentRun();
         this.deps.sessions.delete(msg.sessionId);
         if (this.activeSessionId === msg.sessionId) {
           this.activeSessionId = undefined;
@@ -413,9 +421,16 @@ export class AiChatView extends BaseWebView {
   private async onRegenerate(sessionId: string): Promise<void> {
     const id = sessionId || this.activeSessionId || '';
     const session = id ? this.deps.sessions.get(id) : undefined;
-    if (!session) return;
+    // webview 已经乐观进入生成态（并删掉了尾部回答）：无法继续时必须回 finish 复位。
+    if (!session) {
+      this.post({ type: 'finish', sessionId: id } as never);
+      return;
+    }
     dropTrailingAssistant(session.messages);
-    if (!session.messages.some((m) => m.role === 'user')) return;
+    if (!session.messages.some((m) => m.role === 'user')) {
+      this.post({ type: 'finish', sessionId: id } as never);
+      return;
+    }
     this.activeSessionId = session.id;
     session.updatedAt = Date.now();
     this.saveSession(session);
@@ -428,10 +443,16 @@ export class AiChatView extends BaseWebView {
     if (!trimmed) return;
     const id = sessionId || this.activeSessionId || '';
     const session = id ? this.deps.sessions.get(id) : undefined;
-    if (!session) return;
+    if (!session) {
+      this.post({ type: 'finish', sessionId: id } as never);
+      return;
+    }
     const index = Math.floor(messageIndex);
     const next = replaceUserMessage(session.messages, index, trimmed);
-    if (!next) return;
+    if (!next) {
+      this.post({ type: 'finish', sessionId: id } as never);
+      return;
+    }
     session.messages = next;
     if (index === 0 || !session.title.trim()) session.title = AiSessionStore.titleFromFirstMessage(trimmed);
     if (this.selectedConnId) session.connId = this.selectedConnId;
@@ -443,8 +464,16 @@ export class AiChatView extends BaseWebView {
 
   /** 用当前会话历史 + 上下文发起一次 chat 流。 */
   private async runChat(session: AiChatSession): Promise<void> {
-    const { schemaText } = await this.buildContext();
-    const messages = this.composeMessages(session, schemaText);
+    let messages: ChatMessage[];
+    try {
+      const { schemaText } = await this.buildContext();
+      messages = this.composeMessages(session, schemaText);
+    } catch (err) {
+      // 上下文/schema 读取失败发生在流式请求之前：不补一条 finish 会永远停在「思考中」。
+      const message = err instanceof Error ? err.message : String(err);
+      this.post({ type: 'finish', sessionId: session.id, error: { code: 'AI_CONTEXT_ERROR', message } } as never);
+      return;
+    }
     const conn = this.selectedConnection();
     const database = this.selectedScope ?? conn?.database;
     if (this.agentMode && conn && isRelationalDbType(conn.dbType)) {
@@ -467,6 +496,7 @@ export class AiChatView extends BaseWebView {
     this.abortAgent();
     const controller = new AbortController();
     this.activeAgent = controller;
+    this.runningSessionId = session.id;
     const streamId = ++this.streamSeq;
     const config = readAiConfig();
     const cfg = vscode.workspace.getConfiguration('devbelt');
@@ -620,6 +650,7 @@ export class AiChatView extends BaseWebView {
       isolated?.close();
       if (this.activeAgent === controller) this.activeAgent = undefined;
       if (this.streamSeq === streamId) this.activeStream = undefined;
+      if (this.runningSessionId === session.id) this.runningSessionId = undefined;
     }
   }
 
@@ -633,6 +664,7 @@ export class AiChatView extends BaseWebView {
     const startedAt = Date.now();
     const beforeUsed = this.lastQuota?.used ?? null;
     this.replyBinding = { connId: this.selectedConnId, scope: this.selectedScope };
+    this.runningSessionId = session.id;
     const config = readAiConfig();
     const stream = this.deps.service.streamChat(
       {
@@ -708,6 +740,7 @@ export class AiChatView extends BaseWebView {
       }
     } finally {
       if (this.streamSeq === streamId) this.activeStream = undefined;
+      if (this.runningSessionId === session.id) this.runningSessionId = undefined;
     }
   }
 
@@ -808,10 +841,29 @@ export class AiChatView extends BaseWebView {
     const runId = `q${++this.runSeq}`;
     // 内联绑定的执行才有「执行中」指示与取消入口（尾部气泡路径无位置承载，沿用旧行为）。
     if (blockRef) this.post({ type: 'toolRunning', runId, startedAt: Date.now(), blockRef } as never);
-    const outcome = await this.deps.executor.runHeadless(conn, sql, this.selectedScope ?? conn.database, {
-      onStart: (handle) => this.runs.set(runId, handle),
-    });
-    this.runs.delete(runId);
+    const startedAt = Date.now();
+    let outcome: Awaited<ReturnType<QueryExecutor['runHeadless']>>;
+    try {
+      outcome = await this.deps.executor.runHeadless(conn, sql, this.selectedScope ?? conn.database, {
+        onStart: (handle) => this.runs.set(runId, handle),
+      });
+    } catch (err) {
+      // 执行器抛错时也必须回一条终态，否则内联代码块的「执行中」永不结束。
+      const ms = Date.now() - startedAt;
+      this.post({
+        type: 'toolResult',
+        title: l10n('ai.sql.chatErrorTitle', { ms: formatElapsed(ms) }),
+        content: err instanceof Error ? err.message : String(err),
+        format: 'text',
+        isError: true,
+        runId,
+        costMs: ms,
+        ...(blockRef ? { blockRef } : {}),
+      } as never);
+      return;
+    } finally {
+      this.runs.delete(runId);
+    }
     if (outcome.canceled) {
       // 用户取消 / 确认门禁未放行：内联场景必须回一条结果以结束「执行中」指示。
       if (blockRef) {
@@ -1094,10 +1146,18 @@ export class AiChatView extends BaseWebView {
     return (await vscode.window.showWarningMessage(l10n('ai.agent.confirm.title'), { modal: true, detail }, run)) === run;
   }
 
+  /** 作废在途运行：迟到的 chunk / finish 一律丢弃（新请求、关闭面板时用）。 */
   private abortStream(): void {
     this.streamSeq += 1;
+    this.stopCurrentRun();
+  }
+
+  /** 中止在途的回复与 Agent，但让本次运行自己收尾（`finish(aborted)`）。 */
+  private stopCurrentRun(): void {
     this.activeStream?.abort();
     this.activeStream = undefined;
+    this.activeAgent?.abort();
+    this.activeAgent = undefined;
   }
 
   private abortAgent(): void {

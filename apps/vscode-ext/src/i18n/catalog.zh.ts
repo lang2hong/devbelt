@@ -1750,6 +1750,7 @@ export const zh: MessageCatalog = {
   'wv.ai.ma.test.unknown': '连接失败',
   'wv.ai.ma.saveError.baseUrl': 'Base URL 无效',
   'wv.ai.ma.saveError.insecure': 'Base URL 须为 https（本地调试可用回环地址）',
+  'wv.ai.provider.modelByServer': '服务代理模式：模型由服务端决定，扩展里不显示也不使用本地模型设置',
   'wv.ai.ma.saveError.model': '模型不能为空',
   'wv.ai.ma.saveError.vendors': '自定义厂商数据无效',
   'wv.ai.ma.saveError.invalid': '参数无效',
