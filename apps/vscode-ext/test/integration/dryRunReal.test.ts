@@ -40,7 +40,8 @@ describe.skipIf(!MYSQL_URL)('dry run on real MySQL', () => {
       const result = await dryRunStatement(`UPDATE \`${table}\` SET v = 99`, { dbType: DatabaseType.MYSQL, session: q });
       expect(result).toMatchObject({ outcome: 'rolled_back', affectedRows: 2 });
       const rows = await q.query(`SELECT id, v FROM \`${table}\` ORDER BY id`);
-      expect(rows.rows).toEqual([{ id: '1', v: '10' }, { id: '2', v: '20' }]);
+      const normalized = rows.rows.map((r: any) => ({ id: Number(r.id), v: Number(r.v) }));
+      expect(normalized).toEqual([{ id: 1, v: 10 }, { id: 2, v: 20 }]);
     } finally {
       await q.query(`DROP TABLE IF EXISTS \`${table}\``).catch(() => undefined);
       q.end();
@@ -61,7 +62,8 @@ describe.skipIf(!PG_URL)('dry run on real PostgreSQL', () => {
       const result = await dryRunStatement('UPDATE t SET v = 99', { dbType: DatabaseType.PG, session: q, schema });
       expect(result).toMatchObject({ outcome: 'rolled_back', affectedRows: 2 });
       const rows = await q.query('SELECT id, v FROM t ORDER BY id');
-      expect(rows.rows).toEqual([{ id: '1', v: '10' }, { id: '2', v: '20' }]);
+      const normalized = rows.rows.map((r: any) => ({ id: Number(r.id), v: Number(r.v) }));
+      expect(normalized).toEqual([{ id: 1, v: 10 }, { id: 2, v: 20 }]);
     } finally {
       await q.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`).catch(() => undefined);
       q.end();
