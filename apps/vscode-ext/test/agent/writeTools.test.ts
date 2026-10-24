@@ -123,6 +123,14 @@ describe('write tools', () => {
     expect(events.map((e) => e.state)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTING', 'SUCCEEDED']);
   });
 
+  it('records UNKNOWN and does not execute when aborted after approval', async () => {
+    const controller = new AbortController();
+    const { body, events } = deps({ confirm: async () => { controller.abort(); return true; } });
+    const out = await buildWriteTools(body).execute('propose_write', 'UPDATE t SET a = 1', controller.signal);
+    expect(out).toMatchObject({ isError: true, errorCode: 'aborted' });
+    expect(events.map((e) => e.state)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTING', 'UNKNOWN']);
+  });
+
   it('refuses DDL when allowDdl is off', async () => {
     const { body } = deps({ settings: { allowWrites: true, allowDdl: false, allowProduction: false } });
     expect(await buildWriteTools(body).execute('propose_ddl', 'CREATE TABLE t (a int)', signal))

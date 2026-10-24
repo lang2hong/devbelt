@@ -52,6 +52,16 @@ Ask in natural language, explain or optimize SQL, and turn results into charts. 
 
 E2EE personal sync, SSH host-key verification, read-only protection and audit logs. / 端到端加密个人同步、SSH 主机密钥校验、只读保护与审计日志。
 
+### Agent, MCP and masked export (0.3.0) / Agent、MCP 与脱敏导出
+
+- **Agent mode** (off by default): inspect schema, run read-only SQL and plain `EXPLAIN` step by step, with limits, cancellation and a plain-chat fallback when the model has no tool calling. Writes are proposals only: each DML/DDL needs approval in a native modal, MySQL/PostgreSQL DML is dry-run inside a rolled-back transaction, and every decision goes to a local JSONL execution ledger.
+- **MCP server** (off by default): loopback-only Streamable HTTP for one configured connection, with per-client bearer tokens, rate limits, Host/Origin checks and audit. It exposes five read-only tools and never registers writes.
+- **Masked export**: deterministic per-column masking with explicit PII rules, preview, CSV/SQL output, plus a bounded foreign-key subset export that keeps masked keys aligned.
+
+- **Agent 模式**（默认关闭）：逐步查 Schema、跑只读 SQL 与普通 `EXPLAIN`，带步数上限、取消，模型不支持工具调用时退回普通问答。写操作只能提出：每条 DML/DDL 在原生弹窗中审批，MySQL/PostgreSQL 的 DML 在事务内试执行后回滚，全部决策写入本地 JSONL 执行账本。
+- **MCP Server**（默认关闭）：仅监听本机的 Streamable HTTP，只服务一个指定连接；逐客户端令牌、限流、Host/Origin 校验与审计；只暴露 5 个只读工具，不注册写操作。
+- **脱敏导出**：按列确定性脱敏，PII 列必须显式配置规则，先预览再导出 CSV/SQL；支持有界外键子集导出，父子键脱敏后仍可关联。
+
 ### Visual EXPLAIN / 可视化执行计划
 
 ![Execution plan tree with warnings and node details](resources/screenshots/07-explain.png)
