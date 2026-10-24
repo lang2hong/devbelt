@@ -3,6 +3,12 @@ import type { BuiltinRule, MaskingRule } from './mask.js';
 export interface TableMaskingConfig {
   /** Raw WHERE clause (workspace-authored, not model-generated). */
   where?: string;
+  /** Pull in rows this table references (parents). */
+  referenced?: boolean;
+  /** Pull in rows that reference this table (children). */
+  referencing?: boolean;
+  /** How many FK hops to expand (1-5). */
+  maxDepth?: number;
   columns?: Record<string, MaskingRule>;
   /** Columns allowed to leave unmasked even when the name looks like PII. */
   allowUnmasked?: string[];
@@ -11,6 +17,8 @@ export interface TableMaskingConfig {
 export interface MaskingConfig {
   version: 1;
   tables: Record<string, TableMaskingConfig>;
+  /** Total row budget across all exported tables (default 10 000). */
+  maxRowsTotal?: number;
 }
 
 export type ConfigResult = { ok: true; config: MaskingConfig } | { ok: false; errors: string[] };
@@ -39,6 +47,17 @@ export function parseMaskingConfig(raw: unknown): ConfigResult {
       if (typeof entry.where !== 'string' || entry.where.trim() === '') errors.push(`${table}.where must be a non-empty string`);
       else out.where = entry.where;
     }
+    for (const flag of ['referenced', 'referencing'] as const) {
+      if (entry[flag] !== undefined) {
+        if (typeof entry[flag] !== 'boolean') errors.push(`${table}.${flag} must be a boolean`);
+        else out[flag] = entry[flag] as boolean;
+      }
+    }
+    if (entry.maxDepth !== undefined) {
+      if (typeof entry.maxDepth !== 'number' || !Number.isInteger(entry.maxDepth) || entry.maxDepth < 1 || entry.maxDepth > 5) {
+        errors.push(`${table}.maxDepth must be an integer in [1, 5]`);
+      } else out.maxDepth = entry.maxDepth;
+    }
     if (entry.allowUnmasked !== undefined) {
       if (!Array.isArray(entry.allowUnmasked) || !entry.allowUnmasked.every((c) => typeof c === 'string')) {
         errors.push(`${table}.allowUnmasked must be a string array`);
@@ -59,7 +78,13 @@ export function parseMaskingConfig(raw: unknown): ConfigResult {
     }
     tables[table] = out;
   }
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, config: { version: 1, tables } };
+  let maxRowsTotal: number | undefined;
+  if (body.maxRowsTotal !== undefined) {
+    if (typeof body.maxRowsTotal !== 'number' || !Number.isInteger(body.maxRowsTotal) || body.maxRowsTotal < 1) {
+      errors.push('maxRowsTotal must be a positive integer');
+    } else maxRowsTotal = body.maxRowsTotal;
+  }
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, config: { version: 1, tables, ...(maxRowsTotal !== undefined ? { maxRowsTotal } : {}) } };
 }
 
 function parseRule(raw: unknown, where: string, errors: string[]): MaskingRule | undefined {

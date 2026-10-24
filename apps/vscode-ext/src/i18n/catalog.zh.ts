@@ -1710,6 +1710,8 @@ export const zh: MessageCatalog = {
   'masking.configInvalid': '脱敏规则无效：{errors}',
   'masking.tableMissing': '规则文件里没有表 {table} 的列规则。',
   'masking.confirm': '导出脱敏数据',
+  'masking.subsetConfirm': '导出脱敏子集',
+  'masking.subsetDetail': '包含表：{tables}；共 {rows} 行。外键两侧使用同一脱敏域。',
   'masking.confirmDetail': '表 {table}，预览 {rows} 行。确认后选择保存位置；导出内容已按规则脱敏。',
   'masking.run': '继续导出',
   'masking.done': '已导出 {rows} 行到 {file}',

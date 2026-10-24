@@ -1732,6 +1732,8 @@ export const en: MessageCatalog = {
   'masking.configInvalid': 'Invalid masking rules: {errors}',
   'masking.tableMissing': 'No column rules for table {table}.',
   'masking.confirm': 'Export masked data',
+  'masking.subsetConfirm': 'Export masked subset',
+  'masking.subsetDetail': 'Tables: {tables}; {rows} row(s). Both sides of each foreign key share one masking domain.',
   'masking.confirmDetail': 'Table {table}, preview {rows} row(s). Choose a destination next; the export is already masked.',
   'masking.run': 'Continue',
   'masking.done': 'Exported {rows} row(s) to {file}',

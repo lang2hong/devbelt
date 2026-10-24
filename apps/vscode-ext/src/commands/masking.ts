@@ -2,18 +2,19 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { DatabaseType } from '@devbelt/db-core';
-import { parseMaskingConfig, type TableMaskingConfig } from '@devbelt/masking-core';
+import { parseMaskingConfig, type MaskingConfig, type TableMaskingConfig } from '@devbelt/masking-core';
 import type { Deps, Sub } from './shared';
 import { pgSchemaFor } from '../utils/sql';
 import { l10n } from '../i18n';
 import { getProjectSalt } from '../masking/salt';
 import { exportMaskedTable, readMaskedRows, type MaskedExportDeps } from '../masking/export';
+import { collectMaskedSubset, writeSubsetSql, type SubsetExportDeps } from '../masking/subset';
 
 function safeStem(name: string): string {
   return name.replace(/[\\/:*?"<>|\s]+/g, '_').replace(/^_+|_+$/g, '') || 'table';
 }
 
-async function readConfig(table: string): Promise<{ ok: true; table: TableMaskingConfig } | { ok: false; message: string }> {
+async function readConfig(table: string): Promise<{ ok: true; table: TableMaskingConfig; config: MaskingConfig } | { ok: false; message: string }> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return { ok: false, message: l10n('masking.noWorkspace') };
   const rel = vscode.workspace.getConfiguration('devbelt').get<string>('masking.configPath', '.devbelt-mask.json');
@@ -26,7 +27,7 @@ async function readConfig(table: string): Promise<{ ok: true; table: TableMaskin
   }
   const parsed = parseMaskingConfig(raw);
   if (!parsed.ok) return { ok: false, message: l10n('masking.configInvalid', { errors: parsed.errors.join('; ') }) };
-  return { ok: true, table: parsed.config.tables[table] ?? {} };
+  return { ok: true, table: parsed.config.tables[table] ?? {}, config: parsed.config };
 }
 
 export function registerMaskingCommands(deps: Deps, sub: Sub): void {
@@ -70,6 +71,39 @@ export function registerMaskingCommands(deps: Deps, sub: Sub): void {
         salt,
         maxRows: 100_000,
       };
+
+      const subset = entry.referenced === true || entry.referencing === true;
+      if (subset) {
+        const subsetDeps: SubsetExportDeps = {
+          query: opened.session.query,
+          dialect: opened.session.query.dialect,
+          metadata: opened.session.metadata,
+          ...(database ? { database } : {}),
+          ...(schema ? { schema } : {}),
+          config: config.config,
+          salt,
+          rootTable: table,
+        };
+        const result = await collectMaskedSubset(subsetDeps);
+        const summary = result.tables.map((t) => `${t.name} (${t.rows.length})`).join(', ');
+        const proceed = await vscode.window.showWarningMessage(
+          l10n('masking.subsetConfirm'),
+          { modal: true, detail: l10n('masking.subsetDetail', { tables: summary, rows: String(result.rows) }) },
+          l10n('masking.run'),
+        );
+        if (proceed !== l10n('masking.run')) return;
+        const base = vscode.workspace.workspaceFolders?.[0]?.uri;
+        const uri = await vscode.window.showSaveDialog({
+          defaultUri: base
+            ? vscode.Uri.joinPath(base, `${safeStem(table)}-subset-masked.sql`)
+            : vscode.Uri.file(`${safeStem(table)}-subset-masked.sql`),
+          filters: { SQL: ['sql'] },
+        });
+        if (!uri) return;
+        await writeSubsetSql(subsetDeps, result, uri.fsPath);
+        void vscode.window.showInformationMessage(l10n('masking.done', { rows: String(result.rows), file: uri.fsPath }));
+        return;
+      }
 
       const preview = await readMaskedRows(exportDeps, 20);
       const previewText = [
