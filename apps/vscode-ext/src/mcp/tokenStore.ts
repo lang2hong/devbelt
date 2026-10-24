@@ -40,6 +40,15 @@ export class McpTokenStore {
     return { client, token };
   }
 
+  /** Issue a new secret for an existing client; the old one stops working immediately. */
+  async rotate(id: string): Promise<{ client: McpClientToken; token: string } | undefined> {
+    const client = this.list().find((c) => c.id === id);
+    if (!client) return undefined;
+    const token = randomBytes(32).toString('base64url');
+    await this.secrets.store(`${SECRET_PREFIX}${client.id}`, hash(token));
+    return { client, token };
+  }
+
   async revoke(id: string): Promise<void> {
     await this.secrets.delete(`${SECRET_PREFIX}${id}`);
     await this.memento.update(INDEX_KEY, this.list().filter((c) => c.id !== id));

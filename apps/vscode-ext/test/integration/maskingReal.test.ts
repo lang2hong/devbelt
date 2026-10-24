@@ -68,6 +68,25 @@ describe.skipIf(!HAS_SQLITE)('masked subset on real SQLite', () => {
     expect(String(users.rows[0]!.email)).not.toContain('a@x.test');
   });
 
+  it('refuses a large subset when the row budget is exceeded', async () => {
+    const { q, metadata, file } = await sqliteDb();
+    const bulk = spawnSync('sqlite3', [file, `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 300)
+      INSERT INTO orders (id, user_id, note) SELECT 1000+x, 1, 'bulk' FROM n;`]);
+    expect(bulk.status).toBe(0);
+    const parsed = parseMaskingConfig({
+      version: 1,
+      maxRowsTotal: 100,
+      tables: {
+        orders: { where: 'id > 0', referenced: true, columns: {} },
+        users: { columns: { id: 'hash', email: 'email' } },
+      },
+    });
+    if (!parsed.ok) throw new Error(parsed.errors.join(','));
+    await expect(collectMaskedSubset({
+      query: q, dialect: q.dialect, metadata, config: parsed.config, salt: 's', rootTable: 'orders',
+    })).rejects.toThrow(/more than 100|budget/i);
+  });
+
   it('refuses when a pulled-in table has PII and no rule', async () => {
     const { q, metadata } = await sqliteDb();
     await expect(collectMaskedSubset({

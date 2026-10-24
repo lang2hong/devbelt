@@ -34,6 +34,16 @@ describe('McpTokenStore', () => {
     expect(tokens.list()).toEqual([]);
   });
 
+  it('rotates a token: the old one stops working, the new one works', async () => {
+    const { tokens } = store();
+    const { client, token } = await tokens.create('A');
+    const rotated = await tokens.rotate(client.id);
+    expect(rotated?.client).toEqual(client);
+    await expect(tokens.verify(token)).resolves.toBeUndefined();
+    await expect(tokens.verify(rotated!.token)).resolves.toBe(client.id);
+    await expect(tokens.rotate('missing')).resolves.toBeUndefined();
+  });
+
   it('keeps other clients valid when one is revoked', async () => {
     const { tokens } = store();
     const a = await tokens.create('A');
