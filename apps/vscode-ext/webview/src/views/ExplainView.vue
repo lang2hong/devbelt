@@ -36,6 +36,18 @@ const visibleRows = computed(() =>
 const selectedNode = computed<ExplainPlanNode | undefined>(() =>
   currentPlan.value ? findPlanNode(currentPlan.value.roots, selectedId.value) : undefined,
 );
+const planTableRows = computed(() => {
+  if (!currentPlan.value) return [] as Array<{ depth: number; node: ExplainPlanNode }>;
+  const out: Array<{ depth: number; node: ExplainPlanNode }> = [];
+  const walk = (nodes: ExplainPlanNode[], depth: number): void => {
+    for (const node of nodes) {
+      out.push({ depth, node });
+      walk(node.children, depth + 1);
+    }
+  };
+  walk(currentPlan.value.roots, 0);
+  return out;
+});
 const rawText = computed(() => {
   const source = current.value?.plan ? current.value.plan.raw : current.value?.fallback?.rows;
   if (source == null || (Array.isArray(source) && source.length === 0)) return '';
@@ -279,6 +291,38 @@ onUnmounted(() => {
         <div class="muted">{{ t('wv.explain.fallbackReason', { reason: current.fallback.reason }) }}</div>
         <div v-if="current.rawTruncated" class="muted">{{ t('wv.explain.rawTruncated') }}</div>
         <pre>{{ current.fallback.text || rawText }}</pre>
+      </div>
+
+      <div v-if="currentPlan && planTableRows.length" class="plan-table">
+        <h4>{{ t('wv.explain.tableTitle') }}</h4>
+        <table>
+          <thead><tr>
+            <th>{{ t('wv.explain.col.operation') }}</th>
+            <th>{{ t('wv.explain.col.object') }}</th>
+            <th>{{ t('wv.explain.col.index') }}</th>
+            <th>{{ t('wv.explain.col.estRows') }}</th>
+            <th>{{ t('wv.explain.col.actualRows') }}</th>
+            <th>{{ t('wv.explain.col.actualTime') }}</th>
+            <th>{{ t('wv.explain.col.loops') }}</th>
+            <th>{{ t('wv.explain.col.warnings') }}</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="(row, i) in planTableRows" :key="i">
+              <td :style="{ paddingLeft: (row.depth * 12 + 6) + 'px' }">{{ row.node.operation }}</td>
+              <td>{{ row.node.object ?? '' }}</td>
+              <td>{{ row.node.index ?? '' }}</td>
+              <td>{{ row.node.estimatedRows ?? '' }}</td>
+              <td>{{ row.node.actualRows ?? '' }}</td>
+              <td>{{ row.node.actualTimeMs != null ? row.node.actualTimeMs.toFixed(3) : '' }}</td>
+              <td>{{ row.node.loops ?? '' }}</td>
+              <td>{{ row.node.warnings.map((w) => t(warningLabel(w))).join(', ') }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-if="current?.sql" class="sql-view">
+        <h4>{{ t('wv.explain.sqlTitle') }}</h4>
+        <pre>{{ current.sql }}</pre>
       </div>
 
       <div v-if="currentPlan" class="raw">
