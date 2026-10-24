@@ -356,7 +356,7 @@ jobs:
 
       # 扩展 bundle（out/）+ webview dist 必须先就绪，vsce 才能打进 vsix。
       - name: Build extension
-        run: pnpm -C packages/db-core build && pnpm -C packages/ai-core build && pnpm -C packages/agent-core build && pnpm -C packages/db-host build && pnpm -C packages/explain-core build && pnpm -C apps/vscode-ext build
+        run: pnpm -C packages/db-core build && pnpm -C packages/ai-core build && pnpm -C packages/agent-core build && pnpm -C packages/db-host build && pnpm -C packages/explain-core build && pnpm -C packages/masking-core build && pnpm -C apps/vscode-ext build
 
       - name: Run VSIX install smoke
         run: xvfb-run -a pnpm -C apps/vscode-ext vsix:smoke

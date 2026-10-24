@@ -23,6 +23,7 @@
   "cmd.mcpDisable": "MCP：停用服务",
   "cmd.mcpCopyClientConfig": "MCP：复制客户端配置",
   "cmd.mcpRevokeClient": "MCP：撤销客户端令牌",
+  "cmd.exportMasked": "导出脱敏数据",
   "cmd.updateCell": "更新单元格",
   "cmd.explorerMenu": "更多操作",
   "cmd.authenticator": "验证器",

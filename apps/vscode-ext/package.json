@@ -326,6 +326,11 @@
         "category": "DevBelt"
       },
       {
+        "command": "devbelt.exportMasked",
+        "title": "%cmd.exportMasked%",
+        "category": "DevBelt"
+      },
+      {
         "command": "devbelt.mcp.copyClientConfig",
         "title": "%cmd.mcpCopyClientConfig%",
         "category": "DevBelt"
@@ -2539,6 +2544,12 @@
           "description": "Row limit for MCP read-only queries.",
           "markdownDescription": "MCP 只读查询的最大返回行数。"
         },
+        "devbelt.masking.configPath": {
+          "type": "string",
+          "default": ".devbelt-mask.json",
+          "description": "Workspace-relative path of the masking rules file.",
+          "markdownDescription": "脱敏规则文件路径（相对工作区，默认 `.devbelt-mask.json`）。"
+        },
         "devbelt.ai.temperature": {
           "type": "number",
           "default": 0.2,
@@ -2690,7 +2701,7 @@
     "dev:webview": "cd webview && npx vite build --watch",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "pnpm -C ../../packages/db-core build && pnpm -C ../../packages/ai-core build && pnpm -C ../../packages/agent-core build && pnpm -C ../../packages/db-host build && pnpm -C ../../packages/explain-core build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
+    "test": "pnpm -C ../../packages/db-core build && pnpm -C ../../packages/ai-core build && pnpm -C ../../packages/agent-core build && pnpm -C ../../packages/db-host build && pnpm -C ../../packages/explain-core build && pnpm -C ../../packages/masking-core build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
     "package": "vsce package --no-dependencies",
     "vsix:smoke": "node scripts/vsix-smoke.mjs"
   },
@@ -2703,7 +2714,8 @@
     "jsqr": "^1.4.0",
     "pngjs": "^7.0.0",
     "ssh2": "^1.16.1",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "@devbelt/masking-core": "workspace:*"
   },
   "devDependencies": {
     "@devbelt/ai-core": "workspace:*",

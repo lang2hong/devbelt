@@ -13,6 +13,7 @@ import { registerDdlCommands } from './commands/ddl';
 import { registerSearchCommands } from './commands/search';
 import { registerAuthenticatorCommands } from './commands/authenticator';
 import { registerDictionaryCommands } from './commands/dictionary';
+import { registerMaskingCommands } from './commands/masking';
 import { buildExplorerMenu, EXPLORER_MENU_COMMANDS } from './commands/explorerMenu';
 import { l10n } from './i18n';
 
@@ -32,6 +33,7 @@ export function registerCommands(deps: Deps): void {
   registerSearchCommands(deps, sub);
   registerAuthenticatorCommands(deps, sub);
   registerDictionaryCommands(deps, sub);
+  registerMaskingCommands(deps, sub);
   sub('devbelt.explorerMenu', async () => {
     const loggedIn = deps.auth.isLoggedIn();
     const session = loggedIn ? await deps.syncFactory.ensureSession().catch(() => undefined) : undefined;

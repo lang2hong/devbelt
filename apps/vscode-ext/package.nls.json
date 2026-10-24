@@ -23,6 +23,7 @@
   "cmd.mcpDisable": "MCP: Disable Server",
   "cmd.mcpCopyClientConfig": "MCP: Copy Client Config",
   "cmd.mcpRevokeClient": "MCP: Revoke Client Token",
+  "cmd.exportMasked": "Export Masked Data",
   "cmd.updateCell": "Update Cell",
   "cmd.explorerMenu": "More Actions",
   "cmd.authenticator": "Authenticator",
