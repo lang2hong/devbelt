@@ -2,7 +2,7 @@
   "name": "devbelt-db-client",
   "displayName": "DevBelt DB Client",
   "description": "DevBelt — database development inside VS Code. SQL for MySQL, PostgreSQL and SQLite, plus Redis, Elasticsearch, AI assistance, schema tools, SSH tunnels and end-to-end encrypted sync.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "lang2hong",
   "license": "MIT",
   "icon": "resources/icon.png",

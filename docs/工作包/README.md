@@ -26,7 +26,7 @@
 | P8 | [Elasticsearch 客户端](P8-Elasticsearch客户端.md) | 当前（待手工矩阵） |
 | P9 | [AI 能力](P9-AI.md) | 当前（待发布硬门禁） |
 | P10 | [Insight（0.2.0）](P10-Insight.md) | 计划（已细化） |
-| P12 | [Agent（0.3.0）](P12-Agent.md) | 计划（待审阅） |
+| P12 | [Agent（0.3.0）](P12-Agent.md) | 实施完成，待验收（阶段 11） |
 
 ## 规则
 

@@ -4,9 +4,19 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
-## [Unreleased]
+## [0.3.0] - 2026-10-24
 
 ### English
+
+#### Added
+
+- **Agent mode in AI Chat** (off by default): schema inspection, read-only SQL and plain EXPLAIN in a step-by-step loop, with step limits, cancellation and a fallback to plain chat when the model does not support tool calling.
+- **Approval-gated writes**: the agent can propose one DML or DDL statement; a native modal shows the target, SQL, dry-run impact and irreversibility, and only an approved statement is executed. MySQL/PG DML is dry-run inside a rolled-back transaction; triggers, DDL and SQLite never run a dry run.
+- **Execution ledger**: every write approval and result is appended to `<globalStorage>/agent/ledger.jsonl` with fsync; `PROPOSED`/`EXECUTING` failures block the operation, interrupted executions recover as `UNKNOWN`.
+- **MCP server** (off by default): loopback-only Streamable HTTP with per-client bearer tokens, rate limits, Host/Origin checks and an audit log; exposes the five read-only tools for one configured connection.
+- **Masked export**: deterministic column masking (email/phone/name/address/idCard/bankCard/redact/null/fixed/regex/hash), PII columns require an explicit rule, preview before export, CSV/SQL output, atomic writes.
+- **Foreign-key subset export**: bounded `referenced`/`referencing` closure with depth and row limits, single-column keys only, dependency-ordered SQL, and shared masking domains so masked keys still match.
+- Settings: `devbelt.agent.*`, `devbelt.mcp.*`, `devbelt.masking.configPath`.
 
 #### Changed
 
@@ -21,6 +31,16 @@ All notable changes to DevBelt DB Client are documented in this file.
 - SQLite result cells show a stored line break as `\n`; the stored value is correct. This display behaviour is unchanged from earlier versions.
 
 ### 中文
+
+#### 新增
+
+- **AI Chat 的 Agent 模式**（默认关闭）：查 Schema、跑只读 SQL 与普通 EXPLAIN，逐步展示；带步数上限、取消，以及模型不支持工具调用时退回普通问答。
+- **写操作审批**：Agent 只能提出单条 DML / DDL；原生模态框展示目标、SQL、dry-run 影响与不可回滚提示，只有批准后才执行。MySQL / PG 的 DML 在事务内试执行后回滚；有触发器、DDL、SQLite 不做试执行。
+- **安全执行账本**：每次写审批与结果追加到 `<globalStorage>/agent/ledger.jsonl` 并 fsync；`PROPOSED` / `EXECUTING` 写入失败会阻断操作，异常中断的执行恢复为 `UNKNOWN`。
+- **MCP Server**（默认关闭）：仅监听本机的 Streamable HTTP，逐客户端令牌、限流、Host / Origin 校验与审计；只为所选连接暴露 5 个只读工具。
+- **脱敏导出**：确定性列脱敏（email/phone/name/address/idCard/bankCard/redact/null/fixed/regex/hash），PII 列必须显式配置规则，导出前预览，支持 CSV / SQL，原子写入。
+- **外键子集导出**：受限的 `referenced` / `referencing` 闭包，带深度与行数上限；只支持单列键，按依赖顺序生成 SQL，父子键共享脱敏域。
+- 设置：`devbelt.agent.*`、`devbelt.mcp.*`、`devbelt.masking.configPath`。
 
 #### 变更
 

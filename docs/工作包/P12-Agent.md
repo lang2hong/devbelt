@@ -445,7 +445,13 @@ dry-run 必须限制持锁时间；失败或超时立即回滚并报告。触发
 - **阶段 1–3 已完成**：`packages/agent-core` 的工具契约 / 风险分级 / Proposal 状态机（`c8e9cd9`）、append-only JSONL 安全执行账本（同提交）、Tool Result Sanitizer 与宿主调用校验（`24f7ea3`）。单元测试 94 个。
 - **阶段 4a 已完成**（`0674bc7`）：`ConnectionConfig.readOnly` 贯通到驱动；MySQL `SET SESSION TRANSACTION READ ONLY`、PostgreSQL `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`、SQLite `.open --readonly` + `PRAGMA query_only=ON`，设置失败即建连失败。SQLite 查询改为单行发送并拒绝点命令（原实现可被 CLI 的 `#` / `GO` / `[…]` 行规则绕过）。真库验证：CI run `39934631173` 的 integration job 跑了 `readOnlyReal.test.ts` 4 例（MySQL / PG），`sqliteReadOnly.test.ts` 11 例（本地与 CI）全部通过。
 - **阶段 4b 已完成**（`a0e4351` + `d20d58f`）：`checkReadOnlySql` 单语句 / 读形态 / 关键字与副作用函数黑名单；`runReadOnlyQuery` / `explainReadOnly` 每次调用进入只读事务（PG `BEGIN READ ONLY`、MySQL `START TRANSACTION READ ONLY`，SQLite 要求只读会话），结果经 Sanitizer。CI run `39944715726` 的 integration job 中 `Integration tests (agent-core)` 执行了 9 个用例（MySQL 3 / PG 4 / SQLite 2）并全部通过。同一 run 的 build (22) 暴露了 SQLite 驱动的既有竞态：`-bail` 下 CLI 报错退出时 stdin 的 EPIPE 可能先于 stderr 到达，调用方拿到 `write EPIPE` 而不是 SQL 错误。已在 `d20d58f` 修复（等进程 `close` 再结算，2 秒兜底），本地回归测试与 SQLite 真库用例连跑 20 次通过；**该修复尚未在 CI 复验**。
-- **未完成**：阶段 5 起（tool calling、IDE Agent、W2/W3、MCP、脱敏）以及阶段 10–11 的完整矩阵、i18n、VSIX smoke 与截图。
+- **阶段 5（2026-10-24）**：`ai-core` 与客户端 / 服务端代理支持 tools、tool_choice、tool_calls 与流式增量，旧请求体不变。
+- **阶段 6**：AI Chat 增加 Agent 模式（5 个只读工具、步骤展示、停止、400 降级），默认关闭。
+- **阶段 7**：`propose_write` / `propose_ddl` 经原生模态框审批后执行；MySQL / PG dry-run 回滚，触发器 / DDL / SQLite 降级为静态预览；账本状态机与启动恢复已接。
+- **阶段 8**：loopback MCP Server（SDK 1.32.1），令牌、限流、Host/Origin 校验、审计；只读工具按连接白名单。
+- **阶段 9a / 9b**：确定性单表脱敏导出 + 受限 FK 闭包子集导出。
+- **阶段 10 已验证**：CI 真库覆盖连接只读、只读运行时、写 dry-run 回滚、批准后的 DML/DDL 执行、生产写拒绝、MCP SDK 客户端握手与调用、SQLite 脱敏闭包；i18n 键扫描与 package.nls 对齐；MCP 伪造 Host 拒绝。模型 tool calling 已用 `deepseek-v4.1-flash` 本地验证。
+- **未完成**：阶段 11（版本号、文档、截图、Marketplace）；人工走查；MySQL/PG 脱敏子集、账本崩溃恢复、执行中取消、大规模/跨平台、提示注入端到端等仍待补。
 
 4a 已知限制：
 
