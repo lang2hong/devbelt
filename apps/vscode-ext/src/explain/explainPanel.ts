@@ -17,6 +17,8 @@ import { buildExplainPlanMessages } from '@devbelt/ai-core';
 import { DEFAULT_FORMAT_MAX_CHARS, formatPlanText } from '@devbelt/explain-core';
 import { AiBridge } from '../ai/aiBridge';
 import { buildIndexSuggestions } from './indexSuggestions';
+import { buildAnalyzeQuery, supportsAnalyze } from './explainRunner';
+import { checkReadOnlySql } from '@devbelt/agent-core';
 import {
   buildExplainQuery,
   dialectFor,
@@ -125,6 +127,10 @@ export class ExplainPanel extends BaseWebView {
     }
     if (msg.type === 'copyText') {
       await vscode.env.clipboard.writeText(String(msg.text ?? ''));
+      return;
+    }
+    if (msg.type === 'analyze') {
+      void this.runAnalyze();
       return;
     }
     if (msg.type === 'aiExplain') {
@@ -241,6 +247,53 @@ export class ExplainPanel extends BaseWebView {
       suggestions: advice.suggestions,
       redundantIndexes: advice.redundant,
     });
+  }
+
+
+  /** EXPLAIN ANALYZE: executes one read-only statement after explicit confirmation. */
+  private async runAnalyze(): Promise<void> {
+    if (this.running || !supportsAnalyze(this.conn.dbType)) return;
+    const engine = this.conn.dbType === DatabaseType.PG ? 'PG' : 'MYSQL';
+    const statements = splitSqlStatements(this.sql, this.manager.scanOptionsFor?.(this.conn)).filter((s) => s.trim());
+    if (statements.length !== 1) {
+      this.post({ type: 'error', message: l10n('wv.explain.analyzeSingle') } as never);
+      return;
+    }
+    const statement = statements[0]!.trim();
+    const check = checkReadOnlySql(statement, engine);
+    if (!check.ok) {
+      this.post({ type: 'error', message: l10n('wv.explain.analyzeReadOnly') } as never);
+      return;
+    }
+    if (this.conn.environment === 'production' && !vscode.workspace.getConfiguration('devbelt').get<boolean>('explain.allowAnalyzeProduction', false)) {
+      this.post({ type: 'error', message: l10n('wv.explain.analyzeProduction') } as never);
+      return;
+    }
+    const run = l10n('wv.explain.analyzeRun');
+    const ok = await vscode.window.showWarningMessage(l10n('wv.explain.analyzeConfirm'), { modal: true, detail: statement }, run);
+    if (ok !== run) return;
+    this.running = true;
+    this.generation += 1;
+    this.post({ type: 'explainRunning' } as never);
+    try {
+      const session = await this.manager.connectSql(this.conn, this.database);
+      if (this.database && this.conn.dbType === DatabaseType.MYSQL) {
+        await session.query.query(`USE ${session.query.wrap(validateIdent(this.database))}`, undefined, { skipHistory: true });
+      }
+      const { sql, textOnly } = buildAnalyzeQuery(this.conn.dbType, statement);
+      const result = await session.query.query(sql);
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      const parsed = textOnly ? undefined : parseExplainRows(this.conn.dbType === DatabaseType.PG ? 'postgres' : 'mysql', rows);
+      const payload: ExplainStatementView = parsed?.ok
+        ? { sql: statement, plan: { ...parsed.plan, raw: rows } }
+        : { sql: statement, plan: null, fallback: { reason: 'analyze', rows, text: rows.map((r) => typeof r === 'string' ? r : JSON.stringify(r)).join('\n') } };
+      this.lastStatements = [payload];
+      this.post({ type: 'explainPlan', statements: [payload] } as never);
+    } catch (err) {
+      this.post({ type: 'error', message: (err as Error)?.message ?? String(err) } as never);
+    } finally {
+      this.running = false;
+    }
   }
 
   private async run(): Promise<void> {

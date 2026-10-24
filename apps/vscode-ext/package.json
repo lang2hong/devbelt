@@ -2325,6 +2325,12 @@
           },
           "additionalProperties": false
         },
+        "devbelt.explain.allowAnalyzeProduction": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow EXPLAIN ANALYZE on production connections. It really executes the query.",
+          "markdownDescription": "允许在生产连接上执行 EXPLAIN ANALYZE（会真实执行查询，默认拒绝）。"
+        },
         "devbelt.sql.queryTimeoutSeconds": {
           "type": "number",
           "default": 300,

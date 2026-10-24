@@ -47,6 +47,17 @@ export function buildExplainQuery(dbType: DatabaseType, statement: string): Expl
   }
 }
 
+export function supportsAnalyze(dbType: DatabaseType): boolean {
+  return dbType === DatabaseType.MYSQL || dbType === DatabaseType.PG;
+}
+
+/** EXPLAIN ANALYZE really executes the statement; callers must gate and confirm. */
+export function buildAnalyzeQuery(dbType: DatabaseType, statement: string): { sql: string; textOnly: boolean } {
+  if (dbType === DatabaseType.PG) return { sql: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${statement}`, textOnly: false };
+  if (dbType === DatabaseType.MYSQL) return { sql: `EXPLAIN ANALYZE ${statement}`, textOnly: true };
+  throw new Error(`EXPLAIN ANALYZE is not supported for ${dbType}`);
+}
+
 export function shouldSkipExplain(statement: string, scanOptions?: SqlScanOptions): boolean {
   return classifyWriteKind(statement, scanOptions) === 'ddl';
 }

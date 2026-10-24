@@ -127,6 +127,7 @@ onUnmounted(() => {
       <button class="btn" :disabled="running" @click="rerun">{{ t('wv.explain.rerun') }}</button>
       <button v-if="canAiExplain" class="btn" :disabled="running" @click="aiExplain">{{ t('wv.explain.aiExplain') }}</button>
       <button class="btn" :disabled="!rawText" @click="copyRaw">{{ t('wv.explain.copyRaw') }}</button>
+      <button class="btn" :title="t('wv.explain.analyzeHint')" @click="post({ type: 'analyze' })">{{ t('wv.explain.analyze') }}</button>
       <span v-if="copied" class="copied">{{ t('wv.explain.copied') }}</span>
     </div>
 

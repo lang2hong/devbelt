@@ -127,6 +127,8 @@ export type ExplainUpMessage =
   | { type: 'ready'; __load?: string }
   | { type: 'rerun' }
   | { type: 'copyText'; text: string }
+  /** 执行 EXPLAIN ANALYZE（真实运行只读查询）。 */
+  | { type: 'analyze' }
   /** 让 AI 解释计划；index 为当前语句标签（缺省 0）。 */
   | { type: 'aiExplain'; index?: number };
 
