@@ -12,6 +12,8 @@ export interface ExplainPlanStatementInput {
 export interface ExplainPlanInput {
   statements: ExplainPlanStatementInput[];
   dbType?: string;
+  /** Force the reply language; without it the model follows the English task text. */
+  language?: 'zh' | 'en';
 }
 
 /**
@@ -33,6 +35,7 @@ export function buildExplainPlanMessages(input: ExplainPlanInput): ChatMessage[]
   return withSystem(
     joinSections([
       'Task: explain the execution plan below in plain language. Say why the query may be slow, point out the most expensive or risky steps, and list concrete improvements in priority order (indexes, predicate/join rewrites).',
+      input.language === 'zh' ? 'Reply in Simplified Chinese regardless of the language of these instructions.' : undefined,
       ...blocks,
       dialectLine(input.dbType),
       'Base every claim on the plan shown; if information is missing, say so instead of guessing. These are suggestions only — nothing will be executed. Wrap any proposed SQL in ```sql blocks.',

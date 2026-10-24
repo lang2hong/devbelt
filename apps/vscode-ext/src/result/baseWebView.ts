@@ -87,8 +87,8 @@ export abstract class BaseWebView {
   }
 
   /** 聚焦/前置该面板（同键面板复用时不重复创建）。 */
-  reveal(): void {
-    this.panel.reveal();
+  reveal(column?: vscode.ViewColumn): void {
+    this.panel.reveal(column);
   }
 
   /** 面板销毁回调（子类可 override 做清理） */

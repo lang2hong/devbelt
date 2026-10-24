@@ -3,7 +3,7 @@ import { DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-co
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import type { ConnectionManager } from '../connection/connectionManager';
 import { BaseWebView } from '../result/baseWebView';
-import { l10n } from '../i18n';
+import { isZh, l10n } from '../i18n';
 import { splitSqlStatements } from '../utils/sql';
 import { confirmSqlExecution } from '../utils/sqlSafety';
 import { containsSecretSql } from '../utils/sqlSecret';
@@ -80,7 +80,7 @@ export class ExplainPanel extends BaseWebView {
       // 作废在途结果：它属于上一条 SQL。
       existing.generation += 1;
       existing.pendingRun = true;
-      existing.reveal();
+      existing.reveal(vscode.ViewColumn.Beside);
       if (existing.webviewReady && !existing.running) {
         existing.pendingRun = false;
         void existing.run();
@@ -165,6 +165,7 @@ export class ExplainPanel extends BaseWebView {
           ...(fallbackText ? { fallbackText } : {}),
         }],
         dbType: String(this.conn.dbType),
+        language: isZh() ? 'zh' : 'en',
       }),
       title: l10n('ai.scenario.explainPlan'),
       connName: this.conn.name || this.conn.host,
