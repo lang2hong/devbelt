@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { request as httpRequest } from 'node:http';
 import { DatabaseType } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { McpServerHost } from '../../src/mcp/server';
@@ -58,6 +59,20 @@ describe('McpServerHost', () => {
     const { token } = await store.create('t');
     expect((await fetch(endpoint, { method: 'POST', headers: { Authorization: 'Bearer wrong', 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(401);
     expect(token).toBeTruthy();
+  });
+
+  it('rejects a forged Host header', async () => {
+    const { endpoint } = await start();
+    const port = Number(new URL(endpoint).port);
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest({ host: '127.0.0.1', port, path: '/mcp', method: 'POST', headers: { Host: 'evil.test', 'Content-Type': 'application/json' } }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on('error', reject);
+      req.end('{}');
+    });
+    expect(status).toBe(403);
   });
 
   it('is loopback-only and reports an endpoint', async () => {
