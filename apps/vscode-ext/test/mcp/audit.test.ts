@@ -32,6 +32,15 @@ describe('McpAuditLog', () => {
     expect(await audit.read()).toEqual([]);
   });
 
+  it('does not throw when the audit file cannot be written', async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), 'mcp-audit-fail-'));
+    dirs.push(dir);
+    const blocker = join(dir, 'not-a-dir');
+    await fs.writeFile(blocker, 'x');
+    const audit = new McpAuditLog(join(blocker, 'audit.jsonl'));
+    await expect(audit.append({ at: 1, clientId: 'c', tool: 'list_tables', connectionId: 'db', result: 'ok', durationMs: 1 })).resolves.toBeUndefined();
+  });
+
   it('never records SQL or result rows (schema is fixed)', async () => {
     const { audit, file } = await log();
     await audit.append({ at: 1, clientId: 'c', tool: 'run_read_only_query', connectionId: 'db', result: 'ok', durationMs: 1 });
