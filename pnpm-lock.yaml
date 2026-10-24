@@ -210,6 +210,9 @@ importers:
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0
+      sql-formatter:
+        specifier: ^15.8.2
+        version: 15.8.2
       ssh2:
         specifier: ^1.16.1
         version: 1.17.0
@@ -259,9 +262,6 @@ importers:
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
-      sql-formatter:
-        specifier: ^15.8.2
-        version: 15.8.2
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

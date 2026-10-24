@@ -111,6 +111,10 @@ export interface RedundantIndexView {
 /** 一条 EXPLAIN 语句的结果：plan 与 fallback 二选一。 */
 export interface ExplainStatementView {
   sql: string;
+  /** 按方言格式化后的 SQL（仅展示；格式化失败时缺省）。 */
+  formattedSql?: string;
+  /** MySQL 传统 `EXPLAIN` 的原始行（id / select_type / … / Extra），供经典表格；取不到时缺省。 */
+  classicRows?: Array<Record<string, unknown>>;
   plan: ExplainPlan | null;
   fallback?: ExplainFallbackView;
   /** 原始计划超过消息上限被省略（计划树仍完整）。 */
@@ -129,15 +133,24 @@ export type ExplainUpMessage =
   | { type: 'copyText'; text: string }
   /** 执行 EXPLAIN ANALYZE（真实运行只读查询）。 */
   | { type: 'analyze' }
+  /** 取消在途的 EXPLAIN ANALYZE。 */
+  | { type: 'analyzeCancel' }
   /** 让 AI 解释计划；index 为当前语句标签（缺省 0）。 */
   | { type: 'aiExplain'; index?: number };
 
 /** Extension Host → webview。 */
 export type ExplainDownMessage =
   | (WebviewInitMessage & { mode: 'explain' })
-  | { type: 'explainRunning' }
-  | { type: 'explainPlan'; statements: ExplainStatementView[] }
+  /** 第二次 ready 后下发：当前连接能否 Analyze。 */
+  | { type: 'explainContext'; analyzeSupported: boolean }
+  /** mode：estimate = 普通 EXPLAIN（不执行）；analyze = EXPLAIN ANALYZE（真实执行）。 */
+  | { type: 'explainRunning'; mode: ExplainRunMode }
+  | { type: 'explainPlan'; statements: ExplainStatementView[]; mode: ExplainRunMode }
+  /** 提示条：不替换当前计划（Analyze 被拒绝 / 取消 / 失败）。 */
+  | { type: 'explainNotice'; message: string }
   | { type: 'error'; message: string };
+
+export type ExplainRunMode = 'estimate' | 'analyze';
 
 // ────────────────────────── P10：慢查询分析 ──────────────────────────
 

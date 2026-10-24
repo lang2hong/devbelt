@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseType } from '@devbelt/db-core';
 import type { ExplainParseResult, ExplainPlan } from '@devbelt/explain-core';
 import {
+  buildAnalyzeQuery,
   buildExplainQuery,
   dialectFor,
   limitStatementPayload,
@@ -10,6 +11,7 @@ import {
   rawForDisplay,
   rowsToText,
   shouldSkipExplain,
+  supportsAnalyze,
 } from '../../src/explain/explainRunner';
 
 function fixture(name: string): unknown {
@@ -107,5 +109,14 @@ describe('explainRunner', () => {
     expect(fallback.rawTruncated).toBe(true);
     expect(fallback.fallback?.rows).toEqual([]);
     expect(fallback.fallback?.text.length).toBe(20);
+  });
+
+  it('builds EXPLAIN ANALYZE only for MySQL and PostgreSQL', () => {
+    expect(supportsAnalyze(DatabaseType.MYSQL)).toBe(true);
+    expect(supportsAnalyze(DatabaseType.PG)).toBe(true);
+    expect(supportsAnalyze(DatabaseType.SQLITE)).toBe(false);
+    expect(buildAnalyzeQuery(DatabaseType.PG, 'SELECT 1').sql).toBe('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT 1');
+    expect(buildAnalyzeQuery(DatabaseType.MYSQL, 'SELECT 1').sql).toBe('EXPLAIN ANALYZE SELECT 1');
+    expect(() => buildAnalyzeQuery(DatabaseType.SQLITE, 'SELECT 1')).toThrow();
   });
 });

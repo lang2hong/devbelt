@@ -51,10 +51,13 @@ export function supportsAnalyze(dbType: DatabaseType): boolean {
   return dbType === DatabaseType.MYSQL || dbType === DatabaseType.PG;
 }
 
-/** EXPLAIN ANALYZE really executes the statement; callers must gate and confirm. */
-export function buildAnalyzeQuery(dbType: DatabaseType, statement: string): { sql: string; textOnly: boolean } {
-  if (dbType === DatabaseType.PG) return { sql: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${statement}`, textOnly: false };
-  if (dbType === DatabaseType.MYSQL) return { sql: `EXPLAIN ANALYZE ${statement}`, textOnly: true };
+/**
+ * EXPLAIN ANALYZE really executes the statement; callers must gate and confirm.
+ * PostgreSQL returns a JSON plan; MySQL 8 only returns TREE text.
+ */
+export function buildAnalyzeQuery(dbType: DatabaseType, statement: string): { sql: string } {
+  if (dbType === DatabaseType.PG) return { sql: `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${statement}` };
+  if (dbType === DatabaseType.MYSQL) return { sql: `EXPLAIN ANALYZE ${statement}` };
   throw new Error(`EXPLAIN ANALYZE is not supported for ${dbType}`);
 }
 

@@ -5,14 +5,16 @@ const h = vi.hoisted(() => ({
   clipboard: vi.fn(async () => undefined),
   diag: vi.fn(),
   info: vi.fn(),
+  warn: vi.fn(async (..._args: unknown[]): Promise<string | undefined> => 'Run'),
+  config: {} as Record<string, unknown>,
   bridge: undefined as undefined | { requestChat: ReturnType<typeof vi.fn> },
 }));
 
 vi.mock('vscode', () => ({
   ViewColumn: { Beside: -2 },
-  workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
+  workspace: { getConfiguration: () => ({ get: (k: string, d: unknown) => (k in h.config ? h.config[k] : d) }) },
   env: { language: 'en', clipboard: { writeText: h.clipboard } },
-  window: { showInformationMessage: h.info },
+  window: { showInformationMessage: h.info, showWarningMessage: h.warn },
 }));
 
 vi.mock('../../src/ai/aiBridge', () => ({ AiBridge: { tryGet: () => h.bridge } }));
@@ -83,6 +85,8 @@ beforeEach(() => {
   h.clipboard.mockClear();
   h.diag.mockClear();
   h.info.mockClear();
+  h.warn.mockReset().mockResolvedValue('Run');
+  h.config = {};
   h.bridge = undefined;
 });
 
@@ -419,6 +423,179 @@ describe('ExplainPanel', () => {
       await mount(ExplainPanel.find('c1'));
       expect(manager.openIsolatedSql).not.toHaveBeenCalled();
       expect(manager.connectSql).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Analyze', () => {
+    const MYSQL_TREE = [{ EXPLAIN: '-> Table scan on users  (cost=500 rows=5000) (actual time=0.05..8.1 rows=5000 loops=1)\n' }];
+
+    async function mounted(handler: Handler, overrides: Record<string, unknown> = {}, sql = 'SELECT * FROM users') {
+      const made = makeManager(handler);
+      ExplainPanel.open(made.manager, conn(overrides), sql);
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      made.executed.length = 0;
+      view.post.mockClear();
+      return { view, ...made };
+    }
+
+    function notices(view: any): string[] {
+      return posts(view).filter((m) => m.type === 'explainNotice').map((m) => m.message);
+    }
+
+    it('tells the webview whether Analyze is available', async () => {
+      const { manager } = makeManager(() => [MYSQL_PLAN]);
+      ExplainPanel.open(manager, conn({ dbType: 'SQLITE' }), 'SELECT 1');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      expect(posts(view)).toContainEqual({ type: 'explainContext', analyzeSupported: false });
+    });
+
+    it('runs on an isolated read-only session and parses MySQL TREE output', async () => {
+      const { view, manager, executed } = await mounted((sql) => (sql.startsWith('EXPLAIN ANALYZE') ? MYSQL_TREE : []));
+      await view.handleMessage({ type: 'analyze' });
+
+      expect(h.warn).toHaveBeenCalledTimes(1);
+      expect(manager.openIsolatedSql).toHaveBeenCalledTimes(1);
+      // The mock isolated session quotes with "…"; the panel uses the session's own wrap().
+      expect(executed).toEqual(['SET SESSION TRANSACTION READ ONLY', 'USE "app"', 'EXPLAIN ANALYZE SELECT * FROM users']);
+      expect(manager.isolatedClose).toHaveBeenCalledTimes(1);
+      const plan = posts(view).find((m) => m.type === 'explainPlan');
+      expect(plan.mode).toBe('analyze');
+      expect(plan.statements[0].plan.roots[0]).toMatchObject({ operation: 'Table scan', object: 'users', actualRows: 5000 });
+      expect(typeof plan.statements[0].plan.raw).toBe('string');
+    });
+
+    it('uses ANALYZE, BUFFERS, FORMAT JSON on PostgreSQL', async () => {
+      const PG = [{ Plan: { 'Node Type': 'Seq Scan', 'Relation Name': 'orders', 'Plan Rows': 10, 'Actual Rows': 9 }, 'Execution Time': 1.5 }];
+      const { view, executed } = await mounted(() => PG, { dbType: 'PG' });
+      await view.handleMessage({ type: 'analyze' });
+      expect(executed[0]).toBe('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY');
+      expect(executed).toContain('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT * FROM users');
+      const plan = posts(view).find((m) => m.type === 'explainPlan');
+      expect(plan.statements[0].plan.executionTimeMs).toBe(1.5);
+    });
+
+    it.each([
+      ['UPDATE users SET a = 1', 'Execute only runs read-only'],
+      ['SELECT * FROM users FOR UPDATE', 'Execute only runs read-only'],
+      ['EXPLAIN SELECT 1', 'Execute only runs read-only'],
+      ['SELECT 1; SELECT 2', 'one statement at a time'],
+    ])('refuses %s without executing and keeps the plan', async (sql, text) => {
+      const { view, manager } = await mounted(() => [MYSQL_PLAN], {}, sql);
+      await view.handleMessage({ type: 'analyze' });
+      expect(h.warn).not.toHaveBeenCalled();
+      expect(manager.openIsolatedSql).not.toHaveBeenCalled();
+      expect(notices(view)[0]).toContain(text);
+      expect(posts(view).some((m) => m.type === 'error' || m.type === 'explainPlan')).toBe(false);
+    });
+
+    it('refuses production unless allowAnalyzeProduction is on', async () => {
+      const { view, manager } = await mounted(() => MYSQL_TREE, { environment: 'production' });
+      await view.handleMessage({ type: 'analyze' });
+      expect(manager.openIsolatedSql).not.toHaveBeenCalled();
+      expect(notices(view)[0]).toContain('production');
+
+      h.config['explain.allowAnalyzeProduction'] = true;
+      await view.handleMessage({ type: 'analyze' });
+      expect(manager.openIsolatedSql).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses SQLite', async () => {
+      const { view, manager } = await mounted(() => [], { dbType: 'SQLITE' });
+      await view.handleMessage({ type: 'analyze' });
+      expect(manager.openIsolatedSql).not.toHaveBeenCalled();
+      expect(notices(view)[0]).toContain('SQLITE');
+    });
+
+    it('does nothing when the confirmation is dismissed', async () => {
+      h.warn.mockResolvedValue(undefined);
+      const { view, manager } = await mounted(() => MYSQL_TREE);
+      await view.handleMessage({ type: 'analyze' });
+      expect(manager.openIsolatedSql).not.toHaveBeenCalled();
+      expect(posts(view)).toEqual([]);
+    });
+
+    it('reports a failure as a notice and closes the session', async () => {
+      const { view, manager } = await mounted((sql) => {
+        if (sql.startsWith('EXPLAIN ANALYZE')) throw new Error('Query timeout (1000ms)');
+        return [];
+      });
+      await view.handleMessage({ type: 'analyze' });
+      expect(notices(view)[0]).toContain('Query timeout (1000ms)');
+      expect(posts(view).some((m) => m.type === 'error')).toBe(false);
+      expect(manager.isolatedClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('cancels through its own token', async () => {
+      let token: any;
+      let rejectQuery!: (e: Error) => void;
+      const { manager } = makeManager(() => []);
+      const query = vi.fn((sql: string, _v?: unknown, opts?: any) => {
+        if (!sql.startsWith('EXPLAIN ANALYZE')) return Promise.resolve({ rows: [] });
+        token = opts?.token;
+        return new Promise((_, reject) => {
+          rejectQuery = reject;
+          token.cancel = () => reject(new Error('Query cancelled'));
+        });
+      });
+      manager.openIsolatedSql = vi.fn(async () => ({ session: { query: { query, wrap: (s: string) => `\`${s}\`` } }, close: manager.isolatedClose }));
+      ExplainPanel.open(manager, conn(), 'SELECT * FROM users');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      view.post.mockClear();
+
+      const running = view.handleMessage({ type: 'analyze' });
+      await flush();
+      expect(token).toBeDefined();
+      await view.handleMessage({ type: 'analyzeCancel' });
+      await running;
+      void rejectQuery;
+      expect(notices(view)[0]).toContain('cancelled');
+      expect(manager.isolatedClose).toHaveBeenCalledTimes(1);
+      expect(h.diag).not.toHaveBeenCalledWith('explain analyze failed', expect.anything());
+    });
+  });
+
+  describe('classic MySQL EXPLAIN rows', () => {
+    const CLASSIC = [{ id: 1, select_type: 'SIMPLE', table: 'users', type: 'ALL', possible_keys: null, key: null, key_len: null, ref: null, rows: 5000, filtered: 100, Extra: null }];
+
+    it('attaches the traditional EXPLAIN rows without recording history', async () => {
+      const { manager, query } = makeManager((sql) => {
+        if (sql.startsWith('EXPLAIN FORMAT=JSON')) return [MYSQL_PLAN];
+        if (sql.startsWith('EXPLAIN ')) return CLASSIC;
+        return [];
+      });
+      ExplainPanel.open(manager, conn(), 'SELECT * FROM users');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      const stmt = posts(view).find((m) => m.type === 'explainPlan').statements[0];
+      expect(stmt.classicRows).toEqual(CLASSIC);
+      const call = (query.mock.calls as unknown[][]).find((c) => c[0] === 'EXPLAIN SELECT * FROM users');
+      expect(call?.[2]).toMatchObject({ skipHistory: true });
+    });
+
+    it('still shows the plan when the traditional EXPLAIN fails', async () => {
+      const { manager } = makeManager((sql) => {
+        if (sql.startsWith('EXPLAIN FORMAT=JSON')) return [MYSQL_PLAN];
+        if (sql.startsWith('EXPLAIN ')) throw new Error('denied');
+        return [];
+      });
+      ExplainPanel.open(manager, conn(), 'SELECT * FROM users');
+      const view: any = ExplainPanel.find('c1');
+      await mount(view);
+      const stmt = posts(view).find((m) => m.type === 'explainPlan').statements[0];
+      expect(stmt.plan.roots[0].children[0].object).toBe('users');
+      expect(stmt.classicRows).toBeUndefined();
+      expect(h.diag).toHaveBeenCalledWith('classic explain failed', 'denied');
+    });
+
+    it('does not run it for PostgreSQL', async () => {
+      const PG_PLAN = [{ Plan: { 'Node Type': 'Seq Scan', 'Relation Name': 'orders', 'Plan Rows': 10 } }];
+      const { manager, executed } = makeManager(() => PG_PLAN);
+      ExplainPanel.open(manager, conn({ dbType: 'PG' }), 'SELECT * FROM orders', 'shop');
+      await mount(ExplainPanel.find('c1'));
+      expect(executed.filter((sql) => sql.startsWith('EXPLAIN'))).toEqual(['EXPLAIN (FORMAT JSON) SELECT * FROM orders']);
     });
   });
 });

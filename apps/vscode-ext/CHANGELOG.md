@@ -16,10 +16,14 @@ All notable changes to DevBelt DB Client are documented in this file.
 - **MCP server** (off by default): loopback-only Streamable HTTP with per-client bearer tokens, rate limits, Host/Origin checks and an audit log; exposes the five read-only tools for one configured connection.
 - **Masked export**: deterministic column masking (email/phone/name/address/idCard/bankCard/redact/null/fixed/regex/hash), PII columns require an explicit rule, preview before export, CSV/SQL output, atomic writes.
 - **Foreign-key subset export**: bounded `referenced`/`referencing` closure with depth and row limits, single-column keys only, dependency-ordered SQL, and shared masking domains so masked keys still match.
-- Settings: `devbelt.agent.*`, `devbelt.mcp.*`, `devbelt.masking.configPath`.
+- **EXPLAIN ANALYZE** ("Execute" in the plan panel; MySQL 8 and PostgreSQL): really executes one read-only `SELECT`/`WITH`/`VALUES` after a confirmation, on a separate read-only session that can be cancelled and honours `devbelt.sql.queryTimeoutSeconds`. Production connections are refused unless `devbelt.explain.allowAnalyzeProduction` is on. MySQL TREE output is parsed into the plan tree; refusals and failures keep the current plan on screen.
+- Settings: `devbelt.agent.*`, `devbelt.mcp.*`, `devbelt.masking.configPath`, `devbelt.explain.allowAnalyzeProduction`.
 
 #### Changed
 
+- **Plan panel redesign**: three tabs, Table (default) / Plan tree / JSON. For MySQL the table shows the traditional `EXPLAIN` columns (`id`, `select_type`, `table`, `type`, `possible_keys`, `key`, `key_len`, `ref`, `rows`, `filtered`, `Extra`), read with an extra plain `EXPLAIN` that does not execute the statement (derived from the JSON plan if that fails); PostgreSQL shows one row per plan node, SQLite its plan rows. Problem rows are highlighted with a short note; a full scan with no condition on that table is noted as expected instead of flagged. One or two plain-language conclusions sit above the table, with index suggestions below it; a badge shows whether the plan is an estimate or an executed run (with time); the SQL is a collapsible, copyable line formatted for the dialect. Buttons are now "Run again" and "Execute".
+- Query results and the plan panel open as a new tab in the current editor group instead of splitting the editor.
+- AI "Explain plan" answers (and visible reasoning) in Chinese when the UI is Chinese.
 - **Read-only SQL connections are now enforced by the database**, not only by client-side SQL checks: MySQL `SET SESSION TRANSACTION READ ONLY`, PostgreSQL `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`, SQLite opened read-only with `PRAGMA query_only=ON`. Statements that previously slipped past the client check (for example `nextval()`, `SELECT … FOR SHARE`, SQLite `ATTACH`) now fail on read-only connections. On MySQL this also blocks creating temporary tables. If the read-only setting cannot be applied, the connection fails instead of opening as writable.
 
 #### Fixed
@@ -40,10 +44,14 @@ All notable changes to DevBelt DB Client are documented in this file.
 - **MCP Server**（默认关闭）：仅监听本机的 Streamable HTTP，逐客户端令牌、限流、Host / Origin 校验与审计；只为所选连接暴露 5 个只读工具。
 - **脱敏导出**：确定性列脱敏（email/phone/name/address/idCard/bankCard/redact/null/fixed/regex/hash），PII 列必须显式配置规则，导出前预览，支持 CSV / SQL，原子写入。
 - **外键子集导出**：受限的 `referenced` / `referencing` 闭包，带深度与行数上限；只支持单列键，按依赖顺序生成 SQL，父子键共享脱敏域。
-- 设置：`devbelt.agent.*`、`devbelt.mcp.*`、`devbelt.masking.configPath`。
+- **EXPLAIN ANALYZE**（计划面板「实际执行」；MySQL 8 / PostgreSQL）：在计划面板确认后真实执行一条只读 `SELECT` / `WITH` / `VALUES`；使用独立的只读会话，可取消，超时沿用 `devbelt.sql.queryTimeoutSeconds`。生产连接默认拒绝，需开启 `devbelt.explain.allowAnalyzeProduction`。MySQL 的 TREE 文本解析为计划树；被拒绝或失败时保留当前计划。
+- 设置：`devbelt.agent.*`、`devbelt.mcp.*`、`devbelt.masking.configPath`、`devbelt.explain.allowAnalyzeProduction`。
 
 #### 变更
 
+- **执行计划面板改版**：三个标签：表格（默认）/ 计划树 / JSON。MySQL 表格为传统 `EXPLAIN` 列（`id`、`select_type`、`table`、`type`、`possible_keys`、`key`、`key_len`、`ref`、`rows`、`filtered`、`Extra`），通过额外一次不执行语句的普通 `EXPLAIN` 读取，失败时由 JSON 计划推导；PostgreSQL 每个计划节点一行，SQLite 显示计划行。有问题的行高亮并附简短说明；对该表没有过滤条件的全表扫描注明属正常，不再标红。表格上方是一两句结论，下方是索引建议；顶部标明「估算」或「实际执行（耗时）」；SQL 为可展开、可复制的一行，按方言格式化。按钮改为「重新运行」「实际执行」。
+- 查询结果与执行计划面板在当前编辑器组新开标签页，不再分屏。
+- 中文界面下，AI 解释计划的回答与可见推理使用中文。
 - **只读 SQL 连接改为在数据库层生效**，不再只依赖客户端 SQL 检查：MySQL 使用 `SET SESSION TRANSACTION READ ONLY`，PostgreSQL 使用 `SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`，SQLite 以只读方式打开并设置 `PRAGMA query_only=ON`。过去能绕过客户端检查的语句（如 `nextval()`、`SELECT … FOR SHARE`、SQLite `ATTACH`）在只读连接上会报错；MySQL 上也无法再创建临时表。只读设置失败时建连失败，不会降级为可写。
 
 #### 修复

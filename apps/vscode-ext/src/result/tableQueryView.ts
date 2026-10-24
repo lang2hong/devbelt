@@ -165,7 +165,7 @@ export class TableQueryView extends BaseWebView {
     onExecuted: ((result: any, error?: Error) => void) | undefined,
     mode: 'reuse' | 'new',
     schema?: string,
-    viewColumn: vscode.ViewColumn = vscode.ViewColumn.Beside,
+    viewColumn: vscode.ViewColumn = vscode.ViewColumn.Active,
   ): Promise<TableQueryView> {
     const enqueue = (view: TableQueryView): void => {
       view.queueQuery(sql, database, onExecuted);
@@ -176,7 +176,7 @@ export class TableQueryView extends BaseWebView {
       enqueue(existing);
       return existing;
     }
-    // 结果面板放在 SQL 编辑器旁侧（右侧列）。不能用 splitEditorDown：那条命令会
+    // 结果面板在当前编辑器组新开标签页（不再分屏）。不能用 splitEditorDown：那条命令会
     // 复制当前活动编辑器（SQL 文档），造成「同一份 SQL 文档出现两次」。
     const view = new TableQueryView(conn, manager, undefined, database, viewColumn, { schema });
     TableQueryView.queryViews.set(conn.id, view);

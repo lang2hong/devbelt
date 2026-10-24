@@ -12,9 +12,11 @@ import type {
   ExplainStatementView,
   ExplainUpMessage,
 } from '../result/protocol';
+import type { QueryCancelToken } from '@devbelt/db-core';
 import { diagError } from '../utils/diagnostics';
 import { buildExplainPlanMessages } from '@devbelt/ai-core';
-import { DEFAULT_FORMAT_MAX_CHARS, formatPlanText } from '@devbelt/explain-core';
+import { DEFAULT_FORMAT_MAX_CHARS, formatPlanText, parseMysqlAnalyze, type ExplainParseResult } from '@devbelt/explain-core';
+import { formatSql } from '../format/sqlFormatter';
 import { AiBridge } from '../ai/aiBridge';
 import { buildIndexSuggestions } from './indexSuggestions';
 import { buildAnalyzeQuery, supportsAnalyze } from './explainRunner';
@@ -47,6 +49,9 @@ export class ExplainPanel extends BaseWebView {
   private generation = 0;
   /** 最近一次推给 webview 的结果（AI 解释的素材，与界面所见一致）。 */
   private lastStatements: ExplainStatementView[] = [];
+  /** 在途 EXPLAIN ANALYZE 的取消句柄（只作用于它自己的独立会话）。 */
+  private analyzeToken?: QueryCancelToken;
+  private analyzeCancelled = false;
 
   private constructor(
     private readonly manager: ConnectionManager,
@@ -82,6 +87,7 @@ export class ExplainPanel extends BaseWebView {
       // 作废在途结果：它属于上一条 SQL。
       existing.generation += 1;
       existing.pendingRun = true;
+      existing.cancelAnalyze();
       existing.reveal();
       if (existing.webviewReady && !existing.running) {
         existing.pendingRun = false;
@@ -114,6 +120,7 @@ export class ExplainPanel extends BaseWebView {
         return;
       }
       this.webviewReady = true;
+      this.post({ type: 'explainContext', analyzeSupported: supportsAnalyze(this.conn.dbType) } as ExplainDownMessage);
       if (this.pendingRun) {
         this.pendingRun = false;
         await this.run();
@@ -130,7 +137,11 @@ export class ExplainPanel extends BaseWebView {
       return;
     }
     if (msg.type === 'analyze') {
-      void this.runAnalyze();
+      await this.runAnalyze();
+      return;
+    }
+    if (msg.type === 'analyzeCancel') {
+      this.cancelAnalyze();
       return;
     }
     if (msg.type === 'aiExplain') {
@@ -183,6 +194,7 @@ export class ExplainPanel extends BaseWebView {
   protected onDispose(): void {
     super.onDispose();
     this.webviewReady = false;
+    this.cancelAnalyze();
     if (ExplainPanel.instances.get(this.conn.id) === this) {
       ExplainPanel.instances.delete(this.conn.id);
     }
@@ -241,58 +253,171 @@ export class ExplainPanel extends BaseWebView {
       // 建议是附加信息：失败只记诊断，不影响计划展示。
       diagError('index suggestions failed', (adviceError as Error)?.message ?? String(adviceError));
     }
+    // MySQL 的经典表格（select_type / Extra 等）只有传统 EXPLAIN 才有；同样不执行语句。
+    // 失败时前端从 JSON 推导，不影响计划展示。
+    let classicRows: Array<Record<string, unknown>> | undefined;
+    if (dialect === 'mysql') {
+      try {
+        const classic = await session.query.query(request.fallbackSql, undefined, { skipHistory: true });
+        if (Array.isArray(classic?.rows)) classicRows = classic.rows as Array<Record<string, unknown>>;
+      } catch (classicError) {
+        diagError('classic explain failed', (classicError as Error)?.message ?? String(classicError));
+      }
+    }
     return limitStatementPayload({
       sql: statement,
       plan: { ...parsed.plan, raw: display },
+      ...(classicRows ? { classicRows } : {}),
       suggestions: advice.suggestions,
       redundantIndexes: advice.redundant,
     });
   }
 
 
-  /** EXPLAIN ANALYZE: executes one read-only statement after explicit confirmation. */
-  private async runAnalyze(): Promise<void> {
-    if (this.running || !supportsAnalyze(this.conn.dbType)) return;
-    const engine = this.conn.dbType === DatabaseType.PG ? 'PG' : 'MYSQL';
-    const statements = splitSqlStatements(this.sql, this.manager.scanOptionsFor?.(this.conn)).filter((s) => s.trim());
-    if (statements.length !== 1) {
-      this.post({ type: 'error', message: l10n('wv.explain.analyzeSingle') } as never);
-      return;
-    }
-    const statement = statements[0]!.trim();
-    const check = checkReadOnlySql(statement, engine);
-    if (!check.ok) {
-      this.post({ type: 'error', message: l10n('wv.explain.analyzeReadOnly') } as never);
-      return;
-    }
-    if (this.conn.environment === 'production' && !vscode.workspace.getConfiguration('devbelt').get<boolean>('explain.allowAnalyzeProduction', false)) {
-      this.post({ type: 'error', message: l10n('wv.explain.analyzeProduction') } as never);
-      return;
-    }
-    const run = l10n('wv.explain.analyzeRun');
-    const ok = await vscode.window.showWarningMessage(l10n('wv.explain.analyzeConfirm'), { modal: true, detail: statement }, run);
-    if (ok !== run) return;
-    this.running = true;
-    this.generation += 1;
-    this.post({ type: 'explainRunning' } as never);
+  private notice(message: string): void {
+    this.post({ type: 'explainNotice', message } as ExplainDownMessage);
+  }
+
+  private cancelAnalyze(): void {
+    if (!this.analyzeToken) return;
+    this.analyzeCancelled = true;
+    this.analyzeToken.cancel?.();
+  }
+
+  /** Display-only formatting; the statement that runs is never the formatted one. */
+  private withFormattedSql(view: ExplainStatementView): ExplainStatementView {
     try {
-      const session = await this.manager.connectSql(this.conn, this.database);
-      if (this.database && this.conn.dbType === DatabaseType.MYSQL) {
-        await session.query.query(`USE ${session.query.wrap(validateIdent(this.database))}`, undefined, { skipHistory: true });
+      const formattedSql = formatSql(view.sql, this.conn.dbType);
+      return formattedSql && formattedSql !== view.sql ? { ...view, formattedSql } : view;
+    } catch {
+      return view;
+    }
+  }
+
+  /**
+   * EXPLAIN ANALYZE: really executes one read-only statement after explicit
+   * confirmation. Runs on its own read-only session so cancelling it cannot
+   * abort other panels' queries. Refusals and failures are shown as a notice
+   * and keep the current plan on screen.
+   */
+  private async runAnalyze(): Promise<void> {
+    if (this.analyzeToken) return;
+    if (this.running) {
+      this.notice(l10n('wv.explain.analyzeBusy'));
+      return;
+    }
+    if (!supportsAnalyze(this.conn.dbType)) {
+      this.notice(l10n('wv.explain.analyzeUnsupported', { dbType: this.conn.dbType }));
+      return;
+    }
+    const engine = this.conn.dbType === DatabaseType.PG ? 'PG' : 'MYSQL';
+    const scanOptions = this.manager.scanOptionsFor?.(this.conn);
+    const statements = splitSqlStatements(this.sql, scanOptions).map((s) => s.trim()).filter(Boolean);
+    if (statements.length !== 1) {
+      this.notice(l10n('wv.explain.analyzeSingle'));
+      return;
+    }
+    const statement = statements[0]!;
+    if (containsSecretSql(statement)) {
+      this.notice(l10n('wv.explain.secretBlocked'));
+      return;
+    }
+    const check = checkReadOnlySql(statement, engine);
+    // A plain EXPLAIN passes the read-only check but cannot be wrapped again.
+    if (!check.ok || check.kind !== 'select') {
+      this.notice(l10n('wv.explain.analyzeReadOnly'));
+      return;
+    }
+    if (this.conn.environment === 'production'
+      && !vscode.workspace.getConfiguration('devbelt').get<boolean>('explain.allowAnalyzeProduction', false)) {
+      this.notice(l10n('wv.explain.analyzeProduction'));
+      return;
+    }
+    const database = this.database || this.conn.database;
+    const runLabel = l10n('wv.explain.analyzeRun');
+    const timeout = vscode.workspace.getConfiguration('devbelt').get<number>('sql.queryTimeoutSeconds', 300);
+    const picked = await vscode.window.showWarningMessage(
+      l10n('wv.explain.analyzeConfirm', { conn: this.conn.name || this.conn.host, db: database || '-' }),
+      { modal: true, detail: `${statement}\n\n${l10n('wv.explain.analyzeTimeout', { seconds: timeout })}` },
+      runLabel,
+    );
+    if (picked !== runLabel || this.running || this.analyzeToken) return;
+
+    const generation = ++this.generation;
+    const token: QueryCancelToken = {};
+    this.analyzeToken = token;
+    this.analyzeCancelled = false;
+    this.running = true;
+    let isolated: { close: () => void } | undefined;
+    this.post({ type: 'explainRunning', mode: 'analyze' } as ExplainDownMessage);
+    try {
+      const opened = await this.manager.openIsolatedSql(this.conn, this.database);
+      isolated = opened;
+      const session = opened.session;
+      const internal = { skipHistory: true, token };
+      // Defence in depth on top of checkReadOnlySql: the database refuses writes on this session.
+      if (this.conn.dbType === DatabaseType.PG) {
+        await session.query.query('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', undefined, internal);
+        const searchPath = this.schema
+          ? `${session.query.wrap(validateSchemaIdent(this.schema))}, public`
+          : '"$user", public';
+        await session.query.query(`SET search_path TO ${searchPath}`, undefined, internal);
+      } else {
+        await session.query.query('SET SESSION TRANSACTION READ ONLY', undefined, internal);
+        if (database) await session.query.query(`USE ${session.query.wrap(validateIdent(database))}`, undefined, internal);
       }
-      const { sql, textOnly } = buildAnalyzeQuery(this.conn.dbType, statement);
-      const result = await session.query.query(sql);
-      const rows = Array.isArray(result?.rows) ? result.rows : [];
-      const parsed = textOnly ? undefined : parseExplainRows(this.conn.dbType === DatabaseType.PG ? 'postgres' : 'mysql', rows);
-      const payload: ExplainStatementView = parsed?.ok
-        ? { sql: statement, plan: { ...parsed.plan, raw: rows } }
-        : { sql: statement, plan: null, fallback: { reason: 'analyze', rows, text: rows.map((r) => typeof r === 'string' ? r : JSON.stringify(r)).join('\n') } };
+      const { sql } = buildAnalyzeQuery(this.conn.dbType, statement);
+      const result = await session.query.query(sql, undefined, internal);
+      const rows: unknown[] = Array.isArray(result?.rows) ? result.rows : [];
+      const parsed: ExplainParseResult = this.conn.dbType === DatabaseType.PG
+        ? parseExplainRows('postgres', rows)
+        : parseMysqlAnalyze(rows);
+      let payload: ExplainStatementView;
+      if (parsed.ok) {
+        let advice: Awaited<ReturnType<typeof buildIndexSuggestions>> = { suggestions: [], redundant: [] };
+        try {
+          advice = await buildIndexSuggestions(statement, parsed.plan, {
+            session,
+            dbType: this.conn.dbType,
+            ...(database ? { database } : {}),
+            ...(this.schema ? { schema: this.schema } : {}),
+          });
+        } catch (adviceError) {
+          diagError('index suggestions failed', (adviceError as Error)?.message ?? String(adviceError));
+        }
+        payload = {
+          sql: statement,
+          plan: { ...parsed.plan, raw: this.conn.dbType === DatabaseType.PG ? rows : rowsToText(rows) },
+          suggestions: advice.suggestions,
+          redundantIndexes: advice.redundant,
+        };
+      } else {
+        payload = {
+          sql: statement,
+          plan: null,
+          fallback: { reason: l10n('wv.explain.analyzeParseFailed', { reason: parsed.error }), rows, text: rowsToText(rows) },
+        };
+      }
+      if (generation !== this.generation || !this.webviewReady) return;
+      payload = this.withFormattedSql(limitStatementPayload(payload));
       this.lastStatements = [payload];
-      this.post({ type: 'explainPlan', statements: [payload] } as never);
+      this.post({ type: 'explainPlan', statements: [payload], mode: 'analyze' } as ExplainDownMessage);
     } catch (err) {
-      this.post({ type: 'error', message: (err as Error)?.message ?? String(err) } as never);
+      const message = (err as Error)?.message ?? String(err);
+      if (!this.analyzeCancelled) diagError('explain analyze failed', message);
+      if (generation === this.generation) {
+        this.notice(this.analyzeCancelled
+          ? l10n('wv.explain.analyzeCancelled')
+          : l10n('wv.explain.analyzeFailed', { message }));
+      }
     } finally {
+      isolated?.close();
+      this.analyzeToken = undefined;
       this.running = false;
+      if (this.pendingRun && this.webviewReady) {
+        this.pendingRun = false;
+        void this.run();
+      }
     }
   }
 
@@ -326,7 +451,7 @@ export class ExplainPanel extends BaseWebView {
 
       // 旧结果不再代表当前 SQL：AI 解释只能用本次结果。
       this.lastStatements = [];
-      this.post({ type: 'explainRunning' });
+      this.post({ type: 'explainRunning', mode: 'estimate' });
       const scanOptions = this.manager.scanOptionsFor?.(this.conn);
       const statements = splitSqlStatements(this.sql, scanOptions);
       const database = this.database || this.conn.database;
@@ -388,8 +513,9 @@ export class ExplainPanel extends BaseWebView {
         this.post({ type: 'error', message: payloads[0].error ?? l10n('wv.explain.empty') });
         return;
       }
-      this.lastStatements = payloads;
-      this.post({ type: 'explainPlan', statements: payloads });
+      const views = payloads.map((view) => this.withFormattedSql(view));
+      this.lastStatements = views;
+      this.post({ type: 'explainPlan', statements: views, mode: 'estimate' });
     } catch (error) {
       const message = (error as Error)?.message ?? String(error);
       diagError('explain failed', message);

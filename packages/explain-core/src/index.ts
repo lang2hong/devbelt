@@ -5,6 +5,7 @@ import type { ExplainDialect, ExplainParseOptions, ExplainParseResult } from './
 
 export * from './types.js';
 export { parseMysqlExplain } from './mysql.js';
+export { parseMysqlAnalyze } from './mysqlAnalyze.js';
 export { parsePostgresExplain } from './postgres.js';
 export { parseSqliteExplain } from './sqlite.js';
 export {
