@@ -36,12 +36,33 @@ const visibleRows = computed(() =>
 const selectedNode = computed<ExplainPlanNode | undefined>(() =>
   currentPlan.value ? findPlanNode(currentPlan.value.roots, selectedId.value) : undefined,
 );
+const OPERATION_LABELS: Record<string, string> = {
+  'Query block': '查询块',
+  'Table scan': '全表扫描',
+  'Index lookup': '索引查找',
+  'Index scan': '索引扫描',
+  'Index range scan': '索引范围扫描',
+  'Sort': '排序',
+  'Aggregate': '聚合',
+  'Nested loop': '嵌套循环',
+  'Hash join': '哈希连接',
+  'Merge join': '合并连接',
+  'Seq Scan': '全表扫描',
+  'Index Scan': '索引扫描',
+  'Bitmap Heap Scan': '位图堆扫描',
+  'Hash Join': '哈希连接',
+  'Nested Loop': '嵌套循环',
+};
+function operationLabel(op: string): string {
+  return OPERATION_LABELS[op] ?? op;
+}
 const planTableRows = computed(() => {
   if (!currentPlan.value) return [] as Array<{ depth: number; node: ExplainPlanNode }>;
   const out: Array<{ depth: number; node: ExplainPlanNode }> = [];
   const walk = (nodes: ExplainPlanNode[], depth: number): void => {
     for (const node of nodes) {
-      out.push({ depth, node });
+      // Wrapper nodes (Query block / root) carry no table, index or row estimate.
+      if (node.object || node.index || node.estimatedRows != null) out.push({ depth, node });
       walk(node.children, depth + 1);
     }
   };
@@ -297,28 +318,27 @@ onUnmounted(() => {
         <h4>{{ t('wv.explain.tableTitle') }}</h4>
         <table>
           <thead><tr>
+            <th>#</th>
             <th>{{ t('wv.explain.col.operation') }}</th>
             <th>{{ t('wv.explain.col.object') }}</th>
-            <th>{{ t('wv.explain.col.index') }}</th>
             <th>{{ t('wv.explain.col.estRows') }}</th>
             <th>{{ t('wv.explain.col.actualRows') }}</th>
             <th>{{ t('wv.explain.col.actualTime') }}</th>
-            <th>{{ t('wv.explain.col.loops') }}</th>
             <th>{{ t('wv.explain.col.warnings') }}</th>
           </tr></thead>
           <tbody>
             <tr v-for="(row, i) in planTableRows" :key="i">
-              <td :style="{ paddingLeft: (row.depth * 12 + 6) + 'px' }">{{ row.node.operation }}</td>
-              <td>{{ row.node.object ?? '' }}</td>
-              <td>{{ row.node.index ?? '' }}</td>
-              <td>{{ row.node.estimatedRows ?? '' }}</td>
-              <td>{{ row.node.actualRows ?? '' }}</td>
-              <td>{{ row.node.actualTimeMs != null ? row.node.actualTimeMs.toFixed(3) : '' }}</td>
-              <td>{{ row.node.loops ?? '' }}</td>
-              <td>{{ row.node.warnings.map((w) => t(warningLabel(w))).join(', ') }}</td>
+              <td>{{ i + 1 }}</td>
+              <td :style="{ paddingLeft: (row.depth * 10 + 6) + 'px' }">{{ operationLabel(row.node.operation) }}</td>
+              <td>{{ [row.node.object, row.node.index ? '(' + row.node.index + ')' : ''].filter(Boolean).join(' ') || '—' }}</td>
+              <td>{{ row.node.estimatedRows ?? '—' }}</td>
+              <td>{{ row.node.actualRows ?? '—' }}</td>
+              <td>{{ row.node.actualTimeMs != null ? row.node.actualTimeMs.toFixed(3) : '—' }}</td>
+              <td>{{ row.node.warnings.length ? row.node.warnings.map((w) => t(warningLabel(w))).join('、') : '—' }}</td>
             </tr>
           </tbody>
         </table>
+        <div v-if="!currentPlan.roots.some((n) => n.actualRows != null)" class="muted">{{ t('wv.explain.table.noActual') }}</div>
       </div>
       <div v-if="current?.sql" class="sql-view">
         <h4>{{ t('wv.explain.sqlTitle') }}</h4>

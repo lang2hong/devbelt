@@ -58,7 +58,7 @@ export class ExplainPanel extends BaseWebView {
     super(
       'devbelt.explain',
       l10n('wv.explain.panelTitle', { conn: conn.name || conn.host }),
-      vscode.ViewColumn.Beside,
+      vscode.ViewColumn.Active,
     );
     this.sql = sql;
     this.database = database;
@@ -82,7 +82,7 @@ export class ExplainPanel extends BaseWebView {
       // 作废在途结果：它属于上一条 SQL。
       existing.generation += 1;
       existing.pendingRun = true;
-      existing.reveal(vscode.ViewColumn.Beside);
+      existing.reveal();
       if (existing.webviewReady && !existing.running) {
         existing.pendingRun = false;
         void existing.run();

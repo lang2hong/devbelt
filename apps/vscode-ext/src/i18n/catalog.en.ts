@@ -784,6 +784,7 @@ export const en: MessageCatalog = {
   'wv.explain.analyzeSingle': 'Analyze supports one statement only.',
   'wv.explain.analyzeReadOnly': 'Analyze supports read-only SELECT only.',
   'wv.explain.analyzeProduction': 'Analyze is disabled on production connections by default.',
+  'wv.explain.table.noActual': 'Actual rows/time are “—” because this is a plain EXPLAIN estimate; use Analyze (executes) for real numbers.',
   'wv.explain.tableTitle': 'Plan table',
   'wv.explain.sqlTitle': 'SQL',
   'wv.explain.col.operation': 'Operation',

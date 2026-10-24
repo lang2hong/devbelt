@@ -762,6 +762,7 @@ export const zh: MessageCatalog = {
   'wv.explain.analyzeSingle': 'Analyze 只支持单条语句。',
   'wv.explain.analyzeReadOnly': 'Analyze 只支持只读 SELECT。',
   'wv.explain.analyzeProduction': '生产连接默认禁止 Analyze，可在设置中开启。',
+  'wv.explain.table.noActual': '实际行数/耗时为“—”，因为这是普通 EXPLAIN 的估算；点「Analyze（会执行）」才会产生真实数据。',
   'wv.explain.tableTitle': '计划表格',
   'wv.explain.sqlTitle': 'SQL',
   'wv.explain.col.operation': '操作',

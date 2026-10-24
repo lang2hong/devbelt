@@ -7,7 +7,8 @@ describe('buildExplainPlanMessages language', () => {
   it('forces Simplified Chinese when asked', () => {
     const messages = buildExplainPlanMessages({ ...input, language: 'zh' });
     const user = messages.find((m) => m.role === 'user')!.content;
-    expect(user).toContain('Simplified Chinese');
+    expect(user).toContain('Think through the plan');
+    expect(user).toContain('visible reasoning in Simplified Chinese');
   });
 
   it('leaves the prompt unchanged without a language hint', () => {
