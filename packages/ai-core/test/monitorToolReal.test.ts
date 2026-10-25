@@ -62,8 +62,14 @@ describe.skipIf(!enabled)('real model propose_monitor', () => {
     expect(propose, JSON.stringify(calls)).toBeTruthy();
     const args = JSON.parse(propose!.args || '{}') as Record<string, unknown>;
     expect(['newRows', 'metric']).toContain(args.kind);
-    if (args.kind === 'newRows') expect(['id', 'received_time']).toContain(args.cursorColumn);
-    expect(args.cursorColumn).not.toBe('create_time');
+    if (args.kind === 'newRows') {
+      // 只接受表里真实存在的递增列（kind 是 varchar，不能当游标）。
+      expect(['id', 'received_time', 'event_time']).toContain(args.cursorColumn);
+    } else {
+      // 指标：必须是针对这张表的 SELECT，并指定要比较的列。
+      expect(String(args.sql ?? '')).toMatch(/^\s*select\b[\s\S]*\blc_data_event\b/i);
+      expect(typeof args.watchColumn === 'string' && args.watchColumn.length > 0, JSON.stringify(args)).toBe(true);
+    }
   }, 90_000);
 
   it('does not invent a cursor column when the table has none', async () => {
@@ -73,8 +79,11 @@ describe.skipIf(!enabled)('real model propose_monitor', () => {
       { role: 'assistant', content: '', toolCalls: [{ id: 'd1', type: 'function', function: { name: 'describe_table', arguments: '{"table":"tags"}' } }] },
       { role: 'tool', toolCallId: 'd1', content: JSON.stringify({ name: 'tags', columns: [{ name: 'code', type: 'varchar(20)', primaryKey: true }, { name: 'title', type: 'varchar(100)' }], indexes: [] }) },
     ]);
+    const columns = [{ name: 'code', type: 'varchar(20)' }, { name: 'title', type: 'varchar(100)' }];
+    // 合法游标：表里真实存在、且是整数或时间类型的列（这张表一个都没有）。
+    const validCursors = columns.filter((c) => /int|date|time/i.test(c.type)).map((c) => c.name);
     const newRows = calls.filter((c) => c.name === 'propose_monitor').map((c) => JSON.parse(c.args || '{}') as Record<string, unknown>).filter((a) => a.kind === 'newRows');
-    // Neither existing column is a valid cursor (varchar); any newRows proposal must not invent one.
-    for (const a of newRows) expect(String(a.cursorColumn ?? '')).not.toMatch(/created|create_time|updated|time|id$/i);
+    // 要么不提新增行监控；要么提出时游标列必须是真实存在且类型合法的列。
+    for (const a of newRows) expect(validCursors, JSON.stringify(a)).toContain(a.cursorColumn);
   }, 90_000);
 });

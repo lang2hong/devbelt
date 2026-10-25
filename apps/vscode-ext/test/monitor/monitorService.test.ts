@@ -114,6 +114,32 @@ describe('MonitorService proposals', () => {
     expect(tasks).toHaveLength(0);
   });
 
+  it('a window that does not own the tasks neither trial-runs nor creates', async () => {
+    let owner = true;
+    const { service, trial, tasks } = setup({ isOwner: () => owner });
+    const r = await service.propose(conn, 'app', undefined, { kind: 'metric', table: 't', sql: 'SELECT 1 AS lag_seconds, 2 AS rows_last_1h' });
+    if (!r.ok) throw new Error('expected a proposal');
+    trial.mockClear();
+    owner = false;
+    expect(await service.propose(conn, 'app', undefined, { kind: 'metric', table: 't', sql: 'SELECT 1 AS a' })).toMatchObject({ ok: false, reason: 'otherWindow' });
+    expect(await service.confirm(r.proposal.id)).toMatchObject({ ok: false, reason: 'otherWindow' });
+    expect(trial).not.toHaveBeenCalled();
+    expect(tasks).toHaveLength(0);
+  });
+
+  it('flags a slow metric trial without changing the interval', async () => {
+    let now = 0;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { service } = setup({
+      executor: { trial: async (_t: unknown, fn: (s: never, tk: never, d: string) => Promise<unknown>) => fn({ query: { query: async () => { now += 6_000; return { rows: [{ lag_seconds: '1' }] }; }, wrap: (s: string) => s } } as never, {} as never, 'MYSQL') } as never,
+    });
+    const r = await service.propose(conn, 'app', undefined, { kind: 'metric', table: 't', sql: 'SELECT 1 AS lag_seconds', intervalMinutes: 5 });
+    spy.mockRestore();
+    if (!r.ok) throw new Error('expected a proposal');
+    expect(r.proposal.warnings).toEqual([{ level: 'warning', code: 'slowQuery', detail: '6' }]);
+    expect(r.proposal.intervalMs).toBe(300_000);
+  });
+
   it('sanitizes model-supplied conditions', () => {
     expect(sanitizeCondition({ type: 'above', value: 600 }, 'metric')).toEqual({ type: 'above', value: 600 });
     expect(sanitizeCondition({ type: 'drop_table', value: 1 }, 'metric')).toEqual({ type: 'anyChange' });

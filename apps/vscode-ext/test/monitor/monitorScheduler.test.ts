@@ -131,6 +131,66 @@ describe('MonitorScheduler', () => {
   });
 });
 
+describe('MonitorScheduler across windows', () => {
+  it('a non-owner start does not rewrite tasks.json', async () => {
+    const { scheduler, deps } = setup({ isOwner: () => false }, [task()]);
+    const saveTasks = vi.spyOn(deps.store, 'saveTasks');
+    await scheduler.start();
+    expect(scheduler.get('m1')?.status).toBe('running');
+    expect(saveTasks).not.toHaveBeenCalled();
+  });
+
+  it('a non-owner cannot add, pause, resume or remove, and never runs', async () => {
+    const { scheduler, deps, saved } = setup({ isOwner: () => false }, [task()]);
+    await scheduler.start();
+    await expect(scheduler.add(task({ id: 'm2' }))).rejects.toMatchObject({ name: 'MonitorNotOwnerError' });
+    await expect(scheduler.pause('m1')).rejects.toMatchObject({ name: 'MonitorNotOwnerError' });
+    await expect(scheduler.resume('m1')).rejects.toMatchObject({ name: 'MonitorNotOwnerError' });
+    await expect(scheduler.resumeAll()).rejects.toMatchObject({ name: 'MonitorNotOwnerError' });
+    await expect(scheduler.remove('m1')).rejects.toMatchObject({ name: 'MonitorNotOwnerError' });
+    await scheduler.revalidateConnections();
+    await scheduler.runNow('m1');
+    expect(deps.run).not.toHaveBeenCalled();
+    expect(saved().map((t) => t.id)).toEqual(['m1']);
+    expect(saved()[0]!.status).toBe('running');
+  });
+
+  it('a non-owner reload picks up changes written by the owner window', async () => {
+    const { scheduler, deps } = setup({ isOwner: () => false }, [task()]);
+    await scheduler.start();
+    await deps.store.saveTasks([task({ lastValue: 42 }), task({ id: 'm2', table: 'b' })]);
+    await scheduler.reload();
+    expect(scheduler.list().map((t) => t.id)).toEqual(['m1', 'm2']);
+    expect(scheduler.get('m1')?.lastValue).toBe(42);
+  });
+
+  it('takeOver reloads from disk (latest cursor) and pauses everything', async () => {
+    let owner = false;
+    const { scheduler, deps, saved } = setup({ isOwner: () => owner }, [task({ kind: 'newRows', cursorValue: '5' })]);
+    await scheduler.start();
+    // 原执行窗口推进了游标后关闭
+    await deps.store.saveTasks([task({ kind: 'newRows', cursorValue: '9' })]);
+    owner = true;
+    await scheduler.takeOver();
+    expect(scheduler.get('m1')).toMatchObject({ status: 'paused', pausedReason: 'handover' });
+    expect(scheduler.get('m1')?.cursorValue).toBe('9');
+    expect(saved()[0]!.pausedReason).toBe('handover');
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(deps.run).not.toHaveBeenCalled();
+  });
+
+  it('relinquish stops local timers', async () => {
+    let owner = true;
+    const { scheduler, deps } = setup({ isOwner: () => owner });
+    await scheduler.add(task());
+    expect(deps.run).toHaveBeenCalledTimes(1);
+    owner = false;
+    scheduler.relinquish();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(deps.run).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('MonitorScheduler with structured results', () => {
   it('stores metric values and cursor state, keeps new rows in memory only', async () => {
     const outputs = [

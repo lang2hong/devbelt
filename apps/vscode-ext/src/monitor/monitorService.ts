@@ -60,7 +60,7 @@ export interface ProposalInput {
 
 export type ProposalResult =
   | { ok: true; proposal: MonitorProposal }
-  | { ok: false; reason: CreateRejectReason | 'validation' | 'disabled' | 'unsupportedKind'; issues: ValidationIssue[]; detail?: string };
+  | { ok: false; reason: CreateRejectReason | 'validation' | 'disabled' | 'unsupportedKind' | 'otherWindow'; issues: ValidationIssue[]; detail?: string };
 
 export interface MonitorServiceDeps {
   scheduler: MonitorScheduler;
@@ -73,6 +73,8 @@ export interface MonitorServiceDeps {
   /** 读列 / 索引元数据（B 校验）；走独立只读会话，不调用模型。 */
   describe(conn: SavedConnection, database: string | undefined, schema: string | undefined, table: string): Promise<{ columns: ColumnMeta[]; indexes: IndexMeta[] }>;
   audit(action: 'create' | 'remove' | 'pause' | 'resume', task: MonitorTask): void;
+  /** 本窗口是否拥有任务（持锁）；缺省视为拥有。非拥有者不试执行、不创建。 */
+  isOwner?(): boolean;
 }
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -99,6 +101,9 @@ function intervalFrom(minutes: unknown): number {
 }
 
 export class MonitorService {
+  /** 试执行超过这个耗时时在卡片上提示成本，并建议放宽间隔。 */
+  static readonly SLOW_TRIAL_MS = 5_000;
+
   /** 待确认的提案（内存；面板关闭或 30 分钟后失效）。 */
   private readonly proposals = new Map<string, { proposal: MonitorProposal; at: number }>();
 
@@ -110,6 +115,7 @@ export class MonitorService {
    */
   async propose(conn: SavedConnection, database: string | undefined, schema: string | undefined, input: ProposalInput): Promise<ProposalResult> {
     if (!this.deps.enabled()) return { ok: false, reason: 'disabled', issues: [] };
+    if (this.deps.isOwner && !this.deps.isOwner()) return { ok: false, reason: 'otherWindow', issues: [] };
     if (input.kind !== 'rowCount' && input.kind !== 'metric' && input.kind !== 'newRows') {
       return { ok: false, reason: 'unsupportedKind', issues: [] };
     }
@@ -147,21 +153,25 @@ export class MonitorService {
       const check = checkMetricSql(input.sql ?? '', engineOf(dbType));
       if (!check.ok) return { ok: false, reason: 'validation', issues: [check.issue] };
       let rows: unknown[] | undefined;
+      const startedAt = Date.now();
       try {
         rows = await this.deps.executor.trial({ connId: conn.id, database, schema }, async (session, token) =>
           (await session.query.query(check.statement, undefined, { skipHistory: true, token }))?.rows);
       } catch (err) {
         return { ok: false, reason: 'validation', issues: [{ level: 'error', code: 'trialFailed', detail: messageOf(err) }] };
       }
+      const elapsed = Date.now() - startedAt;
       const shape = checkMetricResult(rows, input.watchColumn);
       if (!shape.ok) return { ok: false, reason: 'validation', issues: shape.issues };
+      // 慢查询只提示、不拦截，也不改用户 / 模型给的间隔（卡片上的提示建议不低于 15 分钟）。
+      const slow = elapsed >= MonitorService.SLOW_TRIAL_MS;
       return this.remember({
         ...base,
         sql: check.statement,
         columns: shape.columns!,
         watchColumn: shape.watchColumn!,
         preview: shape.values!,
-        warnings: [],
+        warnings: slow ? [{ level: 'warning', code: 'slowQuery', detail: String(Math.round(elapsed / 100) / 10) }] : [],
       });
     }
 

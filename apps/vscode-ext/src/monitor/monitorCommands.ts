@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { validateIdent, validateSchemaIdent } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
-import { describeCondition, describeInterval, taskTitle } from './monitorNotifier';
+import { describeInterval, describeTaskCondition, taskTitle } from './monitorNotifier';
 import type { MonitorScheduler } from './monitorScheduler';
 import {
   checkCanCreate,
@@ -57,6 +57,10 @@ export async function createRowCountMonitor(deps: MonitorCommandDeps, node: Moni
     if (node.schema) validateSchemaIdent(node.schema);
   } catch {
     void vscode.window.showErrorMessage(l10n('monitor.reject.identifier', { table }));
+    return;
+  }
+  if (!deps.executing()) {
+    void vscode.window.showInformationMessage(l10n('monitor.list.otherWindowAction'));
     return;
   }
   const reason = checkCanCreate(
@@ -172,14 +176,18 @@ function statusIcon(task: MonitorTask): string {
   return '$(debug-pause)';
 }
 
+/** 最近一次结果的文案：行数 / 指标列的值 / 本次新增行数。 */
+export function lastResultText(task: MonitorTask, time: string): string {
+  if (task.lastError) return l10n('monitor.list.lastError', { time, error: task.lastError });
+  const value = task.lastValue?.toLocaleString() ?? '—';
+  if (task.kind === 'newRows') return l10n('monitor.ui.lastNewRows', { time, n: value });
+  if (task.kind === 'metric') return l10n('monitor.ui.lastMetric', { time, column: task.watchColumn ?? '', value });
+  return l10n('monitor.list.lastValue', { time, value });
+}
+
 function taskDetail(task: MonitorTask): string {
-  const parts = [describeInterval(task.intervalMs), describeCondition(task.condition)];
-  if (task.lastRunAt) {
-    const time = new Date(task.lastRunAt).toLocaleTimeString();
-    parts.push(task.lastError
-      ? l10n('monitor.list.lastError', { time, error: task.lastError })
-      : l10n('monitor.list.lastValue', { time, value: task.lastValue?.toLocaleString() ?? '—' }));
-  }
+  const parts = [describeInterval(task.intervalMs), describeTaskCondition(task)];
+  if (task.lastRunAt) parts.push(lastResultText(task, new Date(task.lastRunAt).toLocaleTimeString()));
   if (task.status === 'paused' && task.pausedReason) parts.push(l10n(`monitor.list.paused.${task.pausedReason}`));
   return parts.join(' · ');
 }
@@ -211,6 +219,10 @@ export async function showMonitorTasks(deps: MonitorCommandDeps, focusId?: strin
   });
   if (!picked) return;
   if (picked.resumeAll) {
+    if (!deps.executing()) {
+      void vscode.window.showInformationMessage(l10n('monitor.list.otherWindowAction'));
+      return;
+    }
     await deps.scheduler.resumeAll();
     for (const task of deps.scheduler.list()) if (task.status === 'running') deps.audit('resume', task);
     return;
@@ -221,6 +233,11 @@ export async function showMonitorTasks(deps: MonitorCommandDeps, focusId?: strin
 }
 
 async function taskActions(deps: MonitorCommandDeps, task: MonitorTask): Promise<void> {
+  // 只有执行任务的窗口能修改任务；其他窗口只看。
+  if (!deps.executing()) {
+    void vscode.window.showInformationMessage(l10n('monitor.list.otherWindowAction'));
+    return;
+  }
   type Action = 'resume' | 'pause' | 'runNow' | 'remove';
   const actions: Array<vscode.QuickPickItem & { action: Action }> = [];
   if (task.status === 'paused') actions.push({ label: `$(play) ${l10n('monitor.action.resume')}`, action: 'resume' });

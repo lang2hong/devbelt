@@ -269,7 +269,8 @@ onMounted(() => {
           streaming.value = null;
           break;
         }
-        if (activeSessionId.value !== session.id) proposals.value = [];
+        // 切换 / 重载会话：清空卡片，由宿主随后按会话补发。
+        proposals.value = [];
         activeSessionId.value = session.id;
         resetMessages(Array.isArray(session.messages) ? [...session.messages] : []);
         streaming.value = null;
@@ -425,7 +426,10 @@ onMounted(() => {
         break;
       case 'monitorProposal':
         if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
-        if (msg.proposal && typeof msg.proposal.id === 'string') proposals.value = [...proposals.value, { proposal: msg.proposal, status: 'pending' }];
+        if (msg.proposal && typeof msg.proposal.id === 'string' && !proposals.value.some((p) => p.proposal.id === msg.proposal.id)) {
+          const status = msg.status === 'created' || msg.status === 'discarded' ? msg.status : 'pending';
+          proposals.value = [...proposals.value, { proposal: msg.proposal, status }];
+        }
         break;
       case 'monitorConfirmResult': {
         const at = proposals.value.findIndex((p) => p.proposal.id === msg.proposalId);

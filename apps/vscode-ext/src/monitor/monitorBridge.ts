@@ -66,7 +66,8 @@ export interface MonitorProposalView {
   watchColumn?: string;
   preview?: Record<string, number | null>;
   cursorColumn?: string;
-  warnings: string[];
+  /** 校验提示：code 对应 `monitor.warning.<code>`，detail 为占位符值（如慢查询秒数）。 */
+  warnings: Array<{ code: string; detail?: string }>;
 }
 
 export class MonitorBridge {

@@ -23,7 +23,7 @@ export type MetricErrorCode =
   | 'trialFailed';
 
 export type CursorErrorCode = 'identifier' | 'columnMissing' | 'cursorType' | 'tableMissing';
-export type CursorWarningCode = 'nullable' | 'noIndex' | 'noPrimaryKey';
+export type CursorWarningCode = 'nullable' | 'noIndex' | 'noPrimaryKey' | 'slowQuery';
 
 export interface MetricValidation {
   ok: boolean;
@@ -88,7 +88,8 @@ export function checkMetricResult(rows: unknown[] | undefined, watchColumn: stri
 export function cursorKindOf(dbType: string, columnType: string): 'integer' | 'temporal' | undefined {
   const engine = dbType.toUpperCase();
   const type = columnType.toLowerCase().trim();
-  if (engine === 'SQLITE') return /\bint/.test(type) ? 'integer' : undefined;
+  // SQLite 类型亲和：类型名里含 INT 即整数（INTEGER / BIGINT / TINYINT / UNSIGNED BIG INT …）。
+  if (engine === 'SQLITE') return type.includes('int') ? 'integer' : undefined;
   // MySQL 的 tinyint(1) 常作布尔，不适合作游标（必须在整数判断之前）。
   if (/^tinyint\s*\(\s*1\s*\)/.test(type)) return undefined;
   if (/^(tinyint|smallint|mediumint|int|integer|bigint|serial|bigserial|smallserial|int2|int4|int8)\b/.test(type)) return 'integer';

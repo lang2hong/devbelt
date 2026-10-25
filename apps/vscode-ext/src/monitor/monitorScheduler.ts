@@ -9,6 +9,17 @@ import {
   type MonitorTask,
 } from './monitorTypes';
 
+/**
+ * 非执行窗口（没拿到锁）试图修改任务时抛出：任务状态只由持锁窗口写，
+ * 否则多个窗口各自的内存副本会互相覆盖 tasks.json。
+ */
+export class MonitorNotOwnerError extends Error {
+  constructor() {
+    super('monitor tasks are owned by another VS Code window');
+    this.name = 'MonitorNotOwnerError';
+  }
+}
+
 /** 执行结果：数值 / 多列 / 游标，加上只放内存的新增行。旧调用方可以只返回数字。 */
 export type MonitorRunOutput = number | (MonitorRunResult & { rows?: Array<Record<string, unknown>>; more?: boolean });
 
@@ -23,6 +34,11 @@ export interface MonitorSchedulerDeps {
   run(task: MonitorTask): Promise<MonitorRunOutput>;
   /** 本窗口是否持有执行锁；不持锁时只显示、不执行。 */
   canExecute(): boolean;
+  /**
+   * 本窗口是否拥有任务（持锁）：只有拥有者能修改任务并写 tasks.json。
+   * 缺省视为拥有（单窗口 / 测试）。
+   */
+  isOwner?(): boolean;
   /** 连接仍存在且指纹未变；否则任务暂停。 */
   connectionValid(task: MonitorTask): boolean;
   cooldownMs(): number;
@@ -62,11 +78,54 @@ export class MonitorScheduler {
     this.clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h));
   }
 
+  /**
+   * 启动：拥有者把所有任务置为暂停并写回；非拥有者只读取用于显示，不写文件
+   * （否则第二个窗口启动会把第一个窗口正在运行的任务全部改成暂停）。
+   */
   async start(): Promise<void> {
     const loaded = await this.deps.store.loadTasks();
+    if (!this.isOwner()) {
+      this.tasks = loaded;
+      this.deps.onChanged?.(this.tasks);
+      return;
+    }
     this.tasks = pauseAllOnStartup(loaded);
     if (loaded.some((t, i) => t.status !== this.tasks[i]?.status)) await this.persist();
     else this.deps.onChanged?.(this.tasks);
+  }
+
+  /** 非拥有者定期从磁盘刷新显示（拥有者以内存为准，不需要）。 */
+  async reload(): Promise<void> {
+    if (this.isOwner()) return;
+    const loaded = await this.deps.store.loadTasks();
+    if (JSON.stringify(loaded) === JSON.stringify(this.tasks)) return;
+    this.tasks = loaded;
+    this.deps.onChanged?.(this.tasks);
+  }
+
+  /**
+   * 接手执行（原执行窗口已关闭，锁过期）：以磁盘为准重新加载（游标等状态是原窗口最新写入的），
+   * 并把所有任务暂停——不在用户没看到的情况下继续查询，由用户在本窗口继续。
+   */
+  async takeOver(): Promise<void> {
+    if (!this.isOwner()) return;
+    for (const id of [...this.timers.keys()]) this.unschedule(id);
+    const loaded = await this.deps.store.loadTasks();
+    this.tasks = loaded.map((t) => (t.status === 'paused' ? t : { ...t, status: 'paused', pausedReason: 'handover' }));
+    await this.persist();
+  }
+
+  /** 失去执行权（另一窗口接手）：停掉本地计时器，之后只显示。 */
+  relinquish(): void {
+    for (const id of [...this.timers.keys()]) this.unschedule(id);
+  }
+
+  isOwner(): boolean {
+    return this.deps.isOwner ? this.deps.isOwner() : true;
+  }
+
+  private assertOwner(): void {
+    if (!this.isOwner()) throw new MonitorNotOwnerError();
   }
 
   list(): readonly MonitorTask[] {
@@ -88,6 +147,7 @@ export class MonitorScheduler {
 
   /** 新建任务并立即运行一次（基线），之后按间隔调度。 */
   async add(task: MonitorTask): Promise<void> {
+    this.assertOwner();
     this.tasks = [...this.tasks, { ...task, intervalMs: clampInterval(task.intervalMs), status: 'running', consecutiveFailures: 0 }];
     await this.persist();
     await this.runNow(task.id);
@@ -95,6 +155,7 @@ export class MonitorScheduler {
   }
 
   async resume(id: string): Promise<void> {
+    this.assertOwner();
     const task = this.get(id);
     if (!task || task.status === 'running') return;
     if (!this.deps.connectionValid(task)) {
@@ -107,15 +168,18 @@ export class MonitorScheduler {
   }
 
   async resumeAll(): Promise<void> {
+    this.assertOwner();
     for (const task of [...this.tasks]) if (task.status === 'paused') await this.resume(task.id);
   }
 
   async pause(id: string): Promise<void> {
+    this.assertOwner();
     this.unschedule(id);
     await this.update(id, { status: 'paused', pausedReason: 'user' });
   }
 
   async remove(id: string): Promise<void> {
+    this.assertOwner();
     this.unschedule(id);
     this.recentRows.delete(id);
     this.tasks = this.tasks.filter((t) => t.id !== id);
@@ -125,6 +189,7 @@ export class MonitorScheduler {
 
   /** 连接被删除 / 修改：相关运行中任务暂停。 */
   async revalidateConnections(): Promise<void> {
+    if (!this.isOwner()) return;
     for (const task of [...this.tasks]) {
       if (task.status === 'paused' || this.deps.connectionValid(task)) continue;
       this.unschedule(task.id);
@@ -140,7 +205,7 @@ export class MonitorScheduler {
   async runNow(id: string): Promise<void> {
     const task = this.get(id);
     if (!task || this.disposed) return;
-    if (!this.deps.canExecute()) return;
+    if (!this.deps.canExecute() || !this.isOwner()) return;
     if (this.inFlight.has(id)) {
       await this.deps.store.appendPoint(id, { at: this.now(), durationMs: 0, skipped: true });
       return;

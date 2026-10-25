@@ -2036,4 +2036,11 @@ export const en: MessageCatalog = {
   'monitor.warning.nullable': 'The cursor column allows NULL: rows with NULL are never detected.',
   'monitor.warning.noIndex': 'No index on the cursor column: every check scans the whole table.',
   'monitor.warning.noPrimaryKey': 'The table has no primary key: rows with the same cursor value may be missed.',
+  'monitor.condition.newRowsAny': 'notify on any new rows',
+  'monitor.condition.newRowsAtLeast': 'notify when {n}+ new rows arrive in one check',
+  'monitor.condition.newRowsAbove': 'notify when more than {n} new rows arrive in one check',
+  'monitor.notify.hitMetric': '{table}: {column} = {value}{delta} ({condition})',
+  'monitor.notify.hitNewRows': '{table}: {n} new rows ({condition})',
+  'monitor.list.paused.handover': 'Paused: the window that ran it was closed',
+  'monitor.warning.slowQuery': 'The trial run took {detail}s; this query is heavy, so an interval of 15 minutes or more is recommended.',
 };

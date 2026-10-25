@@ -2014,4 +2014,11 @@ export const zh: MessageCatalog = {
   'monitor.warning.nullable': '游标列允许为空：为空的行永远不会被检测到。',
   'monitor.warning.noIndex': '游标列上没有索引：每次检查都会扫描整张表。',
   'monitor.warning.noPrimaryKey': '表没有主键：游标值相同的行可能被漏掉。',
+  'monitor.condition.newRowsAny': '有新增行时提醒',
+  'monitor.condition.newRowsAtLeast': '本次新增 ≥ {n} 行时提醒',
+  'monitor.condition.newRowsAbove': '本次新增 > {n} 行时提醒',
+  'monitor.notify.hitMetric': '{table}：{column} = {value}{delta}（{condition}）',
+  'monitor.notify.hitNewRows': '{table}：新增 {n} 行（{condition}）',
+  'monitor.list.paused.handover': '原执行窗口已关闭，已暂停',
+  'monitor.warning.slowQuery': '试执行耗时 {detail} 秒：查询较重，建议间隔不低于 15 分钟。',
 };

@@ -1,4 +1,4 @@
-import { validateIdent, validateSchemaIdent, type QueryCancelToken } from '@devbelt/db-core';
+import { validateIdent, validateSchemaIdent, type ColumnMeta, type IndexMeta, type QueryCancelToken } from '@devbelt/db-core';
 import type { AgentEngine } from '@devbelt/agent-core';
 import { checkMetricResult, checkMetricSql } from './monitorValidate';
 import { MAX_CURSOR_SEEN, NEW_ROWS_LIMIT, type MonitorRunResult, type MonitorTask } from './monitorTypes';
@@ -358,8 +358,11 @@ export async function readCursorBaseline(
 }
 
 /**
- * 数据库层只读（第二道防线，和 Explain「实际执行」一致）；PG 指定 schema 时设置 search_path，
- * 让 A2 的未限定表名解析到该 schema。
+ * 数据库层只读（第二道防线，和 Explain「实际执行」一致）。
+ *
+ * PG 必须**每次**显式设置 search_path：`openIsolatedSql` 为跨 schema 目录读取固定了
+ * `search_path = pg_catalog`，不改回来的话未限定的表名（以及元数据里的 `current_schema()`）
+ * 都会落到 pg_catalog —— 查询报「关系不存在」，提案被判「表不存在」。
  */
 export async function applyReadOnly(session: MonitorQuerySession, dbType: string, schema?: string): Promise<void> {
   const q = session.query;
@@ -368,6 +371,33 @@ export async function applyReadOnly(session: MonitorQuerySession, dbType: string
   if (engine === 'MYSQL') await q.query('SET SESSION TRANSACTION READ ONLY', undefined, opts);
   else if (engine === 'PG') {
     await q.query('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', undefined, opts);
-    if (schema) await q.query(`SET search_path TO ${q.wrap(validateSchemaIdent(schema))}, public`, undefined, opts);
+    const path = schema ? `${q.wrap(validateSchemaIdent(schema))}, public` : '"$user", public';
+    await q.query(`SET search_path TO ${path}`, undefined, opts);
   } else if (engine === 'SQLITE') await q.query('PRAGMA query_only = ON', undefined, opts);
+}
+
+/** 会话若带元数据服务（真实 SqlConnectionSession）就用它；测试 fake 可不提供。 */
+interface MetadataCapableSession extends MonitorQuerySession {
+  metadata?: {
+    getColumns(table: string, database?: string, schema?: string): Promise<ColumnMeta[]>;
+    getIndexes(table: string, database?: string, schema?: string): Promise<IndexMeta[]>;
+  };
+}
+
+/** B 提案用：在监控的只读会话上读列与索引（与定时检查共用超时与串行链）。 */
+export async function describeTableReadOnly(
+  session: MonitorQuerySession,
+  _dbType: string,
+  database: string | undefined,
+  schema: string | undefined,
+  table: string,
+): Promise<{ columns: ColumnMeta[]; indexes: IndexMeta[] }> {
+  const meta = (session as MetadataCapableSession).metadata;
+  if (!meta) throw new Error('metadata is not available on this session');
+  validateIdent(table);
+  const [columns, indexes] = await Promise.all([
+    meta.getColumns(table, database, schema),
+    meta.getIndexes(table, database, schema).catch(() => [] as IndexMeta[]),
+  ]);
+  return { columns, indexes };
 }

@@ -100,6 +100,11 @@ export interface AiChatViewDeps {
   monitor?: MonitorService;
 }
 
+/** 监控关闭时不向模型注册 `propose_monitor`（而不是注册后返回 disabled）。 */
+export function monitorToolEnabled(): boolean {
+  return vscode.workspace.getConfiguration('devbelt.ai.monitor').get<boolean>('enabled', true) !== false;
+}
+
 /**
  * Agent 的目标库 / schema。PG 的作用域选择器列的是**库**（`listScopes` → `getDatabases`），
  * 所以选中值是库名，schema 取连接配置（与表清单 / 列读取一致）；其他引擎作用域就是库。
@@ -163,6 +168,11 @@ export class AiChatView extends BaseWebView {
   private pendingMonitorOpen?: { focusId?: string };
   /** 监控任务变化订阅（面板销毁时释放）。 */
   private monitorSub?: { dispose(): void };
+  /**
+   * 对话里的监控提案卡片（按会话 id）：webview 重载 / 切换会话后重新下发，
+   * 否则模型已经说了「请点卡片」，用户却看不到卡片。只在内存里，随面板销毁。
+   */
+  private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created' | 'discarded' }>>();
 
   private constructor(private readonly deps: AiChatViewDeps) {
     super(VIEW_TYPE, l10n('ai.title'), vscode.ViewColumn.Active, undefined, getAiChatHtml);
@@ -238,7 +248,26 @@ export class AiChatView extends BaseWebView {
   }
 
   private postProposal(proposal: MonitorProposalView): void {
-    this.post({ type: 'monitorProposal', sessionId: this.activeSessionId ?? '', proposal } as never);
+    const sessionId = this.activeSessionId ?? '';
+    const list = this.proposalCards.get(sessionId) ?? [];
+    list.push({ proposal, status: 'pending' });
+    this.proposalCards.set(sessionId, list.slice(-20));
+    this.post({ type: 'monitorProposal', sessionId, proposal } as never);
+  }
+
+  /** 会话加载后补发该会话的提案卡片（含已处理的状态）。 */
+  private replayProposals(sessionId: string | undefined): void {
+    if (!sessionId) return;
+    for (const card of this.proposalCards.get(sessionId) ?? []) {
+      this.post({ type: 'monitorProposal', sessionId, proposal: card.proposal, status: card.status } as never);
+    }
+  }
+
+  private markProposal(proposalId: string, status: 'created' | 'discarded'): void {
+    for (const list of this.proposalCards.values()) {
+      const card = list.find((c) => c.proposal.id === proposalId);
+      if (card) card.status = status;
+    }
   }
 
   /** 「让 AI 解读」：默认只发指标时间序列；新增行内容需用户勾选，且经敏感列脱敏。 */
@@ -371,6 +400,7 @@ export class AiChatView extends BaseWebView {
         if (!session) return;
         this.activeSessionId = session.id;
         this.post({ type: 'sessionLoaded', session } as never);
+        this.replayProposals(session.id);
         return;
       }
       case 'selectConnection': {
@@ -558,7 +588,15 @@ export class AiChatView extends BaseWebView {
           const picked = await vscode.window.showWarningMessage(l10n('monitor.remove.confirm', { table: task?.label ?? msg.id }), { modal: true }, ok);
           if (picked !== ok) return;
         }
-        await bridge.handlers.action(msg.id, action);
+        try {
+          await bridge.handlers.action(msg.id, action);
+        } catch (err) {
+          if (err instanceof Error && err.name === 'MonitorNotOwnerError') {
+            void vscode.window.showInformationMessage(l10n('monitor.list.otherWindowAction'));
+            return;
+          }
+          throw err;
+        }
         this.pushMonitorList();
         if (action !== 'remove') {
           const detail = await bridge.handlers.detail(msg.id);
@@ -567,7 +605,15 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'monitorResumeAll': {
-        await MonitorBridge.tryGet()?.handlers.resumeAll();
+        try {
+          await MonitorBridge.tryGet()?.handlers.resumeAll();
+        } catch (err) {
+          if (err instanceof Error && err.name === 'MonitorNotOwnerError') {
+            void vscode.window.showInformationMessage(l10n('monitor.list.otherWindowAction'));
+            return;
+          }
+          throw err;
+        }
         this.pushMonitorList();
         return;
       }
@@ -575,7 +621,13 @@ export class AiChatView extends BaseWebView {
         const bridge = MonitorBridge.tryGet();
         if (!bridge || typeof msg.proposalId !== 'string') return;
         const minutes = typeof msg.intervalMinutes === 'number' ? msg.intervalMinutes : undefined;
-        const result = await bridge.handlers.confirm(msg.proposalId, minutes !== undefined ? { intervalMinutes: minutes } : {});
+        let result: Awaited<ReturnType<typeof bridge.handlers.confirm>>;
+        try {
+          result = await bridge.handlers.confirm(msg.proposalId, minutes !== undefined ? { intervalMinutes: minutes } : {});
+        } catch (err) {
+          result = { ok: false, reason: err instanceof Error && err.name === 'MonitorNotOwnerError' ? 'otherWindow' : 'error', issues: [] };
+        }
+        if (result.ok) this.markProposal(msg.proposalId, 'created');
         this.post({
           type: 'monitorConfirmResult',
           proposalId: msg.proposalId,
@@ -585,7 +637,10 @@ export class AiChatView extends BaseWebView {
         return;
       }
       case 'monitorDiscard':
-        if (typeof msg.proposalId === 'string') MonitorBridge.tryGet()?.handlers.discard(msg.proposalId);
+        if (typeof msg.proposalId === 'string') {
+          MonitorBridge.tryGet()?.handlers.discard(msg.proposalId);
+          this.markProposal(msg.proposalId, 'discarded');
+        }
         return;
       case 'monitorExplain':
         if (typeof msg.id === 'string') await this.explainMonitor(msg.id, msg.includeRows === true);
@@ -751,7 +806,7 @@ export class AiChatView extends BaseWebView {
       });
       // P13：propose_monitor 只生成提案（卡片），不创建任务；监控关闭时不注册。
       const bridge = MonitorBridge.tryGet();
-      const monitorTool = this.deps.monitor && bridge
+      const monitorTool = this.deps.monitor && bridge && monitorToolEnabled()
         ? buildMonitorTool({
           service: this.deps.monitor,
           conn,
@@ -1436,7 +1491,10 @@ export class AiChatView extends BaseWebView {
       ...(active ? { activeSessionId: active.id } : {}),
     };
     this.post(down as never);
-    if (active) this.post({ type: 'sessionLoaded', session: active } as never);
+    if (active) {
+      this.post({ type: 'sessionLoaded', session: active } as never);
+      this.replayProposals(active.id);
+    }
   }
 
   private async pushContext(): Promise<void> {
@@ -1457,6 +1515,7 @@ export class AiChatView extends BaseWebView {
   private pushActiveSession(): void {
     const session = this.activeSessionId ? this.deps.sessions.get(this.activeSessionId) : undefined;
     this.post({ type: 'sessionLoaded', session: session ?? emptySession() } as never);
+    this.replayProposals(session?.id);
   }
 
   private async refreshQuota(requestId?: string): Promise<void> {

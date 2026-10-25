@@ -9,11 +9,12 @@ import { l10n } from '../i18n';
 import { createRowCountMonitor, showMonitorTasks, type MonitorCommandDeps, type MonitorTableNode } from './monitorCommands';
 import { MonitorBridge, type MonitorTaskView } from './monitorBridge';
 import { MonitorService } from './monitorService';
-import { describeCondition } from './monitorNotifier';
+import { describeTaskCondition } from './monitorNotifier';
 import { MonitorExecutor } from './monitorExecutor';
 import { MonitorLock } from './monitorLock';
-import { MonitorNotifier, taskTitle } from './monitorNotifier';
-import { MonitorScheduler } from './monitorScheduler';
+import { MonitorNotifier } from './monitorNotifier';
+import { MonitorNotOwnerError, MonitorScheduler } from './monitorScheduler';
+import { describeTableReadOnly } from './monitorExecutor';
 import { MonitorStatusBar } from './monitorStatusBar';
 import { MonitorStore } from './monitorStore';
 import { connectionFingerprint, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_TASKS, monitorLabel, type MonitorTask } from './monitorTypes';
@@ -76,6 +77,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
     store,
     run: (task) => executor.run(task),
     canExecute: () => lock.isHeld && config().get<boolean>('enabled', true),
+    isOwner: () => lock.isHeld,
     connectionValid: (task) => {
       const conn = deps.store.get(task.connId);
       if (!conn) return false;
@@ -102,7 +104,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       ...(task.database ? { database: task.database } : {}),
       ...(task.schema ? { schema: task.schema } : {}),
       // 只记操作与目标，不记任何行内容。
-      sql: `${action}: ${task.kind} ${taskTitle(task)}${task.origin === 'ai' ? ' (ai)' : ''}`,
+      sql: `${action}: ${task.kind} ${task.database ? `${task.database}.` : ''}${task.schema ? `${task.schema}.` : ''}${task.table}${task.label ? ` "${task.label}"` : ''}${task.origin === 'ai' ? ' (ai)' : ''}`,
     });
   };
 
@@ -125,19 +127,12 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
     allowProduction: commandDeps.allowProduction,
     maxTasks: commandDeps.maxTasks,
     enabled: commandDeps.enabled,
-    describe: async (conn, database, schema, table) => {
-      // 走监控自己的只读会话读元数据（不占用树 / 面板会话）。
-      const opened = await deps.manager.openIsolatedSql(conn, database);
-      try {
-        const [columns, indexes] = await Promise.all([
-          opened.session.metadata.getColumns(table, database, schema),
-          opened.session.metadata.getIndexes(table, database, schema).catch(() => []),
-        ]);
-        return { columns, indexes };
-      } finally {
-        opened.close();
-      }
-    },
+    // 走执行器的只读会话（search_path 已按 schema 设置）读元数据，带超时、与定时检查串行。
+    describe: (conn, database, schema, table) => executor.trial(
+      { connId: conn.id, ...(database ? { database } : {}), ...(schema ? { schema } : {}) },
+      (session) => describeTableReadOnly(session, String(conn.dbType), database, schema, table),
+    ),
+    isOwner: () => lock.isHeld,
     audit,
   });
 
@@ -154,7 +149,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       status: task.status,
       ...(task.pausedReason ? { pausedReason: task.pausedReason } : {}),
       intervalMs: task.intervalMs,
-      conditionText: (task.watchColumn ? `${task.watchColumn}: ` : '') + describeCondition(task.condition),
+      conditionText: describeTaskCondition(task),
       ...(task.lastValue !== undefined ? { lastValue: task.lastValue } : {}),
       ...(task.lastValues ? { lastValues: task.lastValues } : {}),
       ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
@@ -178,12 +173,14 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
     action: async (id, action) => {
       const task = scheduler.get(id);
       if (!task) return;
+      if (!lock.isHeld) throw new MonitorNotOwnerError();
       if (action === 'resume') { await scheduler.resume(id); audit('resume', task); }
       else if (action === 'pause') { await scheduler.pause(id); audit('pause', task); }
       else if (action === 'runNow') { if (lock.isHeld) await scheduler.runNow(id); }
       else if (action === 'remove') { await scheduler.remove(id); audit('remove', task); }
     },
     resumeAll: async () => {
+      if (!lock.isHeld) throw new MonitorNotOwnerError();
       await scheduler.resumeAll();
       for (const task of scheduler.list()) if (task.status === 'running') audit('resume', task);
     },
@@ -206,29 +203,36 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       ...(p.database ? { database: p.database } : {}),
       ...(p.schema ? { schema: p.schema } : {}),
       intervalMinutes: Math.round(p.intervalMs / 60_000),
-      conditionText: (p.watchColumn ? `${p.watchColumn}: ` : '') + describeCondition(p.condition),
+      conditionText: describeTaskCondition(p),
       ...(p.sql ? { sql: p.sql } : {}),
       ...(p.columns ? { columns: p.columns } : {}),
       ...(p.watchColumn ? { watchColumn: p.watchColumn } : {}),
       ...(p.preview ? { preview: p.preview } : {}),
       ...(p.cursorColumn ? { cursorColumn: p.cursorColumn } : {}),
-      warnings: p.warnings.map((w) => w.code),
+      warnings: p.warnings.map((w) => ({ code: w.code, ...(w.detail ? { detail: w.detail } : {}) })),
     }),
   });
 
   notifier = new MonitorNotifier({
     view: (task) => void vscode.commands.executeCommand('devbelt.monitor.tasks', task.id),
     pause: async (task) => {
+      if (!lock.isHeld) return;
       await scheduler.pause(task.id);
       audit('pause', task);
     },
   });
 
-  // 锁：获取 → 心跳续期；失去锁时停止执行（调度器每次运行前检查 canExecute）。
+  // 锁：获取 → 心跳续期。拿到锁（首次或原窗口关闭后接手）时以磁盘为准重新加载；
+  // 失去锁时停掉本地计时器；不持锁时定期从磁盘刷新显示。
+  let started = false;
   const heartbeat = async (): Promise<void> => {
     try {
       const before = lock.isHeld;
       await lock.tryAcquire();
+      if (!started) return;
+      if (!before && lock.isHeld) await scheduler.takeOver();
+      else if (before && !lock.isHeld) scheduler.relinquish();
+      else if (!lock.isHeld) await scheduler.reload();
       if (before !== lock.isHeld) refreshStatus();
     } catch (err) {
       diagWarn('monitor lock heartbeat failed', String(err));
@@ -239,6 +243,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
   void (async () => {
     await heartbeat();
     await scheduler.start();
+    started = true;
     refreshStatus();
   })().catch((err) => diagWarn('monitor start failed', String(err)));
 
@@ -268,6 +273,10 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       deps.openAiSetup?.(node);
     }),
     vscode.commands.registerCommand('devbelt.monitor.resumeAll', async () => {
+      if (!lock.isHeld) {
+        void vscode.window.showInformationMessage(l10n('monitor.list.otherWindowAction'));
+        return;
+      }
       await scheduler.resumeAll();
       for (const task of scheduler.list()) if (task.status === 'running') audit('resume', task);
     }),

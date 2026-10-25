@@ -16,13 +16,15 @@ All notable changes to DevBelt DB Client are documented in this file.
   - **New rows**: watches an existing integer or date/time column for rows added since the last check; rows sharing the same value are de-duplicated by primary key.
   - In Agent mode the assistant can only **propose** a metric or new-rows task with `propose_monitor`; a card shows the SQL / column, current values and warnings, and nothing is created until you click *Create and start*. The proposal is validated again on confirmation. Right-click → *Set Up Monitoring with AI…* opens the chat with Agent on.
   - **Background Tasks** (More menu in AI Chat, status bar, or command): list, line or bar chart, check history, latest new rows, pause / resume / check now / remove, and *Ask AI to explain*, which sends only the numeric history unless you tick *include the latest new rows* (sensitive columns redacted).
-  - Safety: checks run on an isolated session made read-only at the database level, with a 30 s timeout, no query history and one check at a time per connection; production connections are refused unless `devbelt.ai.monitor.allowProduction` is on; at most 5 tasks per connection and 20 in total; tasks are paused every time VS Code starts, after three failures in a row, or when their connection is removed or changed; only one VS Code window runs them. Task definitions and up to 500 history points per task stay under the extension's global storage; new-row contents are kept in memory only.
+  - Safety: checks run on an isolated session made read-only at the database level, with a 30 s timeout, no query history and one check at a time per connection + database + schema; production connections are refused unless `devbelt.ai.monitor.allowProduction` is on; at most 5 tasks per connection and 20 in total; tasks are paused every time VS Code starts, after three failures in a row, or when their connection is removed or changed; only one VS Code window runs and edits them (other windows are view-only; when that window closes, another takes over with the tasks paused). Task definitions and up to 500 history points per task stay under the extension's global storage, including the cursor value and up to 1000 primary-key values of rows already seen for new-rows tasks; new-row contents are kept in memory only.
 - Settings: `devbelt.ai.monitor.enabled`, `allowProduction`, `queryTimeoutSeconds`, `notifyCooldownMinutes`, `maxTasks`.
 
 #### Known limitations
 
 - Row count only sees the net change (10 inserts and 10 deletes look like no change); new-rows monitoring does not see updates or deletes.
 - Nothing is checked while VS Code is closed.
+- When more than 50 new rows arrive in one check, rows inserted between counting them and reading the new cursor maximum can be skipped.
+- A slow metric query (trial run of 5 s or more) is only flagged on the card; it is not blocked.
 - PostgreSQL monitoring is covered by unit tests only in this release.
 
 ### 中文
@@ -35,13 +37,15 @@ All notable changes to DevBelt DB Client are documented in this file.
   - **新增行**：基于表里已有的整数或时间列，检查上次之后新增的行；游标值相同的行按主键去重。
   - Agent 模式下，助手只能用 `propose_monitor` **提出**指标或新增行任务；对话里显示提案卡片（SQL / 列、当前值、提示），你点「创建并开始」才会创建，确认时会再校验一次。表右键 →「让 AI 帮我设置监控…」会打开对话并开启 Agent。
   - **后台任务**（AI Chat「⋯」菜单、状态栏或命令）：任务列表、折线图或柱状图、检查记录、最近新增的行，暂停 / 继续 / 立即检查 / 删除，以及「让 AI 解读」——默认只发送数值历史，勾选「附带最近的新增行」才会发送行内容（敏感列遮蔽）。
-  - 安全：在独立会话上执行并在数据库层设为只读；单次超时 30 秒，不写查询历史，同一连接一次只跑一个检查；生产连接默认拒绝，需开启 `devbelt.ai.monitor.allowProduction`；每个连接最多 5 个、总共最多 20 个任务；每次启动 VS Code、连续失败 3 次、连接被删除或修改时任务自动暂停；只有一个 VS Code 窗口执行。任务定义和每个任务最多 500 个历史点保存在扩展的全局存储里；新增行内容只保存在内存中。
+  - 安全：在独立会话上执行并在数据库层设为只读；单次超时 30 秒，不写查询历史，同一「连接 + 库 + schema」一次只跑一个检查；生产连接默认拒绝，需开启 `devbelt.ai.monitor.allowProduction`；每个连接最多 5 个、总共最多 20 个任务；每次启动 VS Code、连续失败 3 次、连接被删除或修改时任务自动暂停；只有一个 VS Code 窗口执行和修改任务（其他窗口只能查看；该窗口关闭后由其他窗口接手，任务先暂停）。任务定义和每个任务最多 500 个历史点保存在扩展的全局存储里，新增行任务还会保存游标值和最多 1000 个已见行的主键值；新增行内容只保存在内存中。
 - 设置：`devbelt.ai.monitor.enabled`、`allowProduction`、`queryTimeoutSeconds`、`notifyCooldownMinutes`、`maxTasks`。
 
 #### 已知限制
 
 - 行数监控只看净变化（新增 10 行、删除 10 行显示为无变化）；新增行监控看不到修改和删除。
 - VS Code 关闭期间不检查。
+- 一次新增超过 50 行时，在统计行数和读取新游标最大值之间插入的行可能被跳过。
+- 指标查询较慢（试执行 ≥ 5 秒）时只在卡片上提示，不拦截。
 - 本版本 PostgreSQL 的监控只有单元测试覆盖。
 
 ## [0.3.0] - 2026-10-24

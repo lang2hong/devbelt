@@ -75,6 +75,9 @@ describe('B cursor column', () => {
     expect(cursorKindOf('SQLITE', 'INTEGER')).toBe('integer');
     expect(cursorKindOf('SQLITE', 'TEXT')).toBeUndefined();
     expect(cursorKindOf('SQLITE', 'DATETIME')).toBeUndefined();
+    // SQLite 类型亲和：名字里含 INT 即整数
+    for (const t of ['BIGINT', 'TINYINT', 'MEDIUMINT', 'SMALLINT', 'UNSIGNED BIG INT', 'INT8', 'int']) expect(cursorKindOf('SQLITE', t), t).toBe('integer');
+    expect(cursorKindOf('SQLITE', 'REAL')).toBeUndefined();
   });
 
   it('accepts an indexed integer column with a primary key without warnings', () => {

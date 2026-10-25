@@ -49,7 +49,7 @@ function intervalLabel(minutes: number): string {
     </dl>
     <pre v-if="p.sql" class="mp-sql">{{ p.sql }}</pre>
     <ul v-if="p.warnings.length" class="mp-warn">
-      <li v-for="w in p.warnings" :key="w">{{ t(`monitor.warning.${w}`) }}</li>
+      <li v-for="w in p.warnings" :key="w.code">{{ t(`monitor.warning.${w.code}`, { detail: w.detail ?? '' }) }}</li>
     </ul>
 
     <div v-if="props.state.status === 'pending' || props.state.status === 'failed'" class="mp-actions">

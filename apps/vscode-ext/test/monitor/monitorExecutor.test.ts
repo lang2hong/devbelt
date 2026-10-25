@@ -158,7 +158,7 @@ describe('MonitorExecutor', () => {
   });
 });
 
-import { advanceCursor, buildNewRowsSql, executeTask, readCursorBaseline } from '../../src/monitor/monitorExecutor';
+import { advanceCursor, buildNewRowsSql, describeTableReadOnly, executeTask, readCursorBaseline } from '../../src/monitor/monitorExecutor';
 
 describe('new rows (B)', () => {
   const base = { table: 'events', cursorColumn: 'id', primaryKey: ['id'] as string[] };
@@ -239,5 +239,46 @@ describe('metric (A2)', () => {
     await executor.run(task({ schema: 'sales' }));
     expect(fake.executed.map((e) => e.sql).slice(0, 2)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'SET search_path TO "sales", public']);
     executor.dispose();
+  });
+
+  it('resets the PG search_path away from pg_catalog when the task has no schema', async () => {
+    const fake = fakeSession((sql) => (sql.startsWith('SELECT') ? [{ n: 1 }] : []), quote);
+    const executor = new MonitorExecutor({ openSession: async () => ({ session: fake.session, close: fake.close }), dbTypeOf: () => 'PG', timeoutMs: () => 30_000 });
+    await executor.run(task());
+    expect(fake.executed.map((e) => e.sql).slice(0, 2)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'SET search_path TO "$user", public']);
+    executor.dispose();
+  });
+
+  it('does not touch search_path for MySQL or SQLite', async () => {
+    for (const dbType of ['MYSQL', 'SQLITE']) {
+      const fake = fakeSession((sql) => (sql.startsWith('SELECT') ? [{ n: 1 }] : []));
+      const executor = new MonitorExecutor({ openSession: async () => ({ session: fake.session, close: fake.close }), dbTypeOf: () => dbType, timeoutMs: () => 30_000 });
+      await executor.run(task());
+      expect(fake.executed.some((e) => /search_path/.test(e.sql))).toBe(false);
+      executor.dispose();
+    }
+  });
+});
+
+describe('describeTableReadOnly', () => {
+  it('reads columns and indexes on the read-only monitor session', async () => {
+    const fake = fakeSession(() => [], quote);
+    const getColumns = vi.fn(async () => [{ name: 'id' }]);
+    const getIndexes = vi.fn(async () => { throw new Error('no index access'); });
+    const session = { ...fake.session, metadata: { getColumns, getIndexes } } as unknown as MonitorQuerySession;
+    const executor = new MonitorExecutor({ openSession: async () => ({ session, close: fake.close }), dbTypeOf: () => 'PG', timeoutMs: () => 30_000 });
+    const out = await executor.trial({ connId: 'c1', database: 'app' }, (s) => describeTableReadOnly(s, 'PG', 'app', undefined, 'orders'));
+    expect(out).toEqual({ columns: [{ name: 'id' }], indexes: [] });
+    expect(getColumns).toHaveBeenCalledWith('orders', 'app', undefined);
+    // 先设只读与 search_path，再读元数据
+    expect(fake.executed.map((e) => e.sql)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'SET search_path TO "$user", public']);
+    executor.dispose();
+  });
+
+  it('rejects unsafe table names and sessions without metadata', async () => {
+    const fake = fakeSession(() => []);
+    await expect(describeTableReadOnly(fake.session, 'MYSQL', 'app', undefined, 'orders')).rejects.toThrow(/metadata/);
+    const session = { ...fake.session, metadata: { getColumns: vi.fn(), getIndexes: vi.fn() } } as unknown as MonitorQuerySession;
+    await expect(describeTableReadOnly(session, 'MYSQL', 'app', undefined, 'a`; DROP')).rejects.toThrow();
   });
 });
