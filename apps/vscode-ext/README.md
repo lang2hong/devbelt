@@ -153,6 +153,10 @@ Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表�
 - Inline SQL completion (off by default, trigger with `Alt+/`).
 - Server proxy or bring-your-own API key.
 - AI preferences and custom rules sync across devices with end-to-end encryption.
+- **Agent mode** (off by default via `devbelt.ai.agent.enabled`): open AI Chat, pick a connection and switch **Agent** on. The assistant inspects the schema, runs read-only SQL and plain `EXPLAIN` step by step (`list_schemas`, `list_tables`, `describe_table`, `explain_query`, `run_read_only_query`), within a step / tool-call / time budget (12 / 24 / 120 s, configurable).
+- **Write proposals only**: DML and DDL are proposed, dry-run where possible, and executed only after you approve them in a native dialog. `devbelt.ai.agent.allowWrites`, `devbelt.ai.agent.allowDdl` and `devbelt.ai.agent.allowProduction` control what may be proposed. Every decision is appended to a local JSONL ledger.
+- **Where to open AI Chat**: the DevBelt sidebar title, the status bar, or the `✦ AI` button in a query result panel (that one prefills the current SQL and does not send it).
+- **EXPLAIN panel "Execute"**: runs `EXPLAIN ANALYZE` on a separate read-only session for real row counts and timings (MySQL/PostgreSQL; production connections require `devbelt.explain.allowAnalyzeProduction`).
 
 ### Sync, security and audit
 
@@ -267,6 +271,10 @@ code --install-extension lang2hong.devbelt-db-client
 - SQL 行内补全（默认关闭，按 `Alt+/` 触发）。
 - 支持服务端代理或自带 API Key。
 - AI 偏好与自定义规则端到端加密跨设备同步。
+- **Agent 模式**（`devbelt.ai.agent.enabled` 默认关闭）：在 AI Chat 选好连接，把顶栏「Agent：关」切换为开。助手会逐步查结构、跑只读 SQL 与普通 `EXPLAIN`（`list_schemas`、`list_tables`、`describe_table`、`explain_query`、`run_read_only_query`），并受步数 / 工具次数 / 时间预算限制（默认 12 次 / 24 次 / 120 秒，可调）。
+- **写操作只能提出**：DML / DDL 先给出方案，能试执行的先试执行并回滚，只有你在原生弹窗中批准后才会真正执行。`devbelt.ai.agent.allowWrites`、`devbelt.ai.agent.allowDdl`、`devbelt.ai.agent.allowProduction` 控制允许提出哪些；每次决策写入本地 JSONL 执行账本。
+- **AI 对话入口**：DevBelt 侧栏标题、状态栏，以及查询结果面板的 `✦ AI` 按钮（只预填当前 SQL，不会自动发送）。
+- **EXPLAIN 面板「实际执行」**：在独立只读会话上执行 `EXPLAIN ANALYZE`，获得真实行数与耗时（MySQL / PostgreSQL；生产连接需开启 `devbelt.explain.allowAnalyzeProduction`）。
 
 ### 同步、安全与审计
 
