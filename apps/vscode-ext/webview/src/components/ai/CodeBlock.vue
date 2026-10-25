@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { inject, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
 import { useVsCode } from '../../composables/useVsCode';
 import { useI18n } from '../../composables/useI18n';
 import { RUN_IN_CHAT_KEY } from '../../utils/runInChat';
+import MoreMenu, { type MoreMenuItem } from './MoreMenu.vue';
 
 const props = defineProps<{
   code: string;
@@ -23,6 +24,16 @@ const canExecute = (): boolean => {
 const { post } = useVsCode();
 const { t } = useI18n();
 const copied = ref(false);
+
+/** 低频操作收进代码块自己的「⋯」：插入编辑器 / 在面板运行。 */
+const moreItems = computed<MoreMenuItem[]>(() => [
+  ...(isSql() ? [{ id: 'insert', label: t('wv.ai.insert') }] : []),
+  ...(canExecute() ? [{ id: 'runPanel', label: t('wv.ai.runPanel') }] : []),
+]);
+function onMore(id: string): void {
+  if (id === 'insert') apply();
+  else if (id === 'runPanel') runInPanel();
+}
 
 function copy(): void {
   post({ type: 'copyCode', text: props.code });
@@ -72,9 +83,8 @@ function runInChat(): void {
       <span class="ai-code-lang">{{ lang || 'code' }}</span>
       <div class="ai-code-actions">
         <button class="ai-btn ai-code-copy" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
-        <button v-if="isSql()" class="ai-btn" @click="apply">{{ t('wv.ai.insert') }}</button>
-        <button v-if="canExecute()" class="ai-btn" @click="runInPanel">{{ t('wv.ai.runPanel') }}</button>
-        <button v-if="canExecute()" class="ai-btn" @click="runInChat">{{ t('wv.ai.runChat') }}</button>
+        <button v-if="canExecute()" class="ai-btn" :title="t('wv.ai.runChat')" @click="runInChat">{{ t('wv.ai.run') }}</button>
+        <MoreMenu v-if="moreItems.length" :items="moreItems" @select="onMore" />
       </div>
     </div>
     <pre class="ai-code-body"><code>{{ code }}</code></pre>
@@ -93,6 +103,7 @@ function runInChat(): void {
 }
 .ai-code-actions {
   display: flex;
+  align-items: center;
   gap: 4px;
 }
 .ai-code-head {

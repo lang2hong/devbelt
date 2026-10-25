@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { provide, computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { provide, computed, onMounted, onUnmounted, ref } from 'vue';
 import { useVsCode } from '../composables/useVsCode';
 import { setLanguage, useI18n } from '../composables/useI18n';
 import MessageList from '../components/ai/MessageList.vue';
 import ChatInput from '../components/ai/ChatInput.vue';
 import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
+import SideDrawer from '../components/ai/SideDrawer.vue';
+import QuotaPanel from '../components/ai/QuotaPanel.vue';
+import type { MoreMenuItem } from '../components/ai/MoreMenu.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TableNoteDialog, { type TableNoteColumn } from '../components/ai/TableNoteDialog.vue';
 import TableScopeDialog from '../components/ai/TableScopeDialog.vue';
@@ -107,8 +110,6 @@ const messages = ref<ChatMessage[]>([]);
 const streaming = ref<{ content: string; reasoning: string } | null>(null);
 const selectedConnId = ref<string | undefined>(undefined);
 const input = ref('');
-const includeColumnComments = ref(true);
-const autoRunReadOnlySql = ref(true);
 const agentEnabled = ref(false);
 const agentSteps = ref<Array<{ index: number; tool: string; status: 'running' | 'ok' | 'error'; summary?: string; durationMs?: number; errorCode?: string }>>([]);
 const agentNotice = ref('');
@@ -120,14 +121,26 @@ const suggestions = computed(() => [
   t('wv.ai.suggest.diagnose'),
 ]);
 /**
- * 侧栏折叠视图组（VSCode 侧栏风格：上下堆叠、各自 ▸/▾，可同时展开）：
- * 注入的表（点表名打开说明弹层）/ 会话记录。
+ * 右侧抽屉（一次只开一个）：会话记录 / 注入的表 / 业务规则 / 额度。
+ * 默认关闭，对话区占满宽度；入口在顶栏「⋯」。
  */
-const sidebarOpen = reactive({ context: false, rules: false, sessions: true });
-function toggleSection(key: keyof typeof sidebarOpen): void {
-  sidebarOpen[key] = !sidebarOpen[key];
-  if (key === 'context' && sidebarOpen.context) requestContextDetailIfNeeded();
+type DrawerKind = 'sessions' | 'tables' | 'rules' | 'quota';
+const drawer = ref<DrawerKind | null>(null);
+function openDrawer(kind: DrawerKind): void {
+  drawer.value = kind;
+  if (kind === 'tables') requestContextDetailIfNeeded();
+  if (kind === 'rules' && selectedConnId.value) post({ type: 'requestBusinessRules' });
+  if (kind === 'quota') refreshQuota(false);
 }
+const drawerTitle = computed(() => {
+  switch (drawer.value) {
+    case 'sessions': return t('wv.ai.sessions');
+    case 'tables': return t('wv.ai.context.tablesTitle');
+    case 'rules': return t('wv.ai.rules.title');
+    case 'quota': return t('wv.ai.quota.title');
+    default: return '';
+  }
+});
 /** P9 S4/S7g：「实际注入的表」清单（只读快照；点表名进编辑器）。 */
 const contextDetail = ref<ContextDetailState | null>(null);
 let contextDetailPending = false;
@@ -228,8 +241,6 @@ onMounted(() => {
         context.value = msg.context ?? null;
         connections.value = Array.isArray(msg.connections) ? msg.connections : [];
         sessions.value = Array.isArray(msg.sessions) ? msg.sessions : [];
-        includeColumnComments.value = !!msg.includeColumnComments;
-        autoRunReadOnlySql.value = msg.autoRunReadOnlySql !== false;
         agentEnabled.value = msg.agentEnabled === true;
         activeSessionId.value = msg.activeSessionId || undefined;
         selectedConnId.value = msg.context?.connId;
@@ -380,7 +391,6 @@ onMounted(() => {
           totalTables: Number(msg.context?.totalTables ?? 0),
           tables: Array.isArray(msg.tables) ? msg.tables : [],
         };
-        sidebarOpen.context = true;
         break;
       case 'prefillInput':
         if (typeof msg.text === 'string') input.value = msg.text;
@@ -599,13 +609,6 @@ const scopeLabel = computed(() => {
   return count > 0 ? t('wv.ai.tables.scopeCustom', { n: count }) : t('wv.ai.tables.scopeAuto');
 });
 
-/** 「实际注入的表」仅对关系引擎有意义（Redis/ES 的上下文不是表；连接未定时默认显示）。 */
-const RELATIONAL_DB_TYPES = new Set(['MYSQL', 'PG', 'SQLITE']);
-const showTablesSection = computed(() => {
-  const dbType = String(context.value?.dbType ?? '').toUpperCase();
-  return dbType === '' || RELATIONAL_DB_TYPES.has(dbType);
-});
-
 function openScopeDialog(): void {
   showScopeDialog.value = true;
   tableOptions.value = [];
@@ -639,12 +642,47 @@ function fetchColumnSample(column: string): void {
   post({ type: 'fetchColumnSample', table: tableNoteTable.value, column });
 }
 
-/** P9 S4：打开上下文明细（按需向 host 拉域上下文/默认指令原文 + 注入表清单）。 */
-function openContextDetail(): void {
-  sidebarOpen.context = true;
-  contextDetail.value = null;
-  contextDetailPending = true;
-  post({ type: 'requestContextDetail' });
+/** 「⋯」菜单：低频功能统一收纳（注入的表在顶栏库选择器之后，不在这里）。 */
+const menuItems = computed<MoreMenuItem[]>(() => {
+  const usesQuota = provider.value?.mode !== 'openai-compatible';
+  const items: MoreMenuItem[] = [
+    { id: 'sessions', label: t('wv.ai.sessions'), hint: sessions.value.length ? String(sessions.value.length) : undefined },
+  ];
+  items.push({
+    id: 'rules',
+    label: t('wv.ai.rules.title'),
+    disabled: !selectedConnId.value,
+    hint: rulesSummary.value.configured ? t('wv.ai.rules.configured') : undefined,
+  });
+  if (usesQuota) items.push({ id: 'quota', label: t('wv.ai.quota.title'), separator: true });
+  items.push(
+    { id: 'modelAccess', label: t('wv.ai.modelAccess'), separator: !usesQuota },
+    { id: 'settings', label: t('wv.ai.settings') },
+  );
+  return items;
+});
+
+function onMenu(id: string): void {
+  if (id === 'sessions' || id === 'tables' || id === 'rules' || id === 'quota') openDrawer(id);
+  else if (id === 'modelAccess') openModelAccess();
+  else if (id === 'settings') post({ type: 'openSettings' });
+}
+
+function toggleAgent(): void {
+  if (!selectedConnId.value) return;
+  agentEnabled.value = !agentEnabled.value;
+  post({ type: 'setAgentMode', enabled: agentEnabled.value });
+}
+
+/** 抽屉内加载会话后关闭抽屉，回到对话。 */
+function loadSessionFromDrawer(id: string): void {
+  loadSession(id);
+  drawer.value = null;
+}
+
+function newChatFromDrawer(): void {
+  newChat();
+  drawer.value = null;
 }
 </script>
 
@@ -654,90 +692,19 @@ function openContextDetail(): void {
       :provider="provider"
       :context="context"
       :quota="quota"
-      :quota-refreshing="quotaRefreshing"
-      :quota-feedback="quotaFeedback"
       :connections="connections"
       :selected-conn-id="selectedConnId"
-      :include-column-comments="includeColumnComments"
+      :menu-items="menuItems"
       @select-connection="selectConnection"
       @open-connection="reopenConnection"
       @select-scope="selectScope"
-      @open-console="buyTopup"
-      @open-settings="post({ type: 'openSettings' })"
+      @new-chat="newChat"
+      @menu="onMenu"
+      @open-quota="openDrawer('quota')"
       @open-model-access="openModelAccess"
-      @refresh-quota="refreshQuota"
-      @request-context-detail="openContextDetail"
+      @open-tables="openDrawer('tables')"
     />
-    <div class="ai-toolbar">
-      <button class="ai-btn" @click="newChat">{{ t('wv.ai.newChat') }}</button>
-      <button class="ai-btn" @click="toggleSection('sessions')">{{ t('wv.ai.sessions') }}</button>
-      <button
-        class="ai-btn ai-auto-run"
-        :class="{ on: autoRunReadOnlySql }"
-        :title="t('wv.ai.autoRun.hint')"
-        @click="post({ type: 'openSettings' })"
-      >{{ autoRunReadOnlySql ? t('wv.ai.autoRun.on') : t('wv.ai.autoRun.off') }}</button>
-      <button
-        class="ai-btn ai-auto-run"
-        :class="{ on: agentEnabled }"
-        :title="selectedConnId ? t('wv.ai.agent.hint') : t('wv.ai.agent.needConnection')"
-        :disabled="!selectedConnId"
-        @click="agentEnabled = !agentEnabled; post({ type: 'setAgentMode', enabled: agentEnabled })"
-      >{{ agentEnabled ? t('wv.ai.agent.on') : t('wv.ai.agent.off') }}</button>
-      <span class="ai-spacer"></span>
-      <button v-if="generating" class="ai-btn" @click="stop">{{ t('wv.ai.stop') }}</button>
-    </div>
     <div class="ai-body">
-      <div class="ai-side">
-        <div v-if="showTablesSection" class="ai-side-section">
-          <button class="ai-side-head" @click="toggleSection('context')">
-            <span class="ai-side-chevron">{{ sidebarOpen.context ? '▾' : '▸' }}</span>
-            <span>{{ t('wv.ai.context.tablesTitle') }}</span>
-            <span class="ai-side-count">{{ contextDetail?.tableCount ?? context?.tableCount ?? 0 }}</span>
-          </button>
-          <div v-show="sidebarOpen.context" class="ai-side-content">
-            <div v-if="context?.scopeKind === 'database'" class="ai-scope-row">
-              <span class="ai-scope-label">{{ t('wv.ai.tables.scopeLabel') }}</span>
-              <button class="ai-btn" @click="openScopeDialog">{{ scopeLabel }}</button>
-            </div>
-            <ContextDetailDrawer :detail="contextDetail" @edit-table="editTableNote" />
-          </div>
-        </div>
-        <div class="ai-side-section">
-          <button class="ai-side-head" @click="toggleSection('rules')">
-            <span class="ai-side-chevron">{{ sidebarOpen.rules ? '▾' : '▸' }}</span>
-            <span>{{ t('wv.ai.rules.title') }}</span>
-            <span class="ai-rules-badge" :class="{ on: rulesSummary.configured }">{{ rulesSummary.configured ? t('wv.ai.rules.configured') : t('wv.ai.rules.empty') }}</span>
-          </button>
-          <div v-show="sidebarOpen.rules" class="ai-side-content">
-            <div class="ai-rules-summary">
-              {{ rulesSummary.configured ? t('wv.ai.rules.summary', { domain: rulesSummary.domainChars, directives: rulesSummary.directivesChars }) : t('wv.ai.rules.emptyHint') }}
-            </div>
-            <button
-              class="ai-btn"
-              :disabled="!selectedConnId"
-              :title="selectedConnId ? '' : t('wv.ai.rules.needConnection')"
-              @click="openRulesDialog"
-            >{{ t('wv.ai.rules.edit') }}</button>
-          </div>
-        </div>
-        <div class="ai-side-section">
-          <button class="ai-side-head" @click="toggleSection('sessions')">
-            <span class="ai-side-chevron">{{ sidebarOpen.sessions ? '▾' : '▸' }}</span>
-            <span>{{ t('wv.ai.sessions') }}</span>
-          </button>
-          <div v-show="sidebarOpen.sessions" class="ai-side-content">
-            <ConversationDrawer
-              :sessions="sessions"
-              :active-session-id="activeSessionId"
-              @new-chat="newChat"
-              @load="loadSession"
-              @rename="renameSession"
-              @delete="deleteSession"
-            />
-          </div>
-        </div>
-      </div>
       <div class="ai-main">
         <MessageList
           :messages="messages"
@@ -755,9 +722,50 @@ function openContextDetail(): void {
           <span>{{ t('wv.ai.editBanner', { n: editingIndex + 1 }) }}</span>
           <button class="ai-btn" @click="cancelEdit">{{ t('wv.ai.cancelEdit') }}</button>
         </div>
-        <ChatInput v-model="input" :generating="generating" @send="send" @stop="stop" />
+        <ChatInput
+          v-model="input"
+          :generating="generating"
+          :agent-enabled="agentEnabled"
+          :agent-available="!!selectedConnId"
+          @send="send"
+          @stop="stop"
+          @toggle-agent="toggleAgent"
+        />
       </div>
     </div>
+    <SideDrawer v-if="drawer" :title="drawerTitle" @close="drawer = null">
+      <ConversationDrawer
+        v-if="drawer === 'sessions'"
+        :sessions="sessions"
+        :active-session-id="activeSessionId"
+        @new-chat="newChatFromDrawer"
+        @load="loadSessionFromDrawer"
+        @rename="renameSession"
+        @delete="deleteSession"
+      />
+      <template v-else-if="drawer === 'tables'">
+        <div v-if="context?.scopeKind === 'database'" class="ai-scope-row">
+          <span class="ai-scope-label">{{ t('wv.ai.tables.scopeLabel') }}</span>
+          <button class="ai-btn" @click="openScopeDialog">{{ scopeLabel }}</button>
+        </div>
+        <ContextDetailDrawer :detail="contextDetail" @edit-table="editTableNote" />
+      </template>
+      <template v-else-if="drawer === 'rules'">
+        <p class="ai-rules-summary">
+          {{ rulesSummary.configured ? t('wv.ai.rules.summary', { domain: rulesSummary.domainChars, directives: rulesSummary.directivesChars }) : t('wv.ai.rules.emptyHint') }}
+        </p>
+        <button class="ai-btn" :disabled="!selectedConnId" @click="openRulesDialog">{{ t('wv.ai.rules.edit') }}</button>
+      </template>
+      <QuotaPanel
+        v-else-if="drawer === 'quota'"
+        :quota="quota"
+        :byok="provider?.mode === 'openai-compatible'"
+        :refreshing="quotaRefreshing"
+        :feedback="quotaFeedback"
+        @refresh="refreshQuota()"
+        @buy="buyTopup"
+      />
+    </SideDrawer>
     <TableNoteDialog
       v-if="showNoteDialog"
       :table="tableNoteTable"
@@ -819,62 +827,10 @@ function openContextDetail(): void {
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size, 13px);
 }
-.ai-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--vscode-panel-border);
-}
 .ai-body {
   flex: 1;
   display: flex;
   overflow: hidden;
-}
-.ai-side {
-  width: 340px;
-  flex: 0 0 auto;
-  border-right: 1px solid var(--vscode-panel-border);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-.ai-side-section {
-  border-bottom: 1px solid var(--vscode-panel-border);
-  flex: 0 0 auto;
-}
-.ai-side-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: var(--vscode-foreground);
-  font-family: inherit;
-  font-size: calc(var(--vscode-font-size, 13px) - 2px);
-  padding: 6px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-}
-.ai-side-head:hover {
-  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
-}
-.ai-side-chevron {
-  width: 12px;
-  color: var(--vscode-descriptionForeground);
-}
-.ai-side-count {
-  margin-left: auto;
-  color: var(--vscode-descriptionForeground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 140px;
-}
-.ai-side-content {
-  padding: 2px 8px 8px;
 }
 .ai-scope-row {
   display: flex;
@@ -894,21 +850,9 @@ function openContextDetail(): void {
 .ai-spacer {
   flex: 1;
 }
-.ai-rules-badge {
-  margin-left: auto;
-  font-size: calc(var(--vscode-font-size, 13px) - 2px);
-  color: var(--vscode-descriptionForeground);
-}
-.ai-rules-badge.on {
-  color: var(--vscode-testing-iconPassed, #4caf50);
-}
 .ai-rules-summary {
-  margin-bottom: 4px;
+  margin: 0 0 8px;
   color: var(--vscode-descriptionForeground);
-}
-.ai-auto-run.on {
-  color: var(--vscode-testing-iconPassed, #3fb950);
-  border-color: var(--vscode-testing-iconPassed, #3fb950);
 }
 .ai-edit-banner {
   display: flex;

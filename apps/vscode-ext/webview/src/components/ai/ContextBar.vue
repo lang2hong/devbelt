@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed } from 'vue';
 import { useI18n } from '../../composables/useI18n';
-import { formatCreditTokens } from '../../utils/credits';
+import { formatCreditTokens, isQuotaLow } from '../../utils/credits';
+import MoreMenu, { type MoreMenuItem } from './MoreMenu.vue';
 
 export interface ProviderState {
   mode: 'server-proxy' | 'openai-compatible';
@@ -42,139 +43,106 @@ export interface QuotaState {
   resetAt: string;
 }
 
+/**
+ * AI Chat 顶栏（单行）：连接 / 库 / 低额度提示 / 新对话 / 更多。
+ *
+ * 常规状态只显示这一行；只有出问题（未登录、未配置 Key、连接未打开、库不可达等）时
+ * 才在下方出现一条提示和处理按钮。额度明细、会话、表、规则、模型、设置都在「⋯」里。
+ */
 const props = defineProps<{
   provider: ProviderState | null;
   context: ContextState | null;
   quota: QuotaState | null;
-  quotaRefreshing?: boolean;
-  quotaFeedback?: 'ok' | 'failed' | null;
   connections: { id: string; name: string }[];
   selectedConnId?: string;
-  includeColumnComments: boolean;
+  menuItems: MoreMenuItem[];
 }>();
 const emit = defineEmits<{
   selectConnection: [id: string | null];
   openConnection: [];
   selectScope: [value: string];
-  openConsole: [path: string];
-  openSettings: [];
-  /** 模型接入弹层（替代原 设置/清除 Key/测试 三个散按钮；Key 管理并入弹层）。 */
+  newChat: [];
+  menu: [id: string];
+  openQuota: [];
   openModelAccess: [];
-  requestContextDetail: [];
-  /** 手动刷新积分（宿主 requestQuotaRefresh）。 */
-  refreshQuota: [];
+  /** 打开「实际注入的表」抽屉。 */
+  openTables: [];
 }>();
 
 const { t } = useI18n();
 
-const providerLabel = computed(() =>
-  props.provider?.mode === 'openai-compatible' ? t('wv.ai.provider.byok') : t('wv.ai.provider.serverProxy'),
-);
-
-/** BYOK 直连上游，不消耗服务端积分；积分区整体隐藏，避免误导。 */
-const showQuota = computed(() => props.provider?.mode !== 'openai-compatible');
-
-const providerHint = computed(() => {
-  const reason = props.provider?.reason;
-  if (!reason) return '';
-  if (reason === 'login-required') return t('wv.ai.provider.loginRequired');
-  if (reason === 'api-key-missing') return t('wv.ai.provider.apiKeyMissing');
-  return t('wv.ai.provider.notConfigured');
+/** 自带 Key 直连上游，不消耗服务端积分：不显示额度。 */
+const usesQuota = computed(() => props.provider?.mode !== 'openai-compatible');
+const quotaLow = computed(() => usesQuota.value && isQuotaLow(props.quota));
+const quotaBadge = computed(() => {
+  const q = props.quota;
+  if (!q) return '';
+  return q.remaining <= 0
+    ? t('wv.ai.quota.exhausted')
+    : t('wv.ai.quota.low', { remaining: formatCreditTokens(q.remaining) });
 });
 
-const contextLabel = computed(() => {
+/**
+ * 「实际注入的表」按钮（放在库选择器之后）：只对关系引擎、上下文正常时显示。
+ * 被截断（库内表多于实际注入）时标黄，提示手动选表或用 Agent。
+ */
+const RELATIONAL = new Set(['MYSQL', 'PG', 'SQLITE']);
+const showTables = computed(() => {
   const ctx = props.context;
-  if (!ctx || ctx.note === 'no-connection') return t('wv.ai.context.noConnection');
-  if (ctx.note === 'no-session') return t('wv.ai.context.noSession');
-  if (ctx.note === 'schema-failed') return t('wv.ai.context.schemaFailed');
-  if (ctx.note === 'no-database') return t('wv.ai.context.noDatabase');
-  if (ctx.note === 'db-unreachable') return t('wv.ai.context.dbUnreachable');
-  if (ctx.scopeKind === 'redis-db') {
-    return t('wv.ai.context.redisSummary', { db: ctx.scope ?? '?', tokens: ctx.estimatedTokens });
-  }
-  if (ctx.scopeKind === 'index') {
-    return t('wv.ai.context.indexSummary', { index: ctx.scope ?? '?', tokens: ctx.estimatedTokens });
-  }
-  const summary = t('wv.ai.context.summary', {
-    tables: ctx.totalTables > ctx.tableCount ? `${ctx.tableCount}/${ctx.totalTables}` : ctx.tableCount,
-    comments: ctx.commentCount,
-    tokens: ctx.estimatedTokens,
-  });
-  const parts = [summary];
-  if (ctx.truncated) parts.push(t('wv.ai.context.truncated'));
-  if (ctx.partial) parts.push(t('wv.ai.context.partial'));
-  return parts.join(' · ');
+  if (!ctx || ctx.note || !props.selectedConnId) return false;
+  return RELATIONAL.has(String(ctx.dbType ?? '').toUpperCase());
 });
+const tablesTruncated = computed(() => {
+  const ctx = props.context;
+  return !!ctx && (ctx.truncated === true || ctx.totalTables > ctx.tableCount);
+});
+const tablesLabel = computed(() => {
+  const ctx = props.context;
+  if (!ctx) return '';
+  return ctx.totalTables > ctx.tableCount
+    ? t('wv.ai.tables.badgeOf', { n: ctx.tableCount, total: ctx.totalTables })
+    : t('wv.ai.tables.badge', { n: ctx.tableCount });
+});
+const tablesTitle = computed(() => (tablesTruncated.value ? t('wv.ai.tables.truncatedHint') : t('wv.ai.tables.badgeHint')));
 
 const scopeOptions = computed(() => props.context?.scopeOptions ?? []);
 const showScopeSelect = computed(() => !!props.context?.scopeKind && scopeOptions.value.length > 0);
 
-/** 「连接未打开」时点击摘要按钮 = 重试打开连接（抽屉无会话时毫无内容，只会困住用户）。 */
-const connectionNotOpen = computed(() => props.context?.note === 'no-session');
+/** 只有需要用户处理时才出现的提示条（文案 + 可选处理按钮）。 */
+const alert = computed<{ text: string; action?: { label: string; event: 'openConnection' | 'openModelAccess' } } | null>(() => {
+  const reason = props.provider?.reason;
+  if (reason === 'login-required') return { text: t('wv.ai.provider.loginRequired') };
+  if (reason === 'api-key-missing') return { text: t('wv.ai.provider.apiKeyMissing'), action: { label: t('wv.ai.modelAccess'), event: 'openModelAccess' } };
+  if (reason === 'not-configured') return { text: t('wv.ai.provider.notConfigured'), action: { label: t('wv.ai.modelAccess'), event: 'openModelAccess' } };
+  const note = props.context?.note;
+  if (note === 'no-session') return { text: t('wv.ai.context.noSession'), action: { label: t('wv.ai.context.openHint'), event: 'openConnection' } };
+  if (note === 'schema-failed') return { text: t('wv.ai.context.schemaFailed') };
+  if (note === 'no-database') return { text: t('wv.ai.context.noDatabase') };
+  if (note === 'db-unreachable') return { text: t('wv.ai.context.dbUnreachable') };
+  return null;
+});
 
-function onSummaryClick(): void {
-  if (connectionNotOpen.value) emit('openConnection');
-  else emit('requestContextDetail');
+function onSelect(event: Event): void {
+  const value = (event.target as HTMLSelectElement).value;
+  emit('selectConnection', value || null);
 }
-
 
 function onSelectScope(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   if (value) emit('selectScope', value);
 }
 
-const deltaLabel = ref<string | null>(null);
-let deltaTimer: number | undefined;
-watch(
-  () => props.quota,
-  (next, prev) => {
-    if (!next || !prev) return;
-    const saved = prev.remaining - next.remaining;
-    if (saved <= 0) return;
-    deltaLabel.value = t('wv.ai.quota.delta', { credits: formatCreditTokens(saved) });
-    if (deltaTimer) window.clearTimeout(deltaTimer);
-    deltaTimer = window.setTimeout(() => { deltaLabel.value = null; }, 2400);
-  },
-);
-onBeforeUnmount(() => { if (deltaTimer) window.clearTimeout(deltaTimer); });
-
-const quotaLabel = computed(() => {
-  const quota = props.quota;
-  if (!quota) return t('wv.ai.quota.none');
-  if (quota.topupRemaining > 0) {
-    return t('wv.ai.quota.dual', {
-      used: formatCreditTokens(quota.used),
-      limit: formatCreditTokens(quota.limit),
-      monthly: formatCreditTokens(quota.monthlyRemaining ?? quota.remaining),
-      topup: formatCreditTokens(quota.topupRemaining),
-    });
-  }
-  return t('wv.ai.quota.value', { used: formatCreditTokens(quota.used), limit: formatCreditTokens(quota.limit), remaining: formatCreditTokens(quota.remaining) });
-});
-
-const usedPct = computed(() => {
-  const q = props.quota;
-  if (!q) return 0;
-  const total = q.used + q.remaining;
-  return total > 0 ? Math.min(100, Math.max(0, (q.used / total) * 100)) : 0;
-});
-const quotaLow = computed(() => !!props.quota && props.quota.remaining <= 0);
-
-function onSelect(event: Event): void {
-  const value = (event.target as HTMLSelectElement).value;
-  emit('selectConnection', value || null);
+function runAlertAction(): void {
+  const event = alert.value?.action?.event;
+  if (event === 'openConnection') emit('openConnection');
+  else if (event === 'openModelAccess') emit('openModelAccess');
 }
 </script>
 
 <template>
   <div class="ai-context-bar">
     <div class="ai-context-row">
-      <span class="ai-badge" :title="showQuota ? t('wv.ai.provider.modelByServer') : ''">{{ providerLabel }}</span>
-      <button v-if="provider?.model" class="ai-model ai-model-btn" :title="t('wv.ai.modelAccess')" @click="emit('openModelAccess')">{{ provider.model }}</button>
-      <span v-if="providerHint" class="ai-hint">{{ providerHint }}</span>
-    </div>
-    <div class="ai-context-row">
-      <select class="ai-conn-select" :value="props.selectedConnId ?? ''" @change="onSelect">
+      <select class="ai-conn-select" :aria-label="t('wv.ai.connect')" :value="props.selectedConnId ?? ''" @change="onSelect">
         <option value="">{{ t('wv.ai.connect') }}</option>
         <option v-for="conn in props.connections" :key="conn.id" :value="conn.id">{{ conn.name }}</option>
       </select>
@@ -182,43 +150,28 @@ function onSelect(event: Event): void {
         v-if="showScopeSelect"
         class="ai-conn-select"
         :title="t('wv.ai.scope.title')"
+        :aria-label="t('wv.ai.scope.title')"
         :value="props.context?.scope ?? ''"
         @change="onSelectScope"
       >
         <option v-for="option in scopeOptions" :key="option" :value="option">{{ option }}</option>
       </select>
       <button
-        class="ai-context-summary ai-context-link"
-        :title="connectionNotOpen ? t('wv.ai.context.openHint') : t('wv.ai.context.detail')"
-        @click="onSummaryClick"
-      >
-        {{ contextLabel }}
-      </button>
-    </div>
-    <div class="ai-context-row">
-      <template v-if="showQuota">
-        <span class="ai-context-summary" :class="{ 'ai-quota-low': quotaLow }">{{ quotaLabel }}</span>
-        <span v-if="deltaLabel" class="ai-quota-delta" role="status" aria-live="polite">{{ deltaLabel }}</span>
-        <span v-if="quotaFeedback" class="ai-quota-notice" :class="quotaFeedback" role="status" aria-live="polite">
-          {{ quotaFeedback === 'ok' ? t('wv.ai.quota.refreshOk') : t('wv.ai.quota.refreshFailed') }}
-        </span>
-        <button class="ai-btn ai-quota-refresh" :disabled="quotaRefreshing" :title="quotaRefreshing ? t('wv.ai.quota.refreshing') : t('wv.ai.quota.refresh')" @click="emit('refreshQuota')">
-          {{ quotaRefreshing ? '…' : '↻' }}
-        </button>
-        <button
-          v-if="quota"
-          class="ai-btn ai-quota-buy"
-          :title="t('wv.ai.quota.buy.title')"
-          @click="emit('openConsole', '/db/ai-topup')"
-        >{{ t('wv.ai.quota.buy') }}</button>
-      </template>
-      <span v-else class="ai-context-summary ai-byok-note">{{ t('wv.ai.quota.byok') }}</span>
+        v-if="showTables"
+        class="ai-tables-badge"
+        :class="{ truncated: tablesTruncated }"
+        :title="tablesTitle"
+        :aria-label="tablesTitle"
+        @click="emit('openTables')"
+      >{{ tablesLabel }}</button>
       <span class="ai-spacer"></span>
-      <button class="ai-btn" @click="emit('openModelAccess')">{{ t('wv.ai.modelAccess') }}</button>
-      <button class="ai-btn" @click="emit('openSettings')">{{ t('wv.ai.settings') }}</button>
+      <button v-if="quotaLow" class="ai-quota-low-badge" :title="t('wv.ai.quota.view')" @click="emit('openQuota')">{{ quotaBadge }}</button>
+      <button class="ai-btn ai-icon-btn" :title="t('wv.ai.newChat')" :aria-label="t('wv.ai.newChat')" @click="emit('newChat')">＋</button>
+      <MoreMenu :items="props.menuItems" @select="emit('menu', $event)" />
     </div>
-    <div v-if="showQuota && quota" class="ai-quota-bar" :class="{ low: quotaLow }" :title="t('wv.ai.quota.barTitle')">
-      <span :style="{ width: `${usedPct}%` }"></span>
+    <div v-if="alert" class="ai-alert" role="status">
+      <span>{{ alert.text }}</span>
+      <button v-if="alert.action" class="ai-btn" @click="runAlertAction">{{ alert.action.label }}</button>
     </div>
   </div>
 </template>
@@ -229,53 +182,15 @@ function onSelect(event: Event): void {
   border-bottom: 1px solid var(--vscode-panel-border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: calc(var(--vscode-font-size, 13px) - 1px);
 }
 .ai-context-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
-.ai-badge {
-  background: var(--vscode-badge-background);
-  color: var(--vscode-badge-foreground);
-  border-radius: 3px;
-  padding: 0 5px;
-  font-size: calc(var(--vscode-font-size, 13px) - 2px);
-}
-.ai-model,
-.ai-context-summary {
-  color: var(--vscode-descriptionForeground);
-}
-.ai-model-btn {
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  text-decoration: underline dotted;
-}
-.ai-model-btn:hover { color: var(--vscode-foreground); }
-.ai-context-link {
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font-size: calc(var(--vscode-font-size, 13px) - 1px);
-  font-family: inherit;
-  text-decoration: underline dotted;
-}
-.ai-hint {
-  color: var(--vscode-editorWarning-foreground, #cca700);
-}
-.ai-quota-notice { font-size: calc(var(--vscode-font-size, 13px) - 2px); }
-.ai-quota-notice.ok { color: var(--vscode-testing-iconPassed, #3fb950); }
-.ai-quota-notice.failed { color: var(--vscode-errorForeground, #f85149); }
-.ai-byok-note { opacity: .75; }
-.ai-quota-refresh:disabled { opacity: .5; cursor: default; }
 .ai-conn-select {
   background: var(--vscode-dropdown-background, var(--vscode-input-background));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
@@ -283,9 +198,45 @@ function onSelect(event: Event): void {
   font-size: var(--vscode-font-size, 13px);
   padding: 4px 8px;
   min-height: 26px;
-  max-width: 240px;
+  max-width: 200px;
+  min-width: 0;
 }
 .ai-spacer {
   flex: 1;
+}
+.ai-tables-badge {
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ai-tables-badge:hover { color: var(--vscode-foreground); }
+.ai-tables-badge.truncated {
+  border-color: var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+.ai-quota-low-badge {
+  border: 1px solid var(--vscode-editorWarning-foreground, #cca700);
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  background: transparent;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ai-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.12));
+  border: 1px solid var(--vscode-inputValidation-warningBorder, #cca700);
 }
 </style>

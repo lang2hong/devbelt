@@ -32,6 +32,21 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const blocks = computed(() => parseMessageBlocks(props.message.content));
+
+/** 本轮统计（积分 / tokens / 耗时 / 时间）：收进 ⓘ 的悬停提示，不常驻占位。 */
+const usageText = computed(() => {
+  const usage = props.message.role === 'assistant' ? props.message.usage : undefined;
+  if (!usage) return '';
+  const parts = [
+    usage.credits !== null
+      ? t('wv.ai.msg.credits', { credits: formatCredits(usage.credits) })
+      : t('wv.ai.msg.creditsUnknown'),
+  ];
+  if (usage.credits === null && usage.tokens !== null) parts.push(t('wv.ai.msg.tokens', { tokens: usage.tokens.toLocaleString() }));
+  parts.push(t('wv.ai.msg.duration', { duration: formatElapsed(usage.durationMs) }));
+  parts.push(t('wv.ai.msg.startedAt', { time: formatDateTime(usage.startedAt) }));
+  return parts.join(' · ');
+});
 const copied = ref(false);
 
 function copy(): void {
@@ -119,15 +134,8 @@ watch(
       <MarkdownText :text="message.content" />
     </p>
 
-    <div v-if="message.role === 'assistant' && message.usage && !props.streaming" class="ai-msg-usage">
-      <span v-if="message.usage.credits !== null">{{ t('wv.ai.msg.credits', { credits: formatCredits(message.usage.credits) }) }}</span>
-      <span v-else>{{ t('wv.ai.msg.creditsUnknown') }}</span>
-      <span v-if="message.usage.credits === null && message.usage.tokens !== null">{{ t('wv.ai.msg.tokens', { tokens: message.usage.tokens.toLocaleString() }) }}</span>
-      <span>{{ t('wv.ai.msg.duration', { duration: formatElapsed(message.usage.durationMs) }) }}</span>
-      <span>{{ t('wv.ai.msg.startedAt', { time: formatDateTime(message.usage.startedAt) }) }}</span>
-    </div>
-
     <div v-if="!props.streaming" class="ai-msg-actions">
+      <span v-if="usageText" class="ai-msg-usage" :title="usageText" :aria-label="usageText" tabindex="0">ⓘ</span>
       <button class="ai-btn" @click="copy">{{ copied ? t('wv.ai.copied') : t('wv.ai.copy') }}</button>
       <button v-if="props.canEdit" class="ai-btn" @click="emit('edit')">{{ t('wv.ai.edit') }}</button>
       <button v-if="props.canRegenerate" class="ai-btn" @click="emit('regenerate')">
@@ -166,14 +174,14 @@ watch(
   white-space: pre-wrap;
 }
 .ai-msg-usage {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
   color: var(--vscode-descriptionForeground);
-  font-size: calc(var(--vscode-font-size, 13px) - 2px);
-  font-variant-numeric: tabular-nums;
+  font-size: calc(var(--vscode-font-size, 13px) - 1px);
+  cursor: help;
 }
+.ai-msg-usage:focus-visible { outline: 1px solid var(--vscode-focusBorder); border-radius: 3px; }
 .ai-md-heading {
   margin: 12px 0 6px;
   line-height: 1.35;

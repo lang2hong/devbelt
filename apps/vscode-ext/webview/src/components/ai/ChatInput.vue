@@ -3,8 +3,13 @@ import { nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 
 const model = defineModel<string>({ required: true });
-const props = defineProps<{ generating: boolean }>();
-const emit = defineEmits<{ send: []; stop: [] }>();
+const props = defineProps<{
+  generating: boolean;
+  /** Agent 开关（输入框下方的小开关；未选连接时不可用）。 */
+  agentEnabled?: boolean;
+  agentAvailable?: boolean;
+}>();
+const emit = defineEmits<{ send: []; stop: []; toggleAgent: [] }>();
 const { t } = useI18n();
 const box = ref<HTMLTextAreaElement | null>(null);
 
@@ -48,7 +53,20 @@ function onKeydown(event: KeyboardEvent): void {
         </button>
       </div>
     </div>
-    <p class="ai-input-hint">{{ t('wv.ai.input.hint') }}</p>
+    <div class="ai-input-foot">
+      <button
+        class="ai-agent-toggle"
+        role="switch"
+        :aria-checked="!!props.agentEnabled"
+        :disabled="!props.agentAvailable || props.generating"
+        :title="props.agentAvailable ? t('wv.ai.agent.hint') : t('wv.ai.agent.needConnection')"
+        @click="emit('toggleAgent')"
+      >
+        <span class="ai-agent-knob" :class="{ on: props.agentEnabled }" aria-hidden="true"></span>
+        <span>{{ t('wv.ai.agent.label') }}</span>
+      </button>
+      <p class="ai-input-hint">{{ t('wv.ai.input.hint') }}</p>
+    </div>
   </div>
 </template>
 
@@ -99,4 +117,47 @@ function onKeydown(event: KeyboardEvent): void {
   font-size: 14px;
   font-weight: 600;
 }
+.ai-input-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.ai-input-foot .ai-input-hint { margin: 0; }
+.ai-agent-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: calc(var(--vscode-font-size, 13px) - 2px);
+  cursor: pointer;
+  padding: 2px 0;
+}
+.ai-agent-toggle:disabled { opacity: 0.5; cursor: default; }
+.ai-agent-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.ai-agent-knob {
+  position: relative;
+  width: 24px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--vscode-input-border, var(--vscode-panel-border));
+  transition: background 0.15s;
+}
+.ai-agent-knob::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-foreground);
+  transition: left 0.15s;
+}
+.ai-agent-knob.on { background: var(--vscode-button-background); }
+.ai-agent-knob.on::after { left: 14px; background: var(--vscode-button-foreground); }
 </style>
