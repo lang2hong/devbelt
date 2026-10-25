@@ -5,8 +5,12 @@ import {
   jitterDelay,
   pauseAllOnStartup,
   type MonitorPoint,
+  type MonitorRunResult,
   type MonitorTask,
 } from './monitorTypes';
+
+/** 执行结果：数值 / 多列 / 游标，加上只放内存的新增行。旧调用方可以只返回数字。 */
+export type MonitorRunOutput = number | (MonitorRunResult & { rows?: Array<Record<string, unknown>>; more?: boolean });
 
 /** 调度器依赖（测试注入 fake 实现与 fake timers）。 */
 export interface MonitorSchedulerDeps {
@@ -16,13 +20,15 @@ export interface MonitorSchedulerDeps {
     appendPoint(taskId: string, point: MonitorPoint): Promise<void>;
     deleteHistory(taskId: string): Promise<void>;
   };
-  run(task: MonitorTask): Promise<number>;
+  run(task: MonitorTask): Promise<MonitorRunOutput>;
   /** 本窗口是否持有执行锁；不持锁时只显示、不执行。 */
   canExecute(): boolean;
   /** 连接仍存在且指纹未变；否则任务暂停。 */
   connectionValid(task: MonitorTask): boolean;
   cooldownMs(): number;
   onHit?(task: MonitorTask, previous: number | undefined, value: number): void;
+  /** 每次成功执行后（AI Chat 抽屉实时刷新用）。 */
+  onRun?(task: MonitorTask): void;
   onAutoPaused?(task: MonitorTask): void;
   onChanged?(tasks: readonly MonitorTask[]): void;
   now?: () => number;
@@ -41,6 +47,8 @@ export class MonitorScheduler {
   private tasks: MonitorTask[] = [];
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly inFlight = new Set<string>();
+  /** B：每个任务最近一次的新增行（只放内存，不落盘）。 */
+  private readonly recentRows = new Map<string, { at: number; rows: Array<Record<string, unknown>>; more: boolean }>();
   private disposed = false;
   private readonly now: () => number;
   private readonly random: () => number;
@@ -67,6 +75,11 @@ export class MonitorScheduler {
 
   get(id: string): MonitorTask | undefined {
     return this.tasks.find((t) => t.id === id);
+  }
+
+  /** B：最近一次新增的行（内存；VS Code 重启后为空）。 */
+  latestRows(id: string): { at: number; rows: Array<Record<string, unknown>>; more: boolean } | undefined {
+    return this.recentRows.get(id);
   }
 
   runningCount(): number {
@@ -104,6 +117,7 @@ export class MonitorScheduler {
 
   async remove(id: string): Promise<void> {
     this.unschedule(id);
+    this.recentRows.delete(id);
     this.tasks = this.tasks.filter((t) => t.id !== id);
     await this.persist();
     await this.deps.store.deleteHistory(id);
@@ -140,13 +154,26 @@ export class MonitorScheduler {
     this.inFlight.add(id);
     const started = this.now();
     try {
-      const value = await this.deps.run(task);
+      const raw = await this.deps.run(task);
+      const output = typeof raw === 'number' ? { value: raw } : raw;
       const current = this.get(id);
       if (!current || this.disposed) return;
-      const outcome = applySuccess(current, value, this.now(), this.deps.cooldownMs());
+      const outcome = applySuccess(current, output.value, this.now(), this.deps.cooldownMs(), {
+        ...(output.values ? { values: output.values } : {}),
+        ...(output.cursor ? { cursor: output.cursor } : {}),
+      });
       await this.replace(outcome.task);
-      await this.deps.store.appendPoint(id, { at: started, value, durationMs: this.now() - started });
-      if (outcome.notify) this.deps.onHit?.(outcome.task, outcome.previous, value);
+      if (typeof raw !== 'number' && raw.rows) {
+        if (raw.rows.length > 0) this.recentRows.set(id, { at: started, rows: raw.rows, more: raw.more === true });
+      }
+      await this.deps.store.appendPoint(id, {
+        at: started,
+        ...(output.value !== null ? { value: output.value } : {}),
+        ...(output.values ? { values: output.values } : {}),
+        durationMs: this.now() - started,
+      });
+      this.deps.onRun?.(outcome.task);
+      if (outcome.notify && output.value !== null) this.deps.onHit?.(outcome.task, outcome.previous, output.value);
     } catch (err) {
       const current = this.get(id);
       if (!current || this.disposed) return;

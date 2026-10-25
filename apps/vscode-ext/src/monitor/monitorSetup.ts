@@ -5,14 +5,18 @@ import { eventBus, ConnectionChangedEvent } from '@devbelt/db-host/utils/event';
 import type { ConnectionManager } from '../connection/connectionManager';
 import { AuditLogger } from '../utils/auditLogger';
 import { diagWarn } from '../utils/diagnostics';
+import { l10n } from '../i18n';
 import { createRowCountMonitor, showMonitorTasks, type MonitorCommandDeps, type MonitorTableNode } from './monitorCommands';
+import { MonitorBridge, type MonitorTaskView } from './monitorBridge';
+import { MonitorService } from './monitorService';
+import { describeCondition } from './monitorNotifier';
 import { MonitorExecutor } from './monitorExecutor';
 import { MonitorLock } from './monitorLock';
 import { MonitorNotifier, taskTitle } from './monitorNotifier';
 import { MonitorScheduler } from './monitorScheduler';
 import { MonitorStatusBar } from './monitorStatusBar';
 import { MonitorStore } from './monitorStore';
-import { connectionFingerprint, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_TASKS, type MonitorTask } from './monitorTypes';
+import { connectionFingerprint, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_TASKS, monitorLabel, type MonitorTask } from './monitorTypes';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -29,7 +33,14 @@ function sha256(text: string): string {
  *
  * 所有任务在启动时置为暂停；只有持锁窗口执行；连接被删除或改动时相关任务暂停。
  */
-export function registerMonitor(context: vscode.ExtensionContext, deps: { store: ConnectionStore; manager: ConnectionManager }): void {
+export interface MonitorSetupDeps {
+  store: ConnectionStore;
+  manager: ConnectionManager;
+  /** 「让 AI 帮我设置监控」：打开 AI Chat，切到该连接 / 库，打开 Agent，预填输入。 */
+  openAiSetup?(node: MonitorTableNode): void;
+}
+
+export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorSetupDeps): MonitorService {
   const storageRoot = context.globalStorageUri.fsPath;
   const store = new MonitorStore(storageRoot);
   const lock = new MonitorLock({ dir: store.directory, ownerId: randomBytes(8).toString('hex'), heartbeatMs: HEARTBEAT_MS });
@@ -54,6 +65,13 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: { store:
     statusBar.update(scheduler.runningCount(), scheduler.list().length, lock.isHeld);
   };
 
+  const changeListeners = new Set<() => void>();
+  const emitChanged = (): void => {
+    for (const listener of [...changeListeners]) {
+      try { listener(); } catch { /* 面板已关闭 */ }
+    }
+  };
+
   const scheduler: MonitorScheduler = new MonitorScheduler({
     store,
     run: (task) => executor.run(task),
@@ -69,7 +87,11 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: { store:
       audit('autoPause', task);
       void notifier?.autoPaused(task);
     },
-    onChanged: () => refreshStatus(),
+    onChanged: () => {
+      refreshStatus();
+      emitChanged();
+    },
+    onRun: () => emitChanged(),
   });
 
   const audit = (action: 'create' | 'remove' | 'pause' | 'resume' | 'autoPause', task: MonitorTask): void => {
@@ -80,7 +102,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: { store:
       ...(task.database ? { database: task.database } : {}),
       ...(task.schema ? { schema: task.schema } : {}),
       // 只记操作与目标，不记任何行内容。
-      sql: `${action}: ${task.kind} ${taskTitle(task)}`,
+      sql: `${action}: ${task.kind} ${taskTitle(task)}${task.origin === 'ai' ? ' (ai)' : ''}`,
     });
   };
 
@@ -95,8 +117,107 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: { store:
     audit,
   };
 
+  const service = new MonitorService({
+    scheduler,
+    executor,
+    getConnection: (id) => deps.store.get(id),
+    fingerprint,
+    allowProduction: commandDeps.allowProduction,
+    maxTasks: commandDeps.maxTasks,
+    enabled: commandDeps.enabled,
+    describe: async (conn, database, schema, table) => {
+      // 走监控自己的只读会话读元数据（不占用树 / 面板会话）。
+      const opened = await deps.manager.openIsolatedSql(conn, database);
+      try {
+        const [columns, indexes] = await Promise.all([
+          opened.session.metadata.getColumns(table, database, schema),
+          opened.session.metadata.getIndexes(table, database, schema).catch(() => []),
+        ]);
+        return { columns, indexes };
+      } finally {
+        opened.close();
+      }
+    },
+    audit,
+  });
+
+  const view = (task: MonitorTask): MonitorTaskView => {
+    const conn = deps.store.get(task.connId);
+    return {
+      id: task.id,
+      kind: task.kind,
+      label: monitorLabel(task),
+      connName: conn?.name || conn?.host || '',
+      table: task.table,
+      ...(task.database ? { database: task.database } : {}),
+      ...(task.schema ? { schema: task.schema } : {}),
+      status: task.status,
+      ...(task.pausedReason ? { pausedReason: task.pausedReason } : {}),
+      intervalMs: task.intervalMs,
+      conditionText: (task.watchColumn ? `${task.watchColumn}: ` : '') + describeCondition(task.condition),
+      ...(task.lastValue !== undefined ? { lastValue: task.lastValue } : {}),
+      ...(task.lastValues ? { lastValues: task.lastValues } : {}),
+      ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
+      ...(task.lastError ? { lastError: task.lastError } : {}),
+      ...(task.columns ? { columns: task.columns } : {}),
+      ...(task.watchColumn ? { watchColumn: task.watchColumn } : {}),
+      ...(task.cursorColumn ? { cursorColumn: task.cursorColumn } : {}),
+      ...(task.sql ? { sql: task.sql } : {}),
+    };
+  };
+
+  MonitorBridge.init({
+    list: () => scheduler.list().map(view),
+    detail: async (id) => {
+      const task = scheduler.get(id);
+      if (!task) return undefined;
+      const points = (await store.readHistory(id)).slice(-200);
+      const rows = scheduler.latestRows(id);
+      return { task: view(task), points, ...(rows ? { rows } : {}) };
+    },
+    action: async (id, action) => {
+      const task = scheduler.get(id);
+      if (!task) return;
+      if (action === 'resume') { await scheduler.resume(id); audit('resume', task); }
+      else if (action === 'pause') { await scheduler.pause(id); audit('pause', task); }
+      else if (action === 'runNow') { if (lock.isHeld) await scheduler.runNow(id); }
+      else if (action === 'remove') { await scheduler.remove(id); audit('remove', task); }
+    },
+    resumeAll: async () => {
+      await scheduler.resumeAll();
+      for (const task of scheduler.list()) if (task.status === 'running') audit('resume', task);
+    },
+    confirm: async (proposalId, overrides) => {
+      const result = await service.confirm(proposalId, overrides ?? {});
+      return result.ok ? { ok: true, task: view(result.task) } : result;
+    },
+    discard: (proposalId) => service.discard(proposalId),
+    executing: () => lock.isHeld,
+    onChanged: (listener) => {
+      changeListeners.add(listener);
+      return { dispose: () => changeListeners.delete(listener) };
+    },
+    describeProposal: (p) => ({
+      id: p.id,
+      kind: p.kind,
+      label: p.label ?? monitorLabel(p),
+      connName: p.connName,
+      table: p.table,
+      ...(p.database ? { database: p.database } : {}),
+      ...(p.schema ? { schema: p.schema } : {}),
+      intervalMinutes: Math.round(p.intervalMs / 60_000),
+      conditionText: (p.watchColumn ? `${p.watchColumn}: ` : '') + describeCondition(p.condition),
+      ...(p.sql ? { sql: p.sql } : {}),
+      ...(p.columns ? { columns: p.columns } : {}),
+      ...(p.watchColumn ? { watchColumn: p.watchColumn } : {}),
+      ...(p.preview ? { preview: p.preview } : {}),
+      ...(p.cursorColumn ? { cursorColumn: p.cursorColumn } : {}),
+      warnings: p.warnings.map((w) => w.code),
+    }),
+  });
+
   notifier = new MonitorNotifier({
-    view: (task) => void showMonitorTasks(commandDeps, task.id),
+    view: (task) => void vscode.commands.executeCommand('devbelt.monitor.tasks', task.id),
     pause: async (task) => {
       await scheduler.pause(task.id);
       audit('pause', task);
@@ -132,7 +253,20 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: { store:
       if (e.affectsConfiguration('devbelt.ai.monitor')) refreshStatus();
     }),
     vscode.commands.registerCommand('devbelt.monitor.rowCount', (node?: MonitorTableNode) => createRowCountMonitor(commandDeps, node)),
-    vscode.commands.registerCommand('devbelt.monitor.tasks', () => showMonitorTasks(commandDeps)),
+    vscode.commands.registerCommand('devbelt.monitor.tasks', async (focusId?: unknown) => {
+      // 优先在 AI Chat 的「后台任务」抽屉里打开；AI 不可用时退回 QuickPick。
+      const opened = await vscode.commands.executeCommand<boolean>('devbelt.ai.openMonitor', typeof focusId === 'string' ? focusId : undefined)
+        .then((r) => r === true, () => false);
+      if (!opened) await showMonitorTasks(commandDeps, typeof focusId === 'string' ? focusId : undefined);
+    }),
+    vscode.commands.registerCommand('devbelt.monitor.aiSetup', (node?: MonitorTableNode) => {
+      if (!node?.conn) return;
+      if (!commandDeps.enabled()) {
+        void vscode.window.showInformationMessage(l10n('monitor.disabled'));
+        return;
+      }
+      deps.openAiSetup?.(node);
+    }),
     vscode.commands.registerCommand('devbelt.monitor.resumeAll', async () => {
       await scheduler.resumeAll();
       for (const task of scheduler.list()) if (task.status === 'running') audit('resume', task);
@@ -140,10 +274,13 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: { store:
     {
       dispose: () => {
         clearInterval(heartbeatTimer);
+        changeListeners.clear();
+        MonitorBridge.reset();
         scheduler.dispose();
         executor.dispose();
         void lock.release();
       },
     },
   );
+  return service;
 }

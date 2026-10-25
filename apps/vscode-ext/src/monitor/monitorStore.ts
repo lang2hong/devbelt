@@ -117,7 +117,7 @@ function isTask(value: unknown): value is MonitorTask {
   if (!value || typeof value !== 'object') return false;
   const t = value as Record<string, unknown>;
   return typeof t.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(t.id)
-    && t.kind === 'rowCount'
+    && (t.kind === 'rowCount' || t.kind === 'metric' || t.kind === 'newRows')
     && typeof t.connId === 'string'
     && typeof t.table === 'string'
     && typeof t.intervalMs === 'number'

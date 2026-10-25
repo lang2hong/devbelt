@@ -8,6 +8,9 @@ import ConversationDrawer from '../components/ai/ConversationDrawer.vue';
 import ContextBar from '../components/ai/ContextBar.vue';
 import SideDrawer from '../components/ai/SideDrawer.vue';
 import QuotaPanel from '../components/ai/QuotaPanel.vue';
+import MonitorPanel from '../components/ai/MonitorPanel.vue';
+import MonitorProposalCard, { type ProposalState } from '../components/ai/MonitorProposalCard.vue';
+import type { MonitorDetail, MonitorTaskView } from '../../../src/monitor/monitorBridge';
 import type { MoreMenuItem } from '../components/ai/MoreMenu.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TableNoteDialog, { type TableNoteColumn } from '../components/ai/TableNoteDialog.vue';
@@ -124,10 +127,18 @@ const suggestions = computed(() => [
  * 右侧抽屉（一次只开一个）：会话记录 / 注入的表 / 业务规则 / 额度。
  * 默认关闭，对话区占满宽度；入口在顶栏「⋯」。
  */
-type DrawerKind = 'sessions' | 'tables' | 'rules' | 'quota';
+type DrawerKind = 'sessions' | 'tables' | 'rules' | 'quota' | 'monitor';
 const drawer = ref<DrawerKind | null>(null);
+/** P13：后台任务（列表 / 详情缓存 / 是否由本窗口执行）与对话内的监控提案卡片。 */
+const monitorTasks = ref<MonitorTaskView[]>([]);
+const monitorExecuting = ref(true);
+const monitorAvailable = ref(false);
+const monitorDetails = ref<Record<string, MonitorDetail | null>>({});
+const monitorFocusId = ref<string | null>(null);
+const proposals = ref<ProposalState[]>([]);
 function openDrawer(kind: DrawerKind): void {
   drawer.value = kind;
+  if (kind === 'monitor') post({ type: 'monitorRequestList' });
   if (kind === 'tables') requestContextDetailIfNeeded();
   if (kind === 'rules' && selectedConnId.value) post({ type: 'requestBusinessRules' });
   if (kind === 'quota') refreshQuota(false);
@@ -138,6 +149,7 @@ const drawerTitle = computed(() => {
     case 'tables': return t('wv.ai.context.tablesTitle');
     case 'rules': return t('wv.ai.rules.title');
     case 'quota': return t('wv.ai.quota.title');
+    case 'monitor': return t('monitor.list.title');
     default: return '';
   }
 });
@@ -257,6 +269,7 @@ onMounted(() => {
           streaming.value = null;
           break;
         }
+        if (activeSessionId.value !== session.id) proposals.value = [];
         activeSessionId.value = session.id;
         resetMessages(Array.isArray(session.messages) ? [...session.messages] : []);
         streaming.value = null;
@@ -395,6 +408,35 @@ onMounted(() => {
       case 'prefillInput':
         if (typeof msg.text === 'string') input.value = msg.text;
         break;
+      case 'agentModeChanged':
+        agentEnabled.value = msg.enabled === true;
+        break;
+      case 'monitorList':
+        monitorAvailable.value = true;
+        monitorTasks.value = Array.isArray(msg.tasks) ? msg.tasks : [];
+        monitorExecuting.value = msg.executing !== false;
+        break;
+      case 'monitorDetail':
+        if (typeof msg.id === 'string') monitorDetails.value = { ...monitorDetails.value, [msg.id]: msg.detail ?? null };
+        break;
+      case 'monitorOpen':
+        monitorFocusId.value = typeof msg.focusId === 'string' ? msg.focusId : null;
+        openDrawer('monitor');
+        break;
+      case 'monitorProposal':
+        if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
+        if (msg.proposal && typeof msg.proposal.id === 'string') proposals.value = [...proposals.value, { proposal: msg.proposal, status: 'pending' }];
+        break;
+      case 'monitorConfirmResult': {
+        const at = proposals.value.findIndex((p) => p.proposal.id === msg.proposalId);
+        if (at < 0) break;
+        const next = [...proposals.value];
+        next[at] = msg.ok
+          ? { ...next[at]!, status: 'created' }
+          : { ...next[at]!, status: 'failed', error: t('monitor.proposal.failed', { reason: [msg.reason, ...(Array.isArray(msg.issues) ? msg.issues : [])].filter(Boolean).join(', ') }) };
+        proposals.value = next;
+        break;
+      }
       case 'tableOptions':
         tableOptions.value = Array.isArray(msg.tables) ? msg.tables : [];
         tableOptionsLoading.value = false;
@@ -565,6 +607,7 @@ function useSuggestion(text: string): void {
 }
 
 function newChat(): void {
+  proposals.value = [];
   resetMessages([]);
   streaming.value = null;
   editingIndex.value = null;
@@ -654,6 +697,11 @@ const menuItems = computed<MoreMenuItem[]>(() => {
     disabled: !selectedConnId.value,
     hint: rulesSummary.value.configured ? t('wv.ai.rules.configured') : undefined,
   });
+  if (monitorAvailable.value) items.push({
+    id: 'monitor',
+    label: t('monitor.list.title'),
+    ...(monitorTasks.value.length ? { hint: String(monitorTasks.value.filter((m) => m.status !== 'paused').length) + '/' + monitorTasks.value.length } : {}),
+  });
   if (usesQuota) items.push({ id: 'quota', label: t('wv.ai.quota.title'), separator: true });
   items.push(
     { id: 'modelAccess', label: t('wv.ai.modelAccess'), separator: !usesQuota },
@@ -663,7 +711,7 @@ const menuItems = computed<MoreMenuItem[]>(() => {
 });
 
 function onMenu(id: string): void {
-  if (id === 'sessions' || id === 'tables' || id === 'rules' || id === 'quota') openDrawer(id);
+  if (id === 'sessions' || id === 'tables' || id === 'rules' || id === 'quota' || id === 'monitor') openDrawer(id);
   else if (id === 'modelAccess') openModelAccess();
   else if (id === 'settings') post({ type: 'openSettings' });
 }
@@ -683,6 +731,21 @@ function loadSessionFromDrawer(id: string): void {
 function newChatFromDrawer(): void {
   newChat();
   drawer.value = null;
+}
+
+function confirmProposal(proposalId: string, intervalMinutes: number): void {
+  proposals.value = proposals.value.map((p) => (p.proposal.id === proposalId ? { ...p, status: 'creating', error: undefined } : p));
+  post({ type: 'monitorConfirm', proposalId, intervalMinutes });
+}
+
+function discardProposal(proposalId: string): void {
+  proposals.value = proposals.value.map((p) => (p.proposal.id === proposalId ? { ...p, status: 'discarded' } : p));
+  post({ type: 'monitorDiscard', proposalId });
+}
+
+function explainMonitor(id: string, includeRows: boolean): void {
+  drawer.value = null;
+  post({ type: 'monitorExplain', id, includeRows });
 }
 </script>
 
@@ -717,6 +780,16 @@ function newChatFromDrawer(): void {
           @regenerate="regenerate"
           @edit="editMessage"
         />
+        <div v-if="proposals.length" class="ai-proposals">
+          <MonitorProposalCard
+            v-for="state in proposals"
+            :key="state.proposal.id"
+            :state="state"
+            @confirm="confirmProposal"
+            @discard="discardProposal"
+            @open-tasks="openDrawer('monitor')"
+          />
+        </div>
         <div v-if="agentNotice" class="ai-agent-notice">{{ agentNotice }}</div>
         <div v-if="editingIndex !== null" class="ai-edit-banner">
           <span>{{ t('wv.ai.editBanner', { n: editingIndex + 1 }) }}</span>
@@ -756,6 +829,14 @@ function newChatFromDrawer(): void {
         </p>
         <button class="ai-btn" :disabled="!selectedConnId" @click="openRulesDialog">{{ t('wv.ai.rules.edit') }}</button>
       </template>
+      <MonitorPanel
+        v-else-if="drawer === 'monitor'"
+        :tasks="monitorTasks"
+        :executing="monitorExecuting"
+        :focus-id="monitorFocusId"
+        :details="monitorDetails"
+        @explain="explainMonitor"
+      />
       <QuotaPanel
         v-else-if="drawer === 'quota'"
         :quota="quota"
@@ -865,6 +946,11 @@ function newChatFromDrawer(): void {
   border-radius: 8px;
   color: var(--vscode-descriptionForeground);
   font-size: 12px;
+}
+.ai-proposals {
+  padding: 0 14px;
+  max-height: 45vh;
+  overflow-y: auto;
 }
 .ai-agent-notice {
   padding: 6px 14px;

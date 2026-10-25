@@ -415,7 +415,15 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const aiStatusBar = new AiStatusBar();
   const aiChatStatusBar = new AiChatStatusBar();
   // P13：数据监控（定时只读检查；启动时任务全部暂停，多窗口只有持锁窗口执行）。
-  registerMonitor(context, { store, manager });
+  // aiChatDeps 在下方定义：openAiSetup 是延迟调用，届时已初始化。
+  const monitorService = registerMonitor(context, {
+    store,
+    manager,
+    openAiSetup: (node) => {
+      if (!node.conn) return;
+      void AiChatView.open(aiChatDeps).openMonitorSetup(node.conn, node.database, node.label);
+    },
+  });
   const aiChatDeps: AiChatViewDeps = {
     service: aiService,
     sessions: aiSessions,
@@ -430,7 +438,13 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     modelAccessStore: aiModelAccessStore,
     providerCatalog,
     ledgerPath: agentLedgerPath(context.globalStorageUri.fsPath),
+    monitor: monitorService,
   };
+  // 「后台任务」优先在 AI Chat 抽屉里打开（monitorSetup 的命令会先调这里）。
+  context.subscriptions.push(vscode.commands.registerCommand('devbelt.ai.openMonitor', (focusId?: string) => {
+    AiChatView.open(aiChatDeps).openMonitor(typeof focusId === 'string' ? focusId : undefined);
+    return true;
+  }));
   // P12：把上次异常退出遗留的 EXECUTING 记为 UNKNOWN。
   void recoverAgentLedger(agentLedgerPath(context.globalStorageUri.fsPath)).catch(() => undefined);
 

@@ -130,3 +130,44 @@ describe('MonitorScheduler', () => {
     scheduler.dispose();
   });
 });
+
+describe('MonitorScheduler with structured results', () => {
+  it('stores metric values and cursor state, keeps new rows in memory only', async () => {
+    const outputs = [
+      { value: 0, cursor: { value: '10', seen: ['["10"]'] }, rows: [], more: false },
+      { value: 2, cursor: { value: '12', seen: ['["12"]'] }, rows: [{ id: 11, secret: 'x' }, { id: 12, secret: 'y' }], more: false },
+    ];
+    const { scheduler, points, saved } = setup({ run: vi.fn(async () => outputs.shift()!) });
+    await scheduler.add(task({ kind: 'newRows', cursorColumn: 'id', primaryKey: ['id'], condition: { type: 'increaseBy', value: 1 } }));
+    await scheduler.runNow('m1');
+    expect(scheduler.get('m1')).toMatchObject({ lastValue: 2, cursorValue: '12', cursorSeen: ['["12"]'] });
+    expect(scheduler.latestRows('m1')?.rows).toHaveLength(2);
+    // Row contents are neither persisted in tasks.json nor in the history file.
+    expect(JSON.stringify(saved())).not.toContain('secret');
+    expect(JSON.stringify(points)).not.toContain('secret');
+    await scheduler.remove('m1');
+    expect(scheduler.latestRows('m1')).toBeUndefined();
+  });
+
+  it('notifies new rows against the threshold, not against the previous count', async () => {
+    const outputs = [{ value: 0 }, { value: 3 }, { value: 3 }];
+    const { scheduler, deps } = setup({ run: vi.fn(async () => outputs.shift()!) });
+    await scheduler.add(task({ kind: 'newRows', condition: { type: 'increaseBy', value: 3 } }));
+    await scheduler.runNow('m1');
+    await scheduler.runNow('m1');
+    expect(deps.onHit).toHaveBeenCalledTimes(2);
+    scheduler.dispose();
+  });
+
+  it('records a NULL watched metric without notifying', async () => {
+    const outputs = [{ value: 5, values: { lag: 5 } }, { value: null, values: { lag: null } }];
+    const { scheduler, deps, points } = setup({ run: vi.fn(async () => outputs.shift()!) });
+    await scheduler.add(task({ kind: 'metric', sql: 'SELECT 1 AS lag', watchColumn: 'lag', condition: { type: 'anyChange' } }));
+    await scheduler.runNow('m1');
+    expect(deps.onHit).not.toHaveBeenCalled();
+    expect(scheduler.get('m1')).toMatchObject({ lastValue: 5, lastValues: { lag: null } });
+    expect(points.at(-1)?.point).toMatchObject({ values: { lag: null } });
+    expect(points.at(-1)?.point.value).toBeUndefined();
+    scheduler.dispose();
+  });
+});

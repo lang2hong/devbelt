@@ -62,6 +62,14 @@ E2EE personal sync, SSH host-key verification, read-only protection and audit lo
 - **MCP Server**（默认关闭）：仅监听本机的 Streamable HTTP，只服务一个指定连接；逐客户端令牌、限流、Host/Origin 校验与审计；只暴露 5 个只读工具，不注册写操作。
 - **脱敏导出**：按列确定性脱敏，PII 列必须显式配置规则，先预览再导出 CSV/SQL；支持有界外键子集导出，父子键脱敏后仍可关联。
 
+### Data monitoring (0.4.0) / 数据监控
+
+- **Scheduled read-only checks** on a table's row count, a numeric metric query, or new rows on an existing integer / date-time column, with a VS Code notification when your condition is met. Right-click a table → More… → *Monitor Row Count…*, or ask the Agent; the Agent can only propose, and you create the task from a card in the chat.
+- **Background Tasks** in AI Chat's More menu: charts, check history, latest new rows, pause / resume / check now, and *Ask AI to explain*. Checks use an isolated read-only session, production connections are refused by default, and tasks are paused whenever VS Code starts.
+
+- **定时只读检查**：表的行数、一条数值指标查询，或基于已有整数 / 时间列的新增行；命中你设定的条件时弹 VS Code 通知。表右键 → 更多… →「监控行数变化…」，或让 Agent 帮你设置——Agent 只能提出，任务由你在对话卡片上确认创建。
+- **后台任务**（AI Chat「⋯」菜单）：图表、检查记录、最近新增的行，暂停 / 继续 / 立即检查，以及「让 AI 解读」。检查使用独立只读会话，生产连接默认拒绝，每次启动 VS Code 任务都会先暂停。
+
 ### Visual EXPLAIN / 可视化执行计划
 
 ![Execution plan tree with warnings and node details](resources/screenshots/07-explain.png)

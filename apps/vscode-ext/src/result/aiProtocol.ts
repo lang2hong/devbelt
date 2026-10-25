@@ -403,6 +403,14 @@ export type AiUpMessage =
   | { type: 'clearApiKey' }
   | { type: 'testConnection' }
   | { type: 'copyCode'; text: string }
+  /** P13：后台任务抽屉 / 监控提案卡片。 */
+  | { type: 'monitorRequestList' }
+  | { type: 'monitorDetail'; id: string }
+  | { type: 'monitorAction'; id: string; action: 'resume' | 'pause' | 'runNow' | 'remove' }
+  | { type: 'monitorResumeAll' }
+  | { type: 'monitorConfirm'; proposalId: string; intervalMinutes?: number }
+  | { type: 'monitorDiscard'; proposalId: string }
+  | { type: 'monitorExplain'; id: string; includeRows?: boolean }
   | { type: 'applyCode'; text: string }
   | { type: 'executeSql'; text: string }
   | { type: 'executeSqlInChat'; text: string; blockRef?: AiBlockRef }

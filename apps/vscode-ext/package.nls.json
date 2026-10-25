@@ -180,5 +180,7 @@
   "welcome.noConnections.loggedIn": "No connections yet.\n[New Connection](command:devbelt.addConnection) · [Import](command:devbelt.importConnections)",
   "cmd.monitor.rowCount": "Monitor Row Count…",
   "cmd.monitor.tasks": "Background Tasks",
-  "cmd.monitor.resumeAll": "Resume All Monitoring Tasks"
+  "cmd.monitor.resumeAll": "Resume All Monitoring Tasks",
+  "cmd.monitor.aiSetup": "Set Up Monitoring with AI…",
+  "cmd.ai.openMonitor": "Open Background Tasks in AI Chat"
 }

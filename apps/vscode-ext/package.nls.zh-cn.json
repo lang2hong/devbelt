@@ -180,5 +180,7 @@
   "welcome.noConnections.loggedIn": "还没有连接。\n[新建连接](command:devbelt.addConnection) · [导入连接](command:devbelt.importConnections)",
   "cmd.monitor.rowCount": "监控行数变化…",
   "cmd.monitor.tasks": "后台任务",
-  "cmd.monitor.resumeAll": "继续所有监控任务"
+  "cmd.monitor.resumeAll": "继续所有监控任务",
+  "cmd.monitor.aiSetup": "让 AI 帮我设置监控…",
+  "cmd.ai.openMonitor": "在 AI 对话中打开后台任务"
 }

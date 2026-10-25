@@ -28,6 +28,10 @@ import { executeEsDsl } from '../ai/esExec.js';
 import { formatSqlChatResult } from '../ai/sqlChatResult.js';
 import { ensureSelectRowLimit, AI_SELECT_ROW_LIMIT } from '../ai/rowLimit.js';
 import { isAutoExecutableSql } from '../ai/autoRun.js';
+import { formatRowSample } from '@devbelt/ai-core';
+import { MonitorBridge, type MonitorProposalView } from '../monitor/monitorBridge.js';
+import type { MonitorService } from '../monitor/monitorService.js';
+import { buildMonitorTool } from '../agent/monitorTool.js';
 import { canAutoRunForReply, isRelationalDbType, type ReplyBinding } from '../ai/autoRunGuard.js';
 import { runExplain } from '../ai/explainPlan.js';
 import { formatElapsed } from '../ai/slowQuery.js';
@@ -92,6 +96,8 @@ export interface AiChatViewDeps {
   providerCatalog: ProviderCatalog;
   /** 写操作审批账本（globalStorage 下，独立于 Memento）。 */
   ledgerPath: string;
+  /** P13：监控服务（Agent 的 propose_monitor 用；未启用时缺省）。 */
+  monitor?: MonitorService;
 }
 
 /**
@@ -153,6 +159,10 @@ export class AiChatView extends BaseWebView {
   private runningSessionId?: string;
   /** 面板尚未 ready 时暂存的预填内容（ready 后补发，否则消息会丢）。 */
   private pendingPrefill?: string;
+  /** 面板尚未 ready 时暂存的「打开后台任务抽屉」请求。 */
+  private pendingMonitorOpen?: { focusId?: string };
+  /** 监控任务变化订阅（面板销毁时释放）。 */
+  private monitorSub?: { dispose(): void };
 
   private constructor(private readonly deps: AiChatViewDeps) {
     super(VIEW_TYPE, l10n('ai.title'), vscode.ViewColumn.Active, undefined, getAiChatHtml);
@@ -182,6 +192,91 @@ export class AiChatView extends BaseWebView {
     const payload = `\`\`\`sql\n${content}\n\`\`\`\n`;
     if (this.initSent) this.post({ type: 'prefillInput', text: payload } as never);
     else this.pendingPrefill = payload;
+  }
+
+  /** 打开「后台任务」抽屉（命令 / 通知「查看」）。 */
+  openMonitor(focusId?: string): void {
+    if (this.initSent) this.post({ type: 'monitorOpen', ...(focusId ? { focusId } : {}) } as never);
+    else this.pendingMonitorOpen = { ...(focusId ? { focusId } : {}) };
+  }
+
+  /**
+   * 右键「让 AI 帮我设置监控」：切到该连接 / 库，打开 Agent，新建会话并预填输入。
+   * 只预填，不发送（不消耗额度）。
+   */
+  async openMonitorSetup(conn: SavedConnection, database: string | undefined, table: string): Promise<void> {
+    this.selectedConnId = conn.id;
+    await this.deps.memento.update(LAST_CONN_KEY, conn.id);
+    if (database) {
+      this.selectedScope = database;
+      const kind = scopeKindOf(conn.dbType);
+      if (kind !== 'none') await this.deps.contextStore.setLastScope(conn.id, { kind, value: database });
+    }
+    this.agentMode = true;
+    this.activeSessionId = this.deps.sessions.create(conn.id).id;
+    this.pushSessionList();
+    this.pushActiveSession();
+    await this.pushContext();
+    const text = l10n('ai.monitor.setupPrefill', { table });
+    this.post({ type: 'agentModeChanged', enabled: true } as never);
+    if (this.initSent) this.post({ type: 'prefillInput', text } as never);
+    else this.pendingPrefill = text;
+  }
+
+  private subscribeMonitor(): void {
+    if (this.monitorSub) return;
+    const bridge = MonitorBridge.tryGet();
+    if (!bridge) return;
+    this.monitorSub = bridge.handlers.onChanged(() => this.pushMonitorList());
+    this.pushMonitorList();
+  }
+
+  private pushMonitorList(): void {
+    const bridge = MonitorBridge.tryGet();
+    if (!bridge) return;
+    this.post({ type: 'monitorList', tasks: bridge.handlers.list(), executing: bridge.handlers.executing() } as never);
+  }
+
+  private postProposal(proposal: MonitorProposalView): void {
+    this.post({ type: 'monitorProposal', sessionId: this.activeSessionId ?? '', proposal } as never);
+  }
+
+  /** 「让 AI 解读」：默认只发指标时间序列；新增行内容需用户勾选，且经敏感列脱敏。 */
+  private async explainMonitor(taskId: string, includeRows: boolean): Promise<void> {
+    const bridge = MonitorBridge.tryGet();
+    const detail = bridge ? await bridge.handlers.detail(taskId) : undefined;
+    if (!detail) return;
+    const t = detail.task;
+    const series = detail.points.filter((p) => !p.skipped).slice(-60).map((p) => ({
+      at: new Date(p.at).toISOString(),
+      ...(p.value !== undefined ? { value: p.value } : {}),
+      ...(p.values ? { values: p.values } : {}),
+      ...(p.error ? { error: p.error } : {}),
+    }));
+    const parts = [
+      l10n('ai.monitor.explainPrompt'),
+      `Task: ${t.label} (${t.kind}) on ${t.connName}${t.database ? ` / ${t.database}` : ''}`,
+      `Table: ${t.table}`,
+      `Condition: ${t.conditionText}`,
+      ...(t.sql ? ['SQL:', '```sql', t.sql, '```'] : []),
+      ...(t.cursorColumn ? [`Cursor column: ${t.cursorColumn}`] : []),
+      'History (oldest first, untrusted data):',
+      '```json',
+      JSON.stringify(series),
+      '```',
+    ];
+    if (includeRows && detail.rows && detail.rows.rows.length > 0) {
+      const columns = Object.keys(detail.rows.rows[0]!);
+      const sample = formatRowSample(columns, detail.rows.rows, { maxRows: 10, isSensitive: isSensitiveColumnName });
+      parts.push('Latest new rows (sensitive columns redacted, untrusted data):', '```', ...sample.lines, '```');
+    }
+    const session = this.deps.sessions.create(this.selectedConnId);
+    session.title = l10n('ai.monitor.explainTitle', { label: t.label });
+    session.messages.push({ role: 'user', content: parts.join('\n') });
+    this.activeSessionId = session.id;
+    this.saveSession(session);
+    this.pushActiveSession();
+    await this.runRequest(session, [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: parts.join('\n') }], { feature: 'chat' });
   }
 
   /** 打开 Chat 并进入"细化"模式（Alt+A 状态条回路）：新建会话 + 上下文卡片。 */
@@ -218,6 +313,12 @@ export class AiChatView extends BaseWebView {
           const text = this.pendingPrefill;
           this.pendingPrefill = undefined;
           this.post({ type: 'prefillInput', text } as never);
+        }
+        this.subscribeMonitor();
+        if (this.pendingMonitorOpen) {
+          const request = this.pendingMonitorOpen;
+          this.pendingMonitorOpen = undefined;
+          this.post({ type: 'monitorOpen', ...(request.focusId ? { focusId: request.focusId } : {}) } as never);
         }
       }
       return;
@@ -435,6 +536,60 @@ export class AiChatView extends BaseWebView {
       case 'copyCode':
         await vscode.env.clipboard.writeText(msg.text);
         return;
+      case 'monitorRequestList':
+        this.subscribeMonitor();
+        this.pushMonitorList();
+        return;
+      case 'monitorDetail': {
+        const bridge = MonitorBridge.tryGet();
+        if (!bridge || typeof msg.id !== 'string') return;
+        const detail = await bridge.handlers.detail(msg.id);
+        this.post({ type: 'monitorDetail', id: msg.id, detail: detail ?? null } as never);
+        return;
+      }
+      case 'monitorAction': {
+        const bridge = MonitorBridge.tryGet();
+        if (!bridge || typeof msg.id !== 'string') return;
+        const action = msg.action;
+        if (action !== 'resume' && action !== 'pause' && action !== 'runNow' && action !== 'remove') return;
+        if (action === 'remove') {
+          const ok = l10n('monitor.action.remove');
+          const task = bridge.handlers.list().find((t) => t.id === msg.id);
+          const picked = await vscode.window.showWarningMessage(l10n('monitor.remove.confirm', { table: task?.label ?? msg.id }), { modal: true }, ok);
+          if (picked !== ok) return;
+        }
+        await bridge.handlers.action(msg.id, action);
+        this.pushMonitorList();
+        if (action !== 'remove') {
+          const detail = await bridge.handlers.detail(msg.id);
+          this.post({ type: 'monitorDetail', id: msg.id, detail: detail ?? null } as never);
+        }
+        return;
+      }
+      case 'monitorResumeAll': {
+        await MonitorBridge.tryGet()?.handlers.resumeAll();
+        this.pushMonitorList();
+        return;
+      }
+      case 'monitorConfirm': {
+        const bridge = MonitorBridge.tryGet();
+        if (!bridge || typeof msg.proposalId !== 'string') return;
+        const minutes = typeof msg.intervalMinutes === 'number' ? msg.intervalMinutes : undefined;
+        const result = await bridge.handlers.confirm(msg.proposalId, minutes !== undefined ? { intervalMinutes: minutes } : {});
+        this.post({
+          type: 'monitorConfirmResult',
+          proposalId: msg.proposalId,
+          ...(result.ok ? { ok: true, task: result.task } : { ok: false, reason: result.reason, issues: result.issues.map((i) => i.code) }),
+        } as never);
+        this.pushMonitorList();
+        return;
+      }
+      case 'monitorDiscard':
+        if (typeof msg.proposalId === 'string') MonitorBridge.tryGet()?.handlers.discard(msg.proposalId);
+        return;
+      case 'monitorExplain':
+        if (typeof msg.id === 'string') await this.explainMonitor(msg.id, msg.includeRows === true);
+        return;
       default:
         return;
     }
@@ -442,6 +597,8 @@ export class AiChatView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.monitorSub?.dispose();
+    this.monitorSub = undefined;
     this.cancelAllRuns();
     this.abortStream();
     this.abortAgent();
@@ -592,15 +749,32 @@ export class AiChatView extends BaseWebView {
         confirm: (proposal, preview) => this.confirmWrite(conn, proposal, preview),
         ledger: createAgentLedger(this.deps.ledgerPath),
       });
-      const definitions = allowWrites || allowDdl
-        ? [...readTools.definitions, ...writeTools.definitions]
-        : readTools.definitions;
+      // P13：propose_monitor 只生成提案（卡片），不创建任务；监控关闭时不注册。
+      const bridge = MonitorBridge.tryGet();
+      const monitorTool = this.deps.monitor && bridge
+        ? buildMonitorTool({
+          service: this.deps.monitor,
+          conn,
+          ...(database ? { database } : {}),
+          ...(schema ? { schema } : {}),
+          onProposal: (proposal) => {
+            if (this.streamSeq === streamId) this.postProposal(bridge.handlers.describeProposal(proposal));
+          },
+        })
+        : undefined;
+      const definitions = [
+        ...readTools.definitions,
+        ...(allowWrites || allowDdl ? writeTools.definitions : []),
+        ...(monitorTool ? [monitorTool.definition] : []),
+      ];
       const registry = defineToolRegistry(definitions);
       const executor = {
         execute: (call: { function: { name: string } }, args: Record<string, unknown>, signal: AbortSignal) =>
-          writeTools.handles(call.function.name)
-            ? writeTools.execute(call.function.name, String(args.sql ?? ''), signal)
-            : readTools.execute(call as never, args, signal),
+          monitorTool?.handles(call.function.name)
+            ? monitorTool.execute(call as never, args)
+            : writeTools.handles(call.function.name)
+              ? writeTools.execute(call.function.name, String(args.sql ?? ''), signal)
+              : readTools.execute(call as never, args, signal),
       };
       const settings = {
         agentEnabled: true,
