@@ -177,5 +177,8 @@
   "submenu.tableMore": "更多…",
   "submenu.databaseData": "数据与运维…",
   "welcome.noConnections.loggedOut": "还没有连接。\n[新建连接](command:devbelt.addConnection) · [导入连接](command:devbelt.importConnections) · [登录](command:devbelt.login)",
-  "welcome.noConnections.loggedIn": "还没有连接。\n[新建连接](command:devbelt.addConnection) · [导入连接](command:devbelt.importConnections)"
+  "welcome.noConnections.loggedIn": "还没有连接。\n[新建连接](command:devbelt.addConnection) · [导入连接](command:devbelt.importConnections)",
+  "cmd.monitor.rowCount": "监控行数变化…",
+  "cmd.monitor.tasks": "后台任务",
+  "cmd.monitor.resumeAll": "继续所有监控任务"
 }

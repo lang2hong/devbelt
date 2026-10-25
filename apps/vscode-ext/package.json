@@ -408,6 +408,23 @@
         "icon": "$(kebab-horizontal)"
       },
       {
+        "command": "devbelt.monitor.rowCount",
+        "title": "%cmd.monitor.rowCount%",
+        "category": "DevBelt",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "devbelt.monitor.tasks",
+        "title": "%cmd.monitor.tasks%",
+        "category": "DevBelt",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "devbelt.monitor.resumeAll",
+        "title": "%cmd.monitor.resumeAll%",
+        "category": "DevBelt"
+      },
+      {
         "command": "devbelt.ai.chat",
         "title": "%cmd.ai.chat%",
         "category": "DevBelt",
@@ -976,6 +993,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "devbelt.monitor.rowCount",
+          "when": "false"
+        },
         {
           "command": "devbelt.generateDictionary",
           "when": "false"
@@ -2166,6 +2187,11 @@
       ],
       "devbelt.tableMore": [
         {
+          "command": "devbelt.monitor.rowCount",
+          "when": "view == devbelt.explorer && viewItem =~ /^table\\.(MYSQL|PG|SQLITE)$/ && config.devbelt.ai.monitor.enabled",
+          "group": "5_monitor"
+        },
+        {
           "command": "devbelt.refreshNode",
           "title": "%cmd.refreshNode%",
           "when": "view == devbelt.explorer && viewItem =~ /^table\\./",
@@ -2514,6 +2540,42 @@
           "default": false,
           "description": "Allow the agent to propose DDL. Each statement still needs explicit approval.",
           "markdownDescription": "允许 Agent 提出 DDL（CREATE/ALTER/DROP 等）。每条语句仍需在弹窗中确认。"
+        },
+        "devbelt.ai.monitor.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Data monitoring: scheduled read-only checks on tables. Turning it off hides the entry points and stops every task.",
+          "markdownDescription": "数据监控：定时只读检查表。关闭后隐藏入口并停止所有任务。"
+        },
+        "devbelt.ai.monitor.allowProduction": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow monitoring tasks on connections marked production.",
+          "markdownDescription": "允许在标记为生产的连接上创建监控任务（默认拒绝）。"
+        },
+        "devbelt.ai.monitor.queryTimeoutSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 300,
+          "description": "Timeout of one monitoring check, in seconds.",
+          "markdownDescription": "单次监控检查的超时（秒）。"
+        },
+        "devbelt.ai.monitor.notifyCooldownMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "Minimum minutes between two notifications of the same task.",
+          "markdownDescription": "同一任务两次通知之间的最短间隔（分钟）。"
+        },
+        "devbelt.ai.monitor.maxTasks": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of monitoring tasks (each connection is limited to 5).",
+          "markdownDescription": "监控任务总数上限（每个连接固定最多 5 个）。"
         },
         "devbelt.ai.agent.allowProduction": {
           "type": "boolean",

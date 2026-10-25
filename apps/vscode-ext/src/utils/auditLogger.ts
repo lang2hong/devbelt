@@ -22,7 +22,9 @@ export type AuditAction =
   /** P8：Elasticsearch REST 写请求（method/path，不含 body）。 */
   | 'es_rest'
   /** P9：AI Chat 请求（只记连接/耗时元数据，不含 prompt/回复明文）。 */
-  | 'ai_chat';
+  | 'ai_chat'
+  /** P13：数据监控任务的创建 / 删除 / 暂停 / 继续 / 自动暂停（只记目标，不记行内容）。 */
+  | 'monitor_task';
 
 export interface AuditEntry {
   id: string;

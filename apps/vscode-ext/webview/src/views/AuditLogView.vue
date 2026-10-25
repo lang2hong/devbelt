@@ -39,6 +39,7 @@ const actionLabels: Record<string, string> = {
   process_kill: 'Kill Process',
   redis_command: 'Redis',
   export_data: 'Export',
+  monitor_task: 'Monitor',
 };
 
 function formatSql(sql?: string): string {

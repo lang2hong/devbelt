@@ -37,6 +37,7 @@ import { registerAiEditorCommands } from './commands/aiEditor';
 import { AiSchemaContextBuilder } from './ai/schemaContext';
 import { AiStatusBar } from './ai/aiStatusBar';
 import { AiChatStatusBar } from './ai/aiChatStatusBar';
+import { registerMonitor } from './monitor/monitorSetup';
 import { AiSqlRegistry } from './ai/aiSqlRegistry';
 import { AiBridge } from './ai/aiBridge';
 import { registerAiInlineProvider } from './completion/aiInlineProvider';
@@ -413,6 +414,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   AiSqlRegistry.init();
   const aiStatusBar = new AiStatusBar();
   const aiChatStatusBar = new AiChatStatusBar();
+  // P13：数据监控（定时只读检查；启动时任务全部暂停，多窗口只有持锁窗口执行）。
+  registerMonitor(context, { store, manager });
   const aiChatDeps: AiChatViewDeps = {
     service: aiService,
     sessions: aiSessions,
