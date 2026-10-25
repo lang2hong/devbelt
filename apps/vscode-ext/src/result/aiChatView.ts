@@ -95,6 +95,31 @@ export interface AiChatViewDeps {
 }
 
 /**
+ * Agent 的目标库 / schema。PG 的作用域选择器列的是**库**（`listScopes` → `getDatabases`），
+ * 所以选中值是库名，schema 取连接配置（与表清单 / 列读取一致）；其他引擎作用域就是库。
+ */
+export function agentScopeOf(
+  conn: Pick<SavedConnection, 'dbType' | 'database' | 'schema'>,
+  selectedScope: string | undefined,
+): { database?: string; schema?: string } {
+  const database = selectedScope ?? conn.database;
+  const schema = conn.dbType === DatabaseType.PG && conn.schema ? conn.schema : undefined;
+  return { ...(database ? { database } : {}), ...(schema ? { schema } : {}) };
+}
+
+/**
+ * Agent 独立会话的 PG search_path：`openIsolatedSql` 固定成了 `pg_catalog`，必须改回——
+ * 有 schema 用 `"schema", public`，没有就 RESET 回会话默认（含角色 / 库级配置）。
+ */
+export async function applyAgentSearchPath(
+  q: { query(sql: string, values?: unknown, options?: { skipHistory?: boolean }): Promise<unknown>; wrap(identifier: string): string },
+  schema: string | undefined,
+): Promise<void> {
+  const sql = schema ? `SET search_path TO ${q.wrap(validateSchemaIdent(schema))}, public` : 'RESET search_path';
+  await q.query(sql, undefined, { skipHistory: true });
+}
+
+/**
  * AI Chat 面板（P9 S3）：独立 WebviewPanel（`devbelt.ai` + `aiChat.html`），
  * 不复用 QueryView/DesignView 的 WebviewMode 单入口。
  *
@@ -528,8 +553,7 @@ export class AiChatView extends BaseWebView {
     const allowDdl = cfg.get<boolean>('agent.allowDdl', false);
     const allowProduction = cfg.get<boolean>('agent.allowProduction', false);
     const engine = agentEngineOf(conn.dbType);
-    const database = conn.dbType === DatabaseType.PG ? conn.database : (this.selectedScope ?? conn.database);
-    const schema = conn.dbType === DatabaseType.PG ? this.selectedScope : undefined;
+    const { database, schema } = agentScopeOf(conn, this.selectedScope);
     const meta: AiRequestMeta = {
       feature: 'chat',
       ...(conn.name ? { connName: conn.name } : {}),
@@ -540,13 +564,7 @@ export class AiChatView extends BaseWebView {
     let assistant = '';
     try {
       isolated = await this.deps.manager.openIsolatedSql(conn, database);
-      if (engine === 'PG' && schema) {
-        await isolated.session.query.query(
-          `SET search_path TO ${isolated.session.query.wrap(validateSchemaIdent(schema))}, public`,
-          undefined,
-          { skipHistory: true },
-        );
-      }
+      if (engine === 'PG') await applyAgentSearchPath(isolated.session.query, schema);
       const readTools = buildAgentTools({
         dbType: conn.dbType,
         ...(database ? { database } : {}),
@@ -568,13 +586,7 @@ export class AiChatView extends BaseWebView {
         settings: { allowWrites, allowDdl, allowProduction },
         openSession: async () => {
           const opened = await this.deps.manager.openIsolatedSql(conn, database);
-          if (engine === 'PG' && schema) {
-            await opened.session.query.query(
-              `SET search_path TO ${opened.session.query.wrap(validateSchemaIdent(schema))}, public`,
-              undefined,
-              { skipHistory: true },
-            );
-          }
+          if (engine === 'PG') await applyAgentSearchPath(opened.session.query, schema);
           return { session: opened.session as never, close: opened.close };
         },
         confirm: (proposal, preview) => this.confirmWrite(conn, proposal, preview),
