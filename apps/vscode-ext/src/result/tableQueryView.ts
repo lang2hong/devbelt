@@ -387,6 +387,16 @@ export class TableQueryView extends BaseWebView {
       case 'aiWhyEmpty':
         this.handleAiWhyEmpty();
         break;
+      case 'openAiChat': {
+        // 只预填当前 SQL，不自动发送（点击图标不应该消耗额度）。
+        const bridge = AiBridge.tryGet();
+        if (!bridge) {
+          void vscode.window.showInformationMessage(l10n('ai.notEnabled'));
+          break;
+        }
+        bridge.prefillChat(String(msg.sql ?? ''));
+        break;
+      }
     }
   }
 

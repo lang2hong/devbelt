@@ -50,4 +50,16 @@ describe('树右键菜单分组', () => {
     expect(has('devbelt.databaseData', 'devbelt.restoreDatabase')).toBe(true);
     expect(has('devbelt.databaseData', 'devbelt.syncDatabase')).toBe(true);
   });
+
+  it('侧栏标题栏有 AI 对话图标入口', () => {
+    const title = menus['view/title'] ?? [];
+    const entry = title.find((e) => e.command === 'devbelt.ai.chat');
+    expect(entry, 'view/title 缺 devbelt.ai.chat').toBeTruthy();
+    expect(entry!.when).toContain('view == devbelt.explorer');
+    const pkgCommands = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as {
+      contributes: { commands: { command: string; icon?: string }[] };
+    };
+    const command = pkgCommands.contributes.commands.find((c) => c.command === 'devbelt.ai.chat');
+    expect(command?.icon, '命令需要 codicon 才能作为标题栏图标').toBeTruthy();
+  });
 });

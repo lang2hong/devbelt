@@ -36,6 +36,7 @@ import { registerAiCommands } from './commands/aiChat';
 import { registerAiEditorCommands } from './commands/aiEditor';
 import { AiSchemaContextBuilder } from './ai/schemaContext';
 import { AiStatusBar } from './ai/aiStatusBar';
+import { AiChatStatusBar } from './ai/aiChatStatusBar';
 import { AiSqlRegistry } from './ai/aiSqlRegistry';
 import { AiBridge } from './ai/aiBridge';
 import { registerAiInlineProvider } from './completion/aiInlineProvider';
@@ -411,6 +412,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const aiSchemaBuilder = new AiSchemaContextBuilder();
   AiSqlRegistry.init();
   const aiStatusBar = new AiStatusBar();
+  const aiChatStatusBar = new AiChatStatusBar();
   const aiChatDeps: AiChatViewDeps = {
     service: aiService,
     sessions: aiSessions,
@@ -479,10 +481,14 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     requestChat: (request) => {
       void AiChatView.open(aiChatDeps).requestExternal(request);
     },
+    prefillChat: (text) => {
+      AiChatView.open(aiChatDeps).prefillChat(text);
+    },
   });
   context.subscriptions.push(
     aiKeyStore,
     aiStatusBar,
+    aiChatStatusBar,
     { dispose: () => AiChatView.closeAll() },
     { dispose: () => AiBridge.reset() },
     { dispose: () => AiSqlRegistry.reset() },

@@ -946,6 +946,11 @@
           "group": "navigation"
         },
         {
+          "command": "devbelt.ai.chat",
+          "when": "view == devbelt.explorer",
+          "group": "navigation"
+        },
+        {
           "command": "devbelt.explorerMenu",
           "when": "view == devbelt.explorer",
           "group": "navigation"

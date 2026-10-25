@@ -284,6 +284,11 @@ function closeResult(index: number) {
   }
 }
 
+/** 打开 AI 对话并预填当前 SQL（不发送，不消耗额度）。 */
+function openChatWithSql() {
+  post({ type: 'openAiChat', sql: sql.value });
+}
+
 function explain() {
   post({ type: 'openExplain', sql: sql.value });
 }
@@ -490,6 +495,13 @@ function onKeydown(e: KeyboardEvent) {
       <button v-if="running" class="btn" @click="cancel">{{ t('wv.query.cancel') }}</button>
       <span v-if="transactionState" class="txn-badge" :class="transactionState">{{ t('wv.query.tx') }}: {{ t(`wv.query.tx.${transactionState}`) }}</span>
       <div class="spacer"></div>
+      <button
+        v-if="viewKind !== 'structure'"
+        class="btn ai-open"
+        :title="t('wv.ai.openChat')"
+        :aria-label="t('wv.ai.openChat')"
+        @click="openChatWithSql"
+      >✦ AI</button>
       <span v-if="meta" class="page-info">{{ meta }}</span>
     </div>
     <!--
@@ -605,6 +617,7 @@ function onKeydown(e: KeyboardEvent) {
 .btn { padding: 3px 10px; font-size: 12px; cursor: pointer; border: none; border-radius: 3px;
   background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ffffff); }
 .btn.primary { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #ffffff); }
+  .btn.ai-open { padding: 3px 8px; white-space: nowrap; }
   .btn.active { border: 1px solid var(--vscode-focusBorder, #007fd4); }
   .txn-badge { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
   .txn-badge.active { background: var(--vscode-inputOption-activeBorder, #007fd4); color: var(--vscode-foreground, #cccccc); }

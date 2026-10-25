@@ -1773,6 +1773,8 @@ export const en: MessageCatalog = {
   'wv.ai.ma.saveError.baseUrl': 'Invalid base URL',
   'wv.ai.ma.saveError.insecure': 'Base URL must be https (loopback allowed for local testing)',
   'wv.ai.provider.modelByServer': 'Server proxy mode: the model is chosen by the server; the local model setting is neither shown nor used',
+  'ai.statusBar.chatTooltip': 'Open AI chat',
+  'wv.ai.openChat': 'Open AI chat with this SQL prefilled (it is not sent)',
   'wv.ai.ma.saveError.model': 'Model must not be empty',
   'wv.ai.ma.saveError.vendors': 'Invalid custom vendor data',
   'wv.ai.ma.saveError.invalid': 'Invalid input',

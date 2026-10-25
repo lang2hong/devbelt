@@ -26,6 +26,8 @@ export interface ExternalAiRequest {
 export interface AiBridgeHandlers {
   /** 打开/聚焦 Chat 面板并发起该请求（新会话；已存在面板则新建会话）。 */
   requestChat(request: ExternalAiRequest): void;
+  /** 只打开面板并预填输入框，不发起请求、不消耗额度。 */
+  prefillChat(text: string): void;
 }
 
 export class AiBridge {
@@ -49,6 +51,12 @@ export class AiBridge {
   /** 发起外部 Chat 请求；返回 false 表示 AI 桥未初始化（调用方提示"AI 未启用"）。 */
   requestChat(request: ExternalAiRequest): boolean {
     this.handlers.requestChat(request);
+    return true;
+  }
+
+  /** 只预填对话输入框（不发送）；返回 false 表示 AI 桥未初始化。 */
+  prefillChat(text: string): boolean {
+    this.handlers.prefillChat(text);
     return true;
   }
 }
