@@ -126,6 +126,8 @@ export class AiChatView extends BaseWebView {
   private streamSeq = 0;
   /** 正在生成的会话：删除该会话 / 新建会话时据此中止在途回复。 */
   private runningSessionId?: string;
+  /** 面板尚未 ready 时暂存的预填内容（ready 后补发，否则消息会丢）。 */
+  private pendingPrefill?: string;
 
   private constructor(private readonly deps: AiChatViewDeps) {
     super(VIEW_TYPE, l10n('ai.title'), vscode.ViewColumn.Active, undefined, getAiChatHtml);
@@ -142,6 +144,19 @@ export class AiChatView extends BaseWebView {
     }
     AiChatView.current = new AiChatView(deps);
     return AiChatView.current;
+  }
+
+  /**
+   * 外部图标入口：打开 Chat 并把内容预填进输入框，不发起请求（不消耗额度）。
+   * 面板首次打开时先暂存，等 webview ready 后补发。
+   */
+  prefillChat(text: string): void {
+    const content = text.trim();
+    if (!content) return;
+    // 代码块形式：用户可以直接在下面补问题，发送后模型能明确看出这是 SQL。
+    const payload = `\`\`\`sql\n${content}\n\`\`\`\n`;
+    if (this.initSent) this.post({ type: 'prefillInput', text: payload } as never);
+    else this.pendingPrefill = payload;
   }
 
   /** 打开 Chat 并进入"细化"模式（Alt+A 状态条回路）：新建会话 + 上下文卡片。 */
@@ -174,6 +189,11 @@ export class AiChatView extends BaseWebView {
       if (!this.initSent) {
         this.initSent = true;
         await this.pushInit();
+        if (this.pendingPrefill) {
+          const text = this.pendingPrefill;
+          this.pendingPrefill = undefined;
+          this.post({ type: 'prefillInput', text } as never);
+        }
       }
       return;
     }
@@ -758,6 +778,11 @@ export class AiChatView extends BaseWebView {
     const session = this.deps.sessions.create(connId);
     session.title = request.title;
     this.activeSessionId = session.id;
+    // 外部入口（解释计划/诊断/数据问答）过去只把回复写进会话，没写用户的提问：
+    // 面板里只剩一条 assistant，点「重新生成」既没有可重发的内容，历史也会被清空。
+    // 存下本次请求的最后一条 user 消息（注入的业务规则不进会话）。
+    const userTurn = [...request.messages].reverse().find((m) => m.role === 'user' && m.content.trim());
+    if (userTurn) session.messages.push({ role: 'user', content: userTurn.content });
     this.saveSession(session);
     this.pushActiveSession();
     const messages = injectBusinessRules(request.messages, this.deps.contextStore, connId, request.feature);

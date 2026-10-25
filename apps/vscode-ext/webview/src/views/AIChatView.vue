@@ -523,7 +523,10 @@ function regenerate(): void {
     if (messages.value[i]!.role === 'assistant') { lastAssistant = i; break; }
   }
   if (lastAssistant < 0) return;
-  messages.value = messages.value.slice(0, lastAssistant);
+  const kept = messages.value.slice(0, lastAssistant);
+  // 没有可重发的用户提问（例如由外部入口生成的回复）：不能把仅有的这条回答删掉。
+  if (!kept.some((m) => m.role === 'user')) return;
+  messages.value = kept;
   streaming.value = { content: '', reasoning: '' };
   post({ type: 'regenerate', sessionId: activeSessionId.value ?? '' });
 }
