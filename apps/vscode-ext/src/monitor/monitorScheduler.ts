@@ -107,12 +107,18 @@ export class MonitorScheduler {
    * 接手执行（原执行窗口已关闭，锁过期）：以磁盘为准重新加载（游标等状态是原窗口最新写入的），
    * 并把所有任务暂停——不在用户没看到的情况下继续查询，由用户在本窗口继续。
    */
-  async takeOver(): Promise<void> {
-    if (!this.isOwner()) return;
+  async takeOver(): Promise<number> {
+    if (!this.isOwner()) return 0;
     for (const id of [...this.timers.keys()]) this.unschedule(id);
     const loaded = await this.deps.store.loadTasks();
-    this.tasks = loaded.map((t) => (t.status === 'paused' ? t : { ...t, status: 'paused', pausedReason: 'handover' }));
+    let paused = 0;
+    this.tasks = loaded.map((t) => {
+      if (t.status === 'paused') return t;
+      paused += 1;
+      return { ...t, status: 'paused', pausedReason: 'handover' };
+    });
     await this.persist();
+    return paused;
   }
 
   /** 失去执行权（另一窗口接手）：停掉本地计时器，之后只显示。 */
@@ -222,7 +228,8 @@ export class MonitorScheduler {
       const raw = await this.deps.run(task);
       const output = typeof raw === 'number' ? { value: raw } : raw;
       const current = this.get(id);
-      if (!current || this.disposed) return;
+      // 执行期间失去执行权（另一窗口接手）：结果丢弃，不写回。
+      if (!current || this.disposed || !this.isOwner()) return;
       const outcome = applySuccess(current, output.value, this.now(), this.deps.cooldownMs(), {
         ...(output.values ? { values: output.values } : {}),
         ...(output.cursor ? { cursor: output.cursor } : {}),
@@ -241,7 +248,7 @@ export class MonitorScheduler {
       if (outcome.notify && output.value !== null) this.deps.onHit?.(outcome.task, outcome.previous, output.value);
     } catch (err) {
       const current = this.get(id);
-      if (!current || this.disposed) return;
+      if (!current || this.disposed || !this.isOwner()) return;
       const message = err instanceof Error ? err.message : String(err);
       const outcome = applyFailure(current, message, this.now());
       await this.replace(outcome.task);
@@ -299,8 +306,9 @@ export class MonitorScheduler {
     await this.persist();
   }
 
+  /** 只有拥有者写 tasks.json（兜底：任何路径漏了拥有者检查也不会覆盖另一窗口的状态）。 */
   private async persist(): Promise<void> {
-    await this.deps.store.saveTasks(this.tasks);
+    if (this.isOwner()) await this.deps.store.saveTasks(this.tasks);
     this.deps.onChanged?.(this.tasks);
   }
 }

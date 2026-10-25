@@ -360,9 +360,10 @@ export async function readCursorBaseline(
 /**
  * 数据库层只读（第二道防线，和 Explain「实际执行」一致）。
  *
- * PG 必须**每次**显式设置 search_path：`openIsolatedSql` 为跨 schema 目录读取固定了
+ * PG 必须**每次**改回 search_path：`openIsolatedSql` 为跨 schema 目录读取固定了
  * `search_path = pg_catalog`，不改回来的话未限定的表名（以及元数据里的 `current_schema()`）
  * 都会落到 pg_catalog —— 查询报「关系不存在」，提案被判「表不存在」。
+ * 有 schema 用 `"schema", public`；没有就 RESET 回会话默认（保留角色 / 库级配置）。
  */
 export async function applyReadOnly(session: MonitorQuerySession, dbType: string, schema?: string): Promise<void> {
   const q = session.query;
@@ -371,8 +372,7 @@ export async function applyReadOnly(session: MonitorQuerySession, dbType: string
   if (engine === 'MYSQL') await q.query('SET SESSION TRANSACTION READ ONLY', undefined, opts);
   else if (engine === 'PG') {
     await q.query('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', undefined, opts);
-    const path = schema ? `${q.wrap(validateSchemaIdent(schema))}, public` : '"$user", public';
-    await q.query(`SET search_path TO ${path}`, undefined, opts);
+    await q.query(schema ? `SET search_path TO ${q.wrap(validateSchemaIdent(schema))}, public` : 'RESET search_path', undefined, opts);
   } else if (engine === 'SQLITE') await q.query('PRAGMA query_only = ON', undefined, opts);
 }
 

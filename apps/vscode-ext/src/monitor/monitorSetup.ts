@@ -230,7 +230,15 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       const before = lock.isHeld;
       await lock.tryAcquire();
       if (!started) return;
-      if (!before && lock.isHeld) await scheduler.takeOver();
+      if (!before && lock.isHeld) {
+        const paused = await scheduler.takeOver();
+        // 原执行窗口关闭后接手：任务已暂停，提示一次，避免用户以为监控还在跑。
+        if (paused > 0) {
+          const open = l10n('monitor.notify.view');
+          void vscode.window.showInformationMessage(l10n('monitor.notify.handover', { n: paused }), open)
+            .then((picked) => { if (picked === open) void vscode.commands.executeCommand('devbelt.monitor.tasks'); });
+        }
+      }
       else if (before && !lock.isHeld) scheduler.relinquish();
       else if (!lock.isHeld) await scheduler.reload();
       if (before !== lock.isHeld) refreshStatus();

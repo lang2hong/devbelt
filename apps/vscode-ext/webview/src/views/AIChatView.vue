@@ -11,6 +11,7 @@ import QuotaPanel from '../components/ai/QuotaPanel.vue';
 import MonitorPanel from '../components/ai/MonitorPanel.vue';
 import MonitorProposalCard, { type ProposalState } from '../components/ai/MonitorProposalCard.vue';
 import type { MonitorDetail, MonitorTaskView } from '../../../src/monitor/monitorBridge';
+import { proposalFailureText } from '../utils/monitorView';
 import type { MoreMenuItem } from '../components/ai/MoreMenu.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TableNoteDialog, { type TableNoteColumn } from '../components/ai/TableNoteDialog.vue';
@@ -265,6 +266,7 @@ onMounted(() => {
         if (!session || !session.id) {
           resetMessages([]);
           activeSessionId.value = undefined;
+          proposals.value = [];
           // 会话被删除/不存在：生成态也要复位，否则输入框一直禁用。
           streaming.value = null;
           break;
@@ -437,7 +439,7 @@ onMounted(() => {
         const next = [...proposals.value];
         next[at] = msg.ok
           ? { ...next[at]!, status: 'created' }
-          : { ...next[at]!, status: 'failed', error: t('monitor.proposal.failed', { reason: [msg.reason, ...(Array.isArray(msg.issues) ? msg.issues : [])].filter(Boolean).join(', ') }) };
+          : { ...next[at]!, status: 'failed', error: t('monitor.proposal.failed', { reason: proposalFailureText(t, msg.reason, msg.issues) }) };
         proposals.value = next;
         break;
       }

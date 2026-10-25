@@ -29,6 +29,33 @@ export interface HistoryTable {
 const MAX_CHART_POINTS = 60;
 
 /**
+ * 提案创建失败的说明：原因 / 校验问题映射到词条（`monitor.reject.*`、`monitor.issue.*`），
+ * 词条缺失时才退回显示代码，不把 `otherWindow` 这类内部代码直接给用户看。
+ */
+export function proposalFailureText(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  reason: unknown,
+  issues: unknown,
+): string {
+  const parts: string[] = [];
+  const list = Array.isArray(issues) ? issues : [];
+  const code = typeof reason === 'string' ? reason : '';
+  // 校验失败时只列具体问题；其他原因先说原因。
+  if (code && (code !== 'validation' || list.length === 0)) {
+    const text = t(`monitor.reject.${code}`);
+    parts.push(text === `monitor.reject.${code}` ? code : text);
+  }
+  for (const raw of list) {
+    const issue = typeof raw === 'string' ? { code: raw } : (raw as { code?: unknown; detail?: unknown });
+    if (!issue || typeof issue.code !== 'string') continue;
+    const detail = typeof issue.detail === 'string' ? issue.detail : '';
+    const text = t(`monitor.issue.${issue.code}`, { detail });
+    parts.push(text === `monitor.issue.${issue.code}` ? (detail ? `${issue.code}: ${detail}` : issue.code) : text);
+  }
+  return parts.join(' ');
+}
+
+/**
  * 历史点 → 图表序列 + 表格行。跳过（skipped）的点不画；失败点在表格里显示错误、图表里不画。
  * A2 的 NULL 在图里画成 0 会误导，因此跳过该列在这一点的值（用前一个值占位，表格显示 NULL）。
  */

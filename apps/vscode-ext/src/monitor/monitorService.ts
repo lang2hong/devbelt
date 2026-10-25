@@ -153,14 +153,20 @@ export class MonitorService {
       const check = checkMetricSql(input.sql ?? '', engineOf(dbType));
       if (!check.ok) return { ok: false, reason: 'validation', issues: [check.issue] };
       let rows: unknown[] | undefined;
-      const startedAt = Date.now();
+      // 只计查询本身：建会话（SSH 隧道、设只读）的耗时不算进「查询较重」。
+      let elapsed = 0;
       try {
-        rows = await this.deps.executor.trial({ connId: conn.id, database, schema }, async (session, token) =>
-          (await session.query.query(check.statement, undefined, { skipHistory: true, token }))?.rows);
+        rows = await this.deps.executor.trial({ connId: conn.id, database, schema }, async (session, token) => {
+          const startedAt = Date.now();
+          try {
+            return (await session.query.query(check.statement, undefined, { skipHistory: true, token }))?.rows;
+          } finally {
+            elapsed = Date.now() - startedAt;
+          }
+        });
       } catch (err) {
         return { ok: false, reason: 'validation', issues: [{ level: 'error', code: 'trialFailed', detail: messageOf(err) }] };
       }
-      const elapsed = Date.now() - startedAt;
       const shape = checkMetricResult(rows, input.watchColumn);
       if (!shape.ok) return { ok: false, reason: 'validation', issues: shape.issues };
       // 慢查询只提示、不拦截，也不改用户 / 模型给的间隔（卡片上的提示建议不低于 15 分钟）。

@@ -100,11 +100,6 @@ export interface AiChatViewDeps {
   monitor?: MonitorService;
 }
 
-/** 监控关闭时不向模型注册 `propose_monitor`（而不是注册后返回 disabled）。 */
-export function monitorToolEnabled(): boolean {
-  return vscode.workspace.getConfiguration('devbelt.ai.monitor').get<boolean>('enabled', true) !== false;
-}
-
 /**
  * Agent 的目标库 / schema。PG 的作用域选择器列的是**库**（`listScopes` → `getDatabases`），
  * 所以选中值是库名，schema 取连接配置（与表清单 / 列读取一致）；其他引擎作用域就是库。
@@ -128,6 +123,11 @@ export async function applyAgentSearchPath(
 ): Promise<void> {
   const sql = schema ? `SET search_path TO ${q.wrap(validateSchemaIdent(schema))}, public` : 'RESET search_path';
   await q.query(sql, undefined, { skipHistory: true });
+}
+
+/** 监控关闭时不向模型注册 `propose_monitor`（而不是注册后返回 disabled）。 */
+export function monitorToolEnabled(): boolean {
+  return vscode.workspace.getConfiguration('devbelt.ai.monitor').get<boolean>('enabled', true) !== false;
 }
 
 /**
@@ -247,8 +247,8 @@ export class AiChatView extends BaseWebView {
     this.post({ type: 'monitorList', tasks: bridge.handlers.list(), executing: bridge.handlers.executing() } as never);
   }
 
-  private postProposal(proposal: MonitorProposalView): void {
-    const sessionId = this.activeSessionId ?? '';
+  /** 卡片归属发起本次 Agent 运行的会话（运行中切换会话也不会挂错）。 */
+  private postProposal(proposal: MonitorProposalView, sessionId: string): void {
     const list = this.proposalCards.get(sessionId) ?? [];
     list.push({ proposal, status: 'pending' });
     this.proposalCards.set(sessionId, list.slice(-20));
@@ -631,7 +631,9 @@ export class AiChatView extends BaseWebView {
         this.post({
           type: 'monitorConfirmResult',
           proposalId: msg.proposalId,
-          ...(result.ok ? { ok: true, task: result.task } : { ok: false, reason: result.reason, issues: result.issues.map((i) => i.code) }),
+          ...(result.ok
+            ? { ok: true, task: result.task }
+            : { ok: false, reason: result.reason, issues: result.issues.map((i) => ({ code: i.code, ...(i.detail ? { detail: i.detail.slice(0, 200) } : {}) })) }),
         } as never);
         this.pushMonitorList();
         return;
@@ -813,7 +815,7 @@ export class AiChatView extends BaseWebView {
           ...(database ? { database } : {}),
           ...(schema ? { schema } : {}),
           onProposal: (proposal) => {
-            if (this.streamSeq === streamId) this.postProposal(bridge.handlers.describeProposal(proposal));
+            if (this.streamSeq === streamId) this.postProposal(bridge.handlers.describeProposal(proposal), session.id);
           },
         })
         : undefined;

@@ -245,7 +245,7 @@ describe('metric (A2)', () => {
     const fake = fakeSession((sql) => (sql.startsWith('SELECT') ? [{ n: 1 }] : []), quote);
     const executor = new MonitorExecutor({ openSession: async () => ({ session: fake.session, close: fake.close }), dbTypeOf: () => 'PG', timeoutMs: () => 30_000 });
     await executor.run(task());
-    expect(fake.executed.map((e) => e.sql).slice(0, 2)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'SET search_path TO "$user", public']);
+    expect(fake.executed.map((e) => e.sql).slice(0, 2)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'RESET search_path']);
     executor.dispose();
   });
 
@@ -271,7 +271,7 @@ describe('describeTableReadOnly', () => {
     expect(out).toEqual({ columns: [{ name: 'id' }], indexes: [] });
     expect(getColumns).toHaveBeenCalledWith('orders', 'app', undefined);
     // 先设只读与 search_path，再读元数据
-    expect(fake.executed.map((e) => e.sql)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'SET search_path TO "$user", public']);
+    expect(fake.executed.map((e) => e.sql)).toEqual(['SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY', 'RESET search_path']);
     executor.dispose();
   });
 

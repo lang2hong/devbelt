@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   post: vi.fn(),
+  monitorEnabled: true as boolean,
 }));
 
 vi.mock('vscode', () => ({
   ViewColumn: { Active: 1 },
   workspace: {
-    getConfiguration: () => ({ get: (_k: string, d: unknown) => d }),
+    getConfiguration: (section?: string) => ({
+      get: (k: string, d: unknown) => (section === 'devbelt.ai.monitor' && k === 'enabled' ? h.monitorEnabled : d),
+    }),
   },
   env: { language: 'en', clipboard: { writeText: async () => undefined } },
   commands: { executeCommand: async () => undefined },
@@ -27,6 +30,7 @@ vi.mock('../../src/result/baseWebView', () => ({
 }));
 
 import { agentScopeOf, AiChatView, applyAgentSearchPath } from '../../src/result/aiChatView';
+import { MonitorBridge } from '../../src/monitor/monitorBridge';
 
 describe('agentScopeOf', () => {
   it('PG: the scope picker selects a database; schema comes from the connection', () => {
@@ -79,6 +83,7 @@ function deps(conn: Record<string, unknown>, onRequest: (req: any) => void) {
       modelAccessStore: { current: () => ({}), getPrefs: () => ({ selection: true, custom: true, key: true }), setPrefs: async () => undefined, saveLocal: async () => undefined } as any,
       providerCatalog: { get: async () => [] } as any,
       ledgerPath: '/tmp/opencode/ledger.jsonl',
+      monitor: { propose: vi.fn() } as any,
     },
     session,
   };
@@ -86,7 +91,13 @@ function deps(conn: Record<string, unknown>, onRequest: (req: any) => void) {
 
 beforeEach(() => {
   h.post.mockClear();
+  h.monitorEnabled = true;
   AiChatView.closeAll();
+  MonitorBridge.init({
+    list: () => [], detail: async () => undefined, action: async () => undefined, resumeAll: async () => undefined,
+    confirm: async () => ({ ok: true, task: {} as any }), discard: vi.fn(), executing: () => true,
+    onChanged: () => ({ dispose() {} }), describeProposal: () => ({}) as any,
+  });
 });
 
 describe('runAgent on PostgreSQL', () => {
@@ -108,5 +119,29 @@ describe('runAgent on PostgreSQL', () => {
     await view.runAgent(d.session, [{ role: 'user', content: 'hi' }], conn);
     expect(d.openIsolatedSql).toHaveBeenCalledWith(conn, 'app');
     expect(d.executed).toContain('RESET search_path');
+  });
+});
+
+describe('propose_monitor registration in runAgent', () => {
+  const toolNames = (req: any): string[] => (req.tools ?? []).map((t: any) => t.function?.name);
+
+  it('is offered to the model while monitoring is enabled', async () => {
+    const conn = { id: 'c1', name: 'm', host: 'h', dbType: 'MYSQL', database: 'app' };
+    let names: string[] = [];
+    const d = deps(conn, (req) => { names = toolNames(req); });
+    const view: any = AiChatView.open(d.deps as any);
+    await view.runAgent(d.session, [{ role: 'user', content: 'hi' }], conn);
+    expect(names).toContain('propose_monitor');
+  });
+
+  it('is not offered when monitoring is turned off', async () => {
+    h.monitorEnabled = false;
+    const conn = { id: 'c1', name: 'm', host: 'h', dbType: 'MYSQL', database: 'app' };
+    let names: string[] = [];
+    const d = deps(conn, (req) => { names = toolNames(req); });
+    const view: any = AiChatView.open(d.deps as any);
+    await view.runAgent(d.session, [{ role: 'user', content: 'hi' }], conn);
+    expect(names.length).toBeGreaterThan(0);
+    expect(names).not.toContain('propose_monitor');
   });
 });

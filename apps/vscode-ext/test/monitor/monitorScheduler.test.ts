@@ -164,6 +164,34 @@ describe('MonitorScheduler across windows', () => {
     expect(scheduler.get('m1')?.lastValue).toBe(42);
   });
 
+  it('drops an in-flight result when the lock is lost meanwhile', async () => {
+    let owner = true;
+    let release!: (n: number) => void;
+    const { scheduler, deps, saved, points } = setup({ isOwner: () => owner, run: vi.fn(() => new Promise<number>((r) => { release = r; })) }, [task({ lastValue: 1 })]);
+    await scheduler.start();
+    await scheduler.resume('m1');
+    const before = JSON.stringify(saved());
+    const running = scheduler.runNow('m1');
+    await vi.advanceTimersByTimeAsync(0);
+    owner = false; // 另一窗口接手
+    scheduler.relinquish();
+    release(99);
+    await running;
+    expect(JSON.stringify(saved())).toBe(before);
+    expect(points).toEqual([]);
+    expect(deps.onHit).not.toHaveBeenCalled();
+  });
+
+  it('never writes tasks.json while not the owner, whatever the path', async () => {
+    let owner = true;
+    const { scheduler, deps } = setup({ isOwner: () => owner }, [task()]);
+    await scheduler.start();
+    const save = vi.spyOn(deps.store, 'saveTasks');
+    owner = false;
+    await (scheduler as unknown as { persist(): Promise<void> }).persist();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('takeOver reloads from disk (latest cursor) and pauses everything', async () => {
     let owner = false;
     const { scheduler, deps, saved } = setup({ isOwner: () => owner }, [task({ kind: 'newRows', cursorValue: '5' })]);
@@ -171,7 +199,7 @@ describe('MonitorScheduler across windows', () => {
     // 原执行窗口推进了游标后关闭
     await deps.store.saveTasks([task({ kind: 'newRows', cursorValue: '9' })]);
     owner = true;
-    await scheduler.takeOver();
+    expect(await scheduler.takeOver()).toBe(1);
     expect(scheduler.get('m1')).toMatchObject({ status: 'paused', pausedReason: 'handover' });
     expect(scheduler.get('m1')?.cursorValue).toBe('9');
     expect(saved()[0]!.pausedReason).toBe('handover');

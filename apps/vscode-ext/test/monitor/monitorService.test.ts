@@ -127,6 +127,21 @@ describe('MonitorService proposals', () => {
     expect(tasks).toHaveLength(0);
   });
 
+  it('does not count session setup as query time', async () => {
+    let now = 0;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { service } = setup({
+      executor: { trial: async (_t: unknown, fn: (s: never, tk: never, d: string) => Promise<unknown>) => {
+        now += 20_000; // 慢的 SSH 隧道 / 建会话
+        return fn({ query: { query: async () => { now += 100; return { rows: [{ lag_seconds: '1' }] }; }, wrap: (s: string) => s } } as never, {} as never, 'MYSQL');
+      } } as never,
+    });
+    const r = await service.propose(conn, 'app', undefined, { kind: 'metric', table: 't', sql: 'SELECT 1 AS lag_seconds' });
+    spy.mockRestore();
+    if (!r.ok) throw new Error('expected a proposal');
+    expect(r.proposal.warnings).toEqual([]);
+  });
+
   it('flags a slow metric trial without changing the interval', async () => {
     let now = 0;
     const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);

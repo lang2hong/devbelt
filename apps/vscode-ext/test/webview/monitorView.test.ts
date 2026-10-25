@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { formatMonitorTime, historySeries } from '../../webview/src/utils/monitorView';
+import { formatMonitorTime, historySeries, proposalFailureText } from '../../webview/src/utils/monitorView';
 import type { MonitorDetail } from '../../src/monitor/monitorBridge';
 
 const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
@@ -65,5 +65,29 @@ describe('monitor UI contracts', () => {
   it('opens the background tasks drawer from the More menu', () => {
     expect(view).toContain("id: 'monitor'");
     expect(view).toContain('<MonitorPanel');
+  });
+});
+
+describe('proposalFailureText', () => {
+  const dict: Record<string, string> = {
+    'monitor.reject.otherWindow': 'other window',
+    'monitor.issue.trialFailed': 'trial failed: {detail}',
+    'monitor.issue.columnMissing': 'no column {detail}',
+  };
+  const t = (key: string, vars?: Record<string, string | number>): string => {
+    let text = dict[key] ?? key;
+    for (const [k, v] of Object.entries(vars ?? {})) text = text.replace(`{${k}}`, String(v));
+    return text;
+  };
+
+  it('maps reasons and issues to readable text instead of codes', () => {
+    expect(proposalFailureText(t, 'otherWindow', [])).toBe('other window');
+    expect(proposalFailureText(t, 'validation', [{ code: 'trialFailed', detail: 'timeout' }, { code: 'columnMissing', detail: 'x' }]))
+      .toBe('trial failed: timeout no column x');
+  });
+
+  it('falls back to the code when no text exists', () => {
+    expect(proposalFailureText(t, 'weird', [{ code: 'odd', detail: 'd' }, 'bare'])).toBe('weird odd: d bare');
+    expect(proposalFailureText(t, undefined, undefined)).toBe('');
   });
 });

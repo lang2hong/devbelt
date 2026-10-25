@@ -122,13 +122,11 @@ export async function createRowCountMonitor(deps: MonitorCommandDeps, node: Moni
   const baseline = created?.lastValue;
   const message = created?.lastError
     ? l10n('monitor.created.failed', { table: taskTitle(task), error: created.lastError })
-    : !deps.executing()
-      ? l10n('monitor.created.otherWindow', { table: taskTitle(task) })
-      : l10n('monitor.created', {
-        table: taskTitle(task),
-        value: baseline !== undefined ? baseline.toLocaleString() : '—',
-        interval: describeInterval(task.intervalMs),
-      });
+    : l10n('monitor.created', {
+      table: taskTitle(task),
+      value: baseline !== undefined ? baseline.toLocaleString() : '—',
+      interval: describeInterval(task.intervalMs),
+    });
   const open = l10n('monitor.notify.view');
   const picked = created?.lastError
     ? await vscode.window.showWarningMessage(message, open)

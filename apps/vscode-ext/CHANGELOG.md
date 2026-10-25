@@ -24,7 +24,8 @@ All notable changes to DevBelt DB Client are documented in this file.
 - Row count only sees the net change (10 inserts and 10 deletes look like no change); new-rows monitoring does not see updates or deletes.
 - Nothing is checked while VS Code is closed.
 - When more than 50 new rows arrive in one check, rows inserted between counting them and reading the new cursor maximum can be skipped.
-- A slow metric query (trial run of 5 s or more) is only flagged on the card; it is not blocked.
+- A slow metric query (trial run of 5 s or more) is only flagged on the card; it is not blocked. Creating a metric task runs the query up to three times (proposal, re-check on confirm, baseline).
+- If a laptop sleeps for longer than the lock timeout, two windows can briefly both run a check before the old one notices it lost the lock; a new-rows notification may then repeat once.
 - PostgreSQL monitoring is covered by unit tests only in this release.
 
 ### 中文
@@ -45,7 +46,8 @@ All notable changes to DevBelt DB Client are documented in this file.
 - 行数监控只看净变化（新增 10 行、删除 10 行显示为无变化）；新增行监控看不到修改和删除。
 - VS Code 关闭期间不检查。
 - 一次新增超过 50 行时，在统计行数和读取新游标最大值之间插入的行可能被跳过。
-- 指标查询较慢（试执行 ≥ 5 秒）时只在卡片上提示，不拦截。
+- 指标查询较慢（试执行 ≥ 5 秒）时只在卡片上提示，不拦截。创建一个指标任务最多会执行 3 次该查询（提案、确认时复核、取基线）。
+- 笔记本睡眠超过锁超时后唤醒，旧窗口发现自己失去锁之前，两个窗口可能各执行一次检查，新增行提醒可能重复一次。
 - 本版本 PostgreSQL 的监控只有单元测试覆盖。
 
 ## [0.3.0] - 2026-10-24

@@ -76,8 +76,8 @@ describe('monitor proposal cards in AI Chat', () => {
     const view: any = AiChatView.open(deps() as any);
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'loadHistory', sessionId: 's1' });
-    view.postProposal(proposal('p1'));
-    view.postProposal(proposal('p2'));
+    view.postProposal(proposal('p1'), 's1');
+    view.postProposal(proposal('p2'), 's1');
     await view.handleMessage({ type: 'monitorDiscard', proposalId: 'p1' });
     await view.handleMessage({ type: 'monitorConfirm', proposalId: 'p2' });
 
@@ -93,6 +93,20 @@ describe('monitor proposal cards in AI Chat', () => {
       ['s1', 'p1', 'discarded'],
       ['s1', 'p2', 'created'],
     ]);
+  });
+
+  it('keeps a card with the session that started the run, even after switching', async () => {
+    const view: any = AiChatView.open(deps() as any);
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'loadHistory', sessionId: 's2' }); // 用户已切到 s2
+    h.post.mockClear();
+    view.postProposal(proposal('p3'), 's1'); // s1 的 Agent 运行产生的提案
+    expect(proposalPosts().map((m) => m.sessionId)).toEqual(['s1']);
+    h.post.mockClear();
+    await view.handleMessage({ type: 'loadHistory', sessionId: 's2' });
+    expect(proposalPosts()).toEqual([]);
+    await view.handleMessage({ type: 'loadHistory', sessionId: 's1' });
+    expect(proposalPosts().map((m) => m.proposal.id)).toEqual(['p3']);
   });
 
   it('maps a non-owner confirm to reason otherWindow', async () => {
