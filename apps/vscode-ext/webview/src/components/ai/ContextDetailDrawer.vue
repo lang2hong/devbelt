@@ -28,6 +28,13 @@ const { t } = useI18n();
       <div class="ai-ctx-meta">
         {{ t('wv.ai.context.detailMeta', { tables: props.detail.tableCount, total: props.detail.totalTables, comments: props.detail.commentCount }) }}
       </div>
+      <div v-if="props.detail.history" class="ai-ctx-hint">
+        {{ t('wv.ai.context.historyMeta', {
+          recent: props.detail.history.recent,
+          summarized: props.detail.history.summarized,
+          chars: props.detail.history.chars,
+        }) }}
+      </div>
       <div class="ai-ctx-hint">{{ t('wv.ai.context.tablesHint') }}</div>
       <div class="ai-ctx-list">
         <button

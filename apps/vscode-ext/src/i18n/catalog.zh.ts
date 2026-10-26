@@ -2083,4 +2083,6 @@ export const zh: MessageCatalog = {
   'wv.grid.sortHint': '点击升序排序',
   'wv.grid.sortDesc': '点击降序排序',
   'wv.grid.sortNone': '点击取消排序',
+  'wv.ai.context.historyMeta': '历史：最近 {recent} 条原文，更早的 {summarized} 条已摘要（注入约 {chars} 字符）',
+  'wv.ai.agent.autoOn': '这次请求像是要创建监控任务，已自动开启 Agent 模式；提案仍需你确认后才会创建。',
 };

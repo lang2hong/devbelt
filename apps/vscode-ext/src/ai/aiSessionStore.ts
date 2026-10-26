@@ -32,6 +32,10 @@ export interface AiChatSession {
   updatedAt: number;
   /** 最近一次发送时绑定的连接（仅会话元数据，用于切换时恢复上下文条）。 */
   connId?: string;
+  /** 更早消息的滚动摘要（模型生成；失败时是确定性压缩）。 */
+  summary?: string;
+  /** 摘要已覆盖到第几条消息（不含）。 */
+  summaryUpTo?: number;
 }
 
 /**
@@ -76,6 +80,9 @@ function normalizeSession(session: AiChatSession): AiChatSession {
     messages: session.messages.slice(-MAX_MESSAGES_PER_SESSION).map(normalizeMessage),
     updatedAt: session.updatedAt,
     ...(session.connId ? { connId: session.connId } : {}),
+    ...(typeof session.summary === 'string' && session.summary.trim()
+      ? { summary: session.summary.slice(0, 8_000), summaryUpTo: Math.max(0, Math.floor(session.summaryUpTo ?? 0)) }
+      : {}),
   };
 }
 

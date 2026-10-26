@@ -2105,4 +2105,6 @@ export const en: MessageCatalog = {
   'wv.grid.sortHint': 'Sort ascending',
   'wv.grid.sortDesc': 'Sort descending',
   'wv.grid.sortNone': 'Clear sorting',
+  'wv.ai.context.historyMeta': 'History: last {recent} messages verbatim; {summarized} older messages summarized (~{chars} chars injected)',
+  'wv.ai.agent.autoOn': 'This looks like a monitoring request, so Agent mode was turned on; nothing is created until you confirm the card.',
 };

@@ -14,6 +14,11 @@ import { DatabaseType, validateIdent, validateSchemaIdent } from '@devbelt/db-co
 import { BaseWebView } from './baseWebView.js';
 import { getAiChatHtml } from '../webview/html.js';
 import { AiService, readAiConfig, type AiMutableStream, type AiRequestMeta } from '../ai/aiService.js';
+import {
+  buildSummaryMessages, fitBudget, planHistory, sanitizeSummary, summaryBlock,
+  type HistoryMessage,
+} from '../ai/historyCompression.js';
+import { wantsMonitorTask } from '../ai/monitorIntent.js';
 import { AiSessionStore, type AiChatMessage, type AiChatSession, type AiMessageUsage } from '../ai/aiSessionStore.js';
 import { dropTrailingAssistant, replaceUserMessage } from '../ai/chatEdit.js';
 import { AiContextStore, findColumnNote, findTableNote } from '../ai/aiContextStore.js';
@@ -173,6 +178,8 @@ export class AiChatView extends BaseWebView {
    * 否则模型已经说了「请点卡片」，用户却看不到卡片。只在内存里，随面板销毁。
    */
   private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created' }>>();
+  /** 最近一次发送时的历史压缩统计（上下文抽屉展示）。 */
+  private lastHistoryStats?: { recent: number; summarized: number; chars: number };
 
   private constructor(private readonly deps: AiChatViewDeps) {
     super(VIEW_TYPE, l10n('ai.title'), vscode.ViewColumn.Active, undefined, getAiChatHtml);
@@ -759,16 +766,30 @@ export class AiChatView extends BaseWebView {
   /** 用当前会话历史 + 上下文发起一次 chat 流。 */
   private async runChat(session: AiChatSession): Promise<void> {
     let messages: ChatMessage[];
+    // 监控类请求只有 Agent 模式才有 propose_monitor：普通问答会答「做不到」。
+    // 自动开启（界面上开关会同步变为开启），并给一行提示，避免用户以为被静默改变。
+    const conn = this.selectedConnection();
+    const lastUserText = session.messages.filter((m) => m.role === 'user' && !m.error).at(-1)?.content ?? '';
+    if (!this.agentMode && conn && isRelationalDbType(conn.dbType) && wantsMonitorTask(lastUserText)) {
+      this.agentMode = true;
+      this.post({ type: 'agentModeChanged', enabled: true } as never);
+      this.post({ type: 'agentNotice', text: l10n('wv.ai.agent.autoOn') } as never);
+    }
     try {
-      const { schemaText } = await this.buildContext();
-      messages = this.composeMessages(session, schemaText);
+      const recentUserText = session.messages
+        .filter((m) => m.role === 'user' && !m.error)
+        .slice(-3)
+        .map((m) => m.content)
+        .join('\n');
+      const { schemaText } = await this.buildContext(recentUserText);
+      const history = await this.prepareHistory(session);
+      messages = this.composeMessages(session, schemaText, history);
     } catch (err) {
       // 上下文/schema 读取失败发生在流式请求之前：不补一条 finish 会永远停在「思考中」。
       const message = err instanceof Error ? err.message : String(err);
       this.post({ type: 'finish', sessionId: session.id, error: { code: 'AI_CONTEXT_ERROR', message } } as never);
       return;
     }
-    const conn = this.selectedConnection();
     const database = this.selectedScope ?? conn?.database;
     if (this.agentMode && conn && isRelationalDbType(conn.dbType)) {
       await this.runAgent(session, messages, conn);
@@ -1424,7 +1445,7 @@ export class AiChatView extends BaseWebView {
       const { state, tables } = await this.buildContext();
       this.post({
         type: 'contextDetail',
-        context: state,
+        context: this.withHistory(state),
         ...(tables ? { tables } : {}),
       } as never);
     } catch (err) {
@@ -1471,7 +1492,66 @@ export class AiChatView extends BaseWebView {
   }
 
   /** 组装请求消息：按引擎固定 system + 上下文块 +（域上下文/默认指令）user 区块 + 近 N 条历史。 */
-  private composeMessages(session: AiChatSession, schemaText?: string): ChatMessage[] {
+  /**
+   * 历史压缩：最近 8 条保留原文，更早的交给模型做滚动摘要（失败时用确定性压缩兜底）。
+   * 摘要存回会话，后续只摘要增量，不会每轮都调模型。
+   */
+  private async prepareHistory(session: AiChatSession): Promise<{ summary?: string; recent: HistoryMessage[] }> {
+    const all: HistoryMessage[] = session.messages
+      .filter((m) => !m.error)
+      .map((m) => ({ role: m.role, content: m.content }));
+    const plan = planHistory(all, { covered: session.summaryUpTo ?? 0 });
+    let summary = session.summary;
+    if (plan.pending.length > 0) {
+      const nextCovered = plan.covered + plan.pending.length;
+      try {
+        summary = sanitizeSummary(await this.summarizeHistory(summary, plan.pending));
+      } catch {
+        // 模型不可用 / 额度不足：用确定性压缩，并把覆盖点推进，避免每轮重试。
+        summary = sanitizeSummary([summary, plan.fallback].filter((part) => part && part.trim()).join('\n'));
+      }
+      session.summary = summary;
+      session.summaryUpTo = nextCovered;
+      this.saveSession(session);
+    }
+    const fitted = fitBudget(plan.recent);
+    this.lastHistoryStats = {
+      recent: fitted.messages.length,
+      summarized: session.summaryUpTo ?? 0,
+      chars: (summary?.length ?? 0) + fitted.messages.reduce((sum, m) => sum + m.content.length, 0),
+    };
+    return { ...(summary ? { summary } : {}), recent: fitted.messages };
+  }
+
+  /** 调模型压缩旧历史：只带旧摘要 + 待压缩片段，输出要点列表。 */
+  private async summarizeHistory(previous: string | undefined, pending: HistoryMessage[]): Promise<string> {
+    const config = readAiConfig();
+    const stream = this.deps.service.streamChat(
+      {
+        model: config.model || 'default',
+        messages: buildSummaryMessages(previous, pending) as ChatMessage[],
+        ...(config.temperature !== undefined ? { temperature: Math.min(config.temperature, 0.3) } : {}),
+        maxTokens: 400,
+        feature: 'chat',
+      },
+      { feature: 'chat' },
+    );
+    let text = '';
+    try {
+      for await (const chunk of stream) text += chunk.delta ?? '';
+    } finally {
+      stream.abort();
+    }
+    if (!text.trim()) throw new Error('empty summary');
+    return text;
+  }
+
+  /** 把历史统计并进上下文状态（没有发送过就只有 schema 统计）。 */
+  private withHistory(state: AiContextState): AiContextState {
+    return this.lastHistoryStats ? { ...state, history: this.lastHistoryStats } : state;
+  }
+
+  private composeMessages(session: AiChatSession, schemaText?: string, history?: { summary?: string; recent: HistoryMessage[] }): ChatMessage[] {
     const engineConn = this.selectedConnection();
     const systemPrompt =
       engineConn?.dbType === DatabaseType.REDIS
@@ -1500,9 +1580,11 @@ export class AiChatView extends BaseWebView {
       if (directives) parts.push(`Default rules: ${directives}`);
       messages.push({ role: 'user', content: parts.join('\n') });
     }
-    for (const message of session.messages.filter((m) => !m.error).slice(-HISTORY_LIMIT)) {
-      messages.push({ role: message.role, content: message.content });
-    }
+    const summary = summaryBlock(history?.summary);
+    if (summary) messages.push({ role: 'system', content: summary });
+    const recent = history?.recent
+      ?? session.messages.filter((m) => !m.error).slice(-HISTORY_LIMIT).map((m) => ({ role: m.role, content: m.content }));
+    for (const message of recent) messages.push({ role: message.role, content: message.content });
     return messages;
   }
 
@@ -1512,7 +1594,7 @@ export class AiChatView extends BaseWebView {
     const provider = await this.deps.service.describeProvider();
     const quota = await this.fetchQuotaState();
     this.lastQuota = quota;
-    const context = (await this.buildContext()).state;
+    const context = this.withHistory((await this.buildContext()).state);
     const active = this.activeSessionId ? this.deps.sessions.get(this.activeSessionId) : undefined;
     const down: AiDownMessage = {
       type: 'init',
@@ -1537,7 +1619,7 @@ export class AiChatView extends BaseWebView {
 
   private async pushContext(): Promise<void> {
     const { state } = await this.buildContext();
-    this.post({ type: 'contextChanged', context: state } as never);
+    this.post({ type: 'contextChanged', context: this.withHistory(state) } as never);
     // 连接/作用域变化时同步业务规则摘要（侧栏状态行随连接切换）。
     this.pushBusinessRules();
   }
@@ -1619,7 +1701,7 @@ export class AiChatView extends BaseWebView {
     return this.selectedConnId ? this.deps.connectionStore.get(this.selectedConnId) : undefined;
   }
 
-  private async buildContext(): Promise<{ state: AiContextState; schemaText?: string; tables?: string[] }> {
+  private async buildContext(userText?: string): Promise<{ state: AiContextState; schemaText?: string; tables?: string[] }> {
     const conn = this.selectedConnection();
     if (!conn) {
       return { state: { tableCount: 0, totalTables: 0, commentCount: 0, estimatedTokens: 0, note: 'no-connection' } };
@@ -1646,6 +1728,7 @@ export class AiChatView extends BaseWebView {
         dbType: String(conn.dbType),
         includeComments: readAiConfig().includeColumnComments,
         ...(conn.database ? { database: conn.database } : {}),
+        ...(userText ? { userText } : {}),
       });
       if (!snapshot) return { state: { ...base, ...empty, note: 'schema-failed' } };
       return this.sqlContextState(base, snapshot);
@@ -1688,6 +1771,7 @@ export class AiChatView extends BaseWebView {
         ...(conn.dbType === DatabaseType.PG && conn.schema ? { schema: conn.schema } : {}),
         ...(selected.length > 0 ? { referencedTables: selected, onlyReferenced: true } : {}),
         ...(Object.keys(notes.tables).length > 0 ? { notes } : {}),
+        ...(userText ? { userText } : {}),
       });
       if (!snapshot) return { state: { ...scopeBase, ...empty, note: 'schema-failed' } };
       return this.sqlContextState(

@@ -20,6 +20,8 @@ All notable changes to DevBelt DB Client are documented in this file.
   - Intervals: 1 minute to 24 hours in the picker, plus custom values from 5 seconds (5 s is the floor, to protect the database); the interval can be changed later without recreating the task.
   - Safety: checks run on an isolated session made read-only at the database level, with a 30 s timeout, no query history and one check at a time per connection + database + schema; production connections are refused unless `devbelt.ai.monitor.allowProduction` is on; at most 5 tasks per connection and 20 in total; tasks are paused every time VS Code starts, after three failures in a row, or when their connection is removed or changed; only one VS Code window runs and edits them (other windows are view-only; when that window closes, another takes over with the tasks paused). Task definitions and up to 500 history points per task stay under the extension's global storage, including the cursor value and up to 1000 primary-key values of rows already seen for new-rows tasks; new-row contents are kept in memory only.
 - Settings: `devbelt.ai.monitor.enabled`, `allowProduction`, `queryTimeoutSeconds`, `notifyCooldownMinutes`, `maxTasks`.
+- **Long conversations are compressed instead of truncated**: the last 8 messages stay verbatim and older ones become a rolling model-written summary (cached in the session, refreshed only when 4+ new old messages accumulate; a deterministic compact transcript is used if the model is unavailable). The context drawer shows how much was summarized and how many characters are injected.
+- **Monitoring requests switch on Agent mode automatically** (the toggle visibly turns on and a one-line notice explains why) so `propose_monitor` is available; nothing is created without confirming the card. The tables you mention in the message are now ranked first when the schema context has to be trimmed.
 - Result grid: a sort icon on every column header (ascending → descending → clear) with `aria-sort`; the pagination bar stays visible while the result set scrolls; the AI side drawer can be dragged wider and remembers its width.
 
 #### Known limitations
@@ -45,6 +47,8 @@ All notable changes to DevBelt DB Client are documented in this file.
   - 间隔：预设 1 分钟到 24 小时，也可以自定义，最短 5 秒（保护数据库）；创建后还能直接改间隔，不用重建任务。
   - 安全：在独立会话上执行并在数据库层设为只读；单次超时 30 秒，不写查询历史，同一「连接 + 库 + schema」一次只跑一个检查；生产连接默认拒绝，需开启 `devbelt.ai.monitor.allowProduction`；每个连接最多 5 个、总共最多 20 个任务；每次启动 VS Code、连续失败 3 次、连接被删除或修改时任务自动暂停；只有一个 VS Code 窗口执行和修改任务（其他窗口只能查看；该窗口关闭后由其他窗口接手，任务先暂停）。任务定义和每个任务最多 500 个历史点保存在扩展的全局存储里，新增行任务还会保存游标值和最多 1000 个已见行的主键值；新增行内容只保存在内存中。
 - 设置：`devbelt.ai.monitor.enabled`、`allowProduction`、`queryTimeoutSeconds`、`notifyCooldownMinutes`、`maxTasks`。
+- **长对话改为压缩而不是截断**：最近 8 条保留原文，更早的消息由模型写成滚动摘要（存在会话里，攒够 4 条旧消息才更新；模型不可用时退回确定性压缩）。上下文抽屉会显示压缩了多少条、注入了多少字符。
+- **监控类请求会自动开启 Agent 模式**（开关会明显变为开启，并有一行说明），这样才有 `propose_monitor`；不确认卡片不会创建任何任务。你消息里提到的表在表结构超预算时会被排到最前面。
 - 结果表格：每个列头都有排序图标（升序 → 降序 → 取消），并带 `aria-sort`；结果滚动时分页栏固定在底部可见；AI 侧抽屉可拖宽并记住宽度。
 
 #### 已知限制

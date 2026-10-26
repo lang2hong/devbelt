@@ -29,6 +29,8 @@ export interface AiContextState {
   partial?: boolean;
   /** 无可用连接/会话/作用域时的说明（UI 提示"未选择连接"等）。 */
   note?: 'no-connection' | 'no-session' | 'schema-failed' | 'no-database' | 'db-unreachable';
+  /** 历史压缩状态：保留原文的条数、已摘要覆盖的条数、注入字符数。 */
+  history?: { recent: number; summarized: number; chars: number };
 }
 
 export interface AiQuotaState {

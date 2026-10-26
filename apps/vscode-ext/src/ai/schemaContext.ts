@@ -281,8 +281,6 @@ function selectTables(
     chosen.length = 0;
   }
 
-  if (tables.length <= options.maxTables) return tables;
-
   for (const ref of options.referencedTables ?? []) {
     take(byName.get(ref.toLowerCase()) ?? byName.get(ref.split('.').pop()!.toLowerCase()));
   }
@@ -296,6 +294,8 @@ function selectTables(
     for (const entry of scored) take(entry.table);
   }
 
+  // 即使没到 200 张上限也保持这个顺序：字符预算截断按顺序丢尾部，
+  // 相关表必须排在前面，否则「问 A 表却注入不到 A 表」。
   for (const table of tables) take(table);
   return chosen.slice(0, options.maxTables);
 }

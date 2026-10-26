@@ -117,6 +117,7 @@ const input = ref('');
 const agentEnabled = ref(false);
 const agentSteps = ref<Array<{ index: number; tool: string; status: 'running' | 'ok' | 'error'; summary?: string; durationMs?: number; errorCode?: string }>>([]);
 const agentNotice = ref('');
+let noticeTimer: ReturnType<typeof window.setTimeout> | undefined;
 const editingIndex = ref<number | null>(null);
 const suggestions = computed(() => [
   t('wv.ai.suggest.explain'),
@@ -427,6 +428,11 @@ onMounted(() => {
         break;
       case 'monitorDetail':
         if (typeof msg.id === 'string') monitorDetails.value = { ...monitorDetails.value, [msg.id]: msg.detail ?? null };
+        break;
+      case 'agentNotice':
+        agentNotice.value = typeof msg.text === 'string' ? msg.text : '';
+        if (noticeTimer) window.clearTimeout(noticeTimer);
+        noticeTimer = window.setTimeout(() => { agentNotice.value = ''; }, 6000);
         break;
       case 'monitorOpen':
         monitorFocusId.value = typeof msg.focusId === 'string' ? msg.focusId : null;
