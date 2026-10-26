@@ -1531,7 +1531,8 @@ export class AiChatView extends BaseWebView {
         model: config.model || 'default',
         messages: buildSummaryMessages(previous, pending) as ChatMessage[],
         ...(config.temperature !== undefined ? { temperature: Math.min(config.temperature, 0.3) } : {}),
-        maxTokens: 400,
+        // 推理类模型会把 reasoning token 也算进 max_tokens：留足空间，避免摘要被截断。
+        maxTokens: 900,
         feature: 'chat',
       },
       { feature: 'chat' },
