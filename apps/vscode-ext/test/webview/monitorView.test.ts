@@ -71,6 +71,13 @@ describe('monitor UI contracts', () => {
     expect(card).toContain('monitor.proposal.suggested');
   });
 
+  it('loads the detail (and charts) as soon as a task is opened or checked', () => {
+    // 带着 focusId 打开时立即请求详情
+    expect(panel).toContain("watch(() => props.focusId, (id) => { if (id) open(id); }, { immediate: true })");
+    // 定时 / 立即检查后（lastRunAt 变化）刷新详情
+    expect(panel).toMatch(/watch\(\s*\(\) => props\.tasks\.find\(\(task\) => task\.id === selectedId\.value\)\?\.lastRunAt/);
+  });
+
   it('keeps SQL collapsed, removes discarded cards and collapses created ones', () => {
     expect(card).toMatch(/<details v-if="p.sql"/);
     expect(card).not.toContain("'discarded'");

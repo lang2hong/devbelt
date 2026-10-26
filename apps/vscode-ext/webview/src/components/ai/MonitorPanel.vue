@@ -28,12 +28,14 @@ const { post } = useVsCode();
 
 const selectedId = ref<string | null>(props.focusId ?? null);
 const includeRows = ref(false);
+// 打开抽屉时如果已经带上了任务 id（通知 / 菜单），立即拉取详情——
+// 否则只显示「加载中」，要等一次操作后才有图表。
+watch(() => props.focusId, (id) => { if (id) open(id); }, { immediate: true });
 const editing = ref(false);
 const editInterval = ref(5);
 const editCondition = ref<ConditionInput | undefined>(undefined);
 const editError = ref('');
 const editReady = computed(() => editing.value && isConditionComplete(editCondition.value));
-watch(() => props.focusId, (id) => { if (id) open(id); });
 
 const selected = computed(() => props.tasks.find((task) => task.id === selectedId.value) ?? null);
 const detail = computed(() => (selectedId.value ? props.details[selectedId.value] ?? null : null));
@@ -48,6 +50,14 @@ function open(id: string): void {
   editing.value = false;
   post({ type: 'monitorDetail', id });
 }
+
+/** 定时检查 / 立即检查后刷新详情（历史点与新增行），图表跟着更新。 */
+watch(
+  () => props.tasks.find((task) => task.id === selectedId.value)?.lastRunAt,
+  (at, before) => {
+    if (selectedId.value && at !== before) post({ type: 'monitorDetail', id: selectedId.value });
+  },
+);
 
 function startEdit(task: MonitorTaskView): void {
   editing.value = true;
