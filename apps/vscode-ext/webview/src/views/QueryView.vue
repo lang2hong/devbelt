@@ -592,9 +592,8 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.app { display: flex; flex-direction: column; height: 100vh; min-height: 0; overflow: hidden; font-family: var(--vscode-font-family, sans-serif); }
-/* 编辑器手动拉高时也要给结果和分页留出空间（否则分页被挤出视口）。 */
-.editor { width: 100%; box-sizing: border-box; padding: 8px; min-height: 80px; max-height: 40vh; resize: vertical;
+.app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family, sans-serif); }
+.editor { width: 100%; box-sizing: border-box; padding: 8px; min-height: 80px; resize: vertical;
   background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: none; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
   font-family: var(--vscode-editor-font-family, monospace); font-size: 13px; }

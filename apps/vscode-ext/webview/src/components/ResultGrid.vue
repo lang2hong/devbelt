@@ -1036,7 +1036,7 @@ watch(() => props.filterConditions, (conds) => {
 .btn:disabled { opacity: 0.5; cursor: default; }
 .input { font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
-.grid-wrap { flex: 1 1 0; min-height: 0; overflow: auto; outline: none; }
+.grid-wrap { flex: 1; overflow: auto; outline: none; }
 .search-input { width: 180px; max-width: 40vw; }
 .selected-count { font-size: 11px; color: var(--vscode-descriptionForeground, #808080); }
 .row-num { width: 48px; min-width: 48px; text-align: right; color: var(--vscode-descriptionForeground, #808080); font-variant-numeric: tabular-nums; }
