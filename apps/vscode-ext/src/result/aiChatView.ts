@@ -172,7 +172,7 @@ export class AiChatView extends BaseWebView {
    * 对话里的监控提案卡片（按会话 id）：webview 重载 / 切换会话后重新下发，
    * 否则模型已经说了「请点卡片」，用户却看不到卡片。只在内存里，随面板销毁。
    */
-  private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created' | 'discarded' }>>();
+  private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created' }>>();
 
   private constructor(private readonly deps: AiChatViewDeps) {
     super(VIEW_TYPE, l10n('ai.title'), vscode.ViewColumn.Active, undefined, getAiChatHtml);
@@ -255,7 +255,7 @@ export class AiChatView extends BaseWebView {
     this.post({ type: 'monitorProposal', sessionId, proposal } as never);
   }
 
-  /** 会话加载后补发该会话的提案卡片（含已处理的状态）。 */
+  /** 会话加载后补发该会话的提案卡片（待确认 / 已创建；放弃的已移除）。 */
   private replayProposals(sessionId: string | undefined): void {
     if (!sessionId) return;
     for (const card of this.proposalCards.get(sessionId) ?? []) {
@@ -263,10 +263,19 @@ export class AiChatView extends BaseWebView {
     }
   }
 
-  private markProposal(proposalId: string, status: 'created' | 'discarded'): void {
+  private markProposal(proposalId: string, status: 'created'): void {
     for (const list of this.proposalCards.values()) {
       const card = list.find((c) => c.proposal.id === proposalId);
       if (card) card.status = status;
+    }
+  }
+
+  /** 用户放弃：从会话的卡片记录里删掉，重新进入会话也不再出现。 */
+  private dropProposal(proposalId: string): void {
+    for (const [sessionId, list] of this.proposalCards) {
+      const next = list.filter((c) => c.proposal.id !== proposalId);
+      if (next.length === 0) this.proposalCards.delete(sessionId);
+      else if (next.length !== list.length) this.proposalCards.set(sessionId, next);
     }
   }
 
@@ -641,7 +650,7 @@ export class AiChatView extends BaseWebView {
       case 'monitorDiscard':
         if (typeof msg.proposalId === 'string') {
           MonitorBridge.tryGet()?.handlers.discard(msg.proposalId);
-          this.markProposal(msg.proposalId, 'discarded');
+          this.dropProposal(msg.proposalId);
         }
         return;
       case 'monitorExplain':

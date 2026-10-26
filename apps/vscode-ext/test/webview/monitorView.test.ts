@@ -56,6 +56,14 @@ describe('monitor UI contracts', () => {
     expect(card).toContain('p.preview');
   });
 
+  it('keeps SQL collapsed, removes discarded cards and collapses created ones', () => {
+    expect(card).toMatch(/<details v-if="p.sql"/);
+    expect(card).not.toContain("'discarded'");
+    expect(card).toContain("props.state.status === 'created'");
+    expect(view).toContain('proposals.value = proposals.value.filter((p) => p.proposal.id !== proposalId)');
+    expect(view).toContain("if (msg.status === 'discarded') break;");
+  });
+
   it('only sends new-row contents to the AI when the user ticks the box', () => {
     expect(panel).toContain('v-model="includeRows"');
     expect(panel).toMatch(/const includeRows = ref\(false\)/);

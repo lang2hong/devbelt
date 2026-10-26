@@ -72,7 +72,7 @@ beforeEach(() => {
 afterEach(() => MonitorBridge.reset());
 
 describe('monitor proposal cards in AI Chat', () => {
-  it('replays a session’s cards (with their status) when the session is loaded again', async () => {
+  it('replays created cards with their status and drops discarded ones', async () => {
     const view: any = AiChatView.open(deps() as any);
     await view.handleMessage({ type: 'ready' });
     await view.handleMessage({ type: 'loadHistory', sessionId: 's1' });
@@ -86,11 +86,10 @@ describe('monitor proposal cards in AI Chat', () => {
     await view.handleMessage({ type: 'loadHistory', sessionId: 's2' });
     expect(proposalPosts()).toEqual([]);
 
-    // 切回来：两张卡片都补发，状态保留
+    // 切回来：放弃的不再补发，已创建的保留状态
     h.post.mockClear();
     await view.handleMessage({ type: 'loadHistory', sessionId: 's1' });
     expect(proposalPosts().map((m) => [m.sessionId, m.proposal.id, m.status])).toEqual([
-      ['s1', 'p1', 'discarded'],
       ['s1', 'p2', 'created'],
     ]);
   });

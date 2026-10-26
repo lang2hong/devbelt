@@ -2029,8 +2029,6 @@ export const en: MessageCatalog = {
   'monitor.proposal.discard': 'Dismiss',
   'monitor.proposal.create': 'Create and start',
   'monitor.proposal.creating': 'Validating and creating…',
-  'monitor.proposal.created': 'Created and running in the background.',
-  'monitor.proposal.discarded': 'Proposal dismissed.',
   'monitor.proposal.failed': 'Could not create: {reason}',
   'monitor.warning.nullable': 'The cursor column allows NULL: rows with NULL are never detected.',
   'monitor.warning.noIndex': 'No index on the cursor column: every check scans the whole table.',
@@ -2062,4 +2060,6 @@ export const en: MessageCatalog = {
   'monitor.issue.cursorType': 'Column type {detail} cannot track new rows (an integer or date/time column is needed).',
   'monitor.issue.tableMissing': 'Table {detail} was not found, or you cannot read it.',
   'monitor.notify.handover': 'The VS Code window that ran monitoring was closed; {n} tasks are paused and can be resumed here.',
+  'monitor.proposal.showSql': 'Show SQL',
+  'monitor.proposal.createdNamed': 'Created “{name}”; it is running in the background',
 };

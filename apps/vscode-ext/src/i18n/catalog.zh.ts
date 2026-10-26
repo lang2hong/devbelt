@@ -2007,8 +2007,6 @@ export const zh: MessageCatalog = {
   'monitor.proposal.discard': '不用了',
   'monitor.proposal.create': '创建并开始',
   'monitor.proposal.creating': '正在校验并创建…',
-  'monitor.proposal.created': '已创建，正在后台运行。',
-  'monitor.proposal.discarded': '已放弃这个提案。',
   'monitor.proposal.failed': '创建失败：{reason}',
   'monitor.warning.nullable': '游标列允许为空：为空的行永远不会被检测到。',
   'monitor.warning.noIndex': '游标列上没有索引：每次检查都会扫描整张表。',
@@ -2040,4 +2038,6 @@ export const zh: MessageCatalog = {
   'monitor.issue.cursorType': '列类型 {detail} 不能用来判断新增行（需要整数或日期时间）。',
   'monitor.issue.tableMissing': '找不到表 {detail}，或没有读取它的权限。',
   'monitor.notify.handover': '原执行监控的 VS Code 窗口已关闭，{n} 个任务已暂停，可在这里继续。',
+  'monitor.proposal.showSql': '查看 SQL',
+  'monitor.proposal.createdNamed': '已创建「{name}」，正在后台运行',
 };

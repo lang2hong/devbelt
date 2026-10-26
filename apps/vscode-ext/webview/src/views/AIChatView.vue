@@ -429,7 +429,8 @@ onMounted(() => {
       case 'monitorProposal':
         if (isForeignSession(activeSessionId.value, msg.sessionId)) break;
         if (msg.proposal && typeof msg.proposal.id === 'string' && !proposals.value.some((p) => p.proposal.id === msg.proposal.id)) {
-          const status = msg.status === 'created' || msg.status === 'discarded' ? msg.status : 'pending';
+          if (msg.status === 'discarded') break;
+          const status = msg.status === 'created' ? 'created' : 'pending';
           proposals.value = [...proposals.value, { proposal: msg.proposal, status }];
         }
         break;
@@ -745,7 +746,8 @@ function confirmProposal(proposalId: string, intervalMinutes: number): void {
 }
 
 function discardProposal(proposalId: string): void {
-  proposals.value = proposals.value.map((p) => (p.proposal.id === proposalId ? { ...p, status: 'discarded' } : p));
+  // 放弃即移除卡片（扩展端同时删掉记录，重新进入会话不再补发）。
+  proposals.value = proposals.value.filter((p) => p.proposal.id !== proposalId);
   post({ type: 'monitorDiscard', proposalId });
 }
 
