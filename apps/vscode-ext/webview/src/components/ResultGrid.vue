@@ -134,13 +134,13 @@ function sortColumn(name: string) {
 
 /** 列头排序图标：未排序显示 ⇅（悬停才明显），已排序显示 ▲ / ▼。 */
 function sortIcon(name: string): string {
-  if (sortCol !== name) return '⇅';
-  return sortDir === 'DESC' ? '▼' : '▲';
+  if (props.sortCol !== name) return '⇅';
+  return props.sortDir === 'DESC' ? '▼' : '▲';
 }
 
 function sortTitle(name: string): string {
-  if (sortCol !== name) return t('wv.grid.sortHint');
-  return sortDir === 'ASC' ? t('wv.grid.sortDesc') : t('wv.grid.sortNone');
+  if (props.sortCol !== name) return t('wv.grid.sortHint');
+  return props.sortDir === 'ASC' ? t('wv.grid.sortDesc') : t('wv.grid.sortNone');
 }
 
 function persistLayout() {
