@@ -2080,4 +2080,7 @@ export const zh: MessageCatalog = {
   'monitor.pick.custom': '自定义间隔…',
   'monitor.pick.customPrompt': '输入间隔秒数（{min}–{max} 秒）',
   'monitor.pick.customInvalid': '请输入 {min}–{max} 之间的整数秒数',
+  'wv.grid.sortHint': '点击升序排序',
+  'wv.grid.sortDesc': '点击降序排序',
+  'wv.grid.sortNone': '点击取消排序',
 };

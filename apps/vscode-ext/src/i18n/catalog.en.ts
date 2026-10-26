@@ -2102,4 +2102,7 @@ export const en: MessageCatalog = {
   'monitor.pick.custom': 'Custom interval…',
   'monitor.pick.customPrompt': 'Interval in seconds ({min}–{max})',
   'monitor.pick.customInvalid': 'Enter a whole number of seconds between {min} and {max}',
+  'wv.grid.sortHint': 'Sort ascending',
+  'wv.grid.sortDesc': 'Sort descending',
+  'wv.grid.sortNone': 'Clear sorting',
 };

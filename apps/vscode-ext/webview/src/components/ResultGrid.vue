@@ -132,6 +132,17 @@ function sortColumn(name: string) {
   emit('sort', name);
 }
 
+/** 列头排序图标：未排序显示 ⇅（悬停才明显），已排序显示 ▲ / ▼。 */
+function sortIcon(name: string): string {
+  if (sortCol !== name) return '⇅';
+  return sortDir === 'DESC' ? '▼' : '▲';
+}
+
+function sortTitle(name: string): string {
+  if (sortCol !== name) return t('wv.grid.sortHint');
+  return sortDir === 'ASC' ? t('wv.grid.sortDesc') : t('wv.grid.sortNone');
+}
+
 function persistLayout() {
   // 查询结果只做本地布局；只有表预览才把布局写回宿主。
   if (props.hasTable) emit('saveLayout', [...displayedOrder.value], { ...localColumnWidths.value });
@@ -900,8 +911,10 @@ watch(() => props.filterConditions, (conds) => {
             @dragstart="startColumnDrag(f.name, $event)"
             @dragover.prevent
             @drop="dropColumn(f.name, $event)"
-            :class="{ 'sort-asc': sortCol === f.name && sortDir === 'ASC', 'sort-desc': sortCol === f.name && sortDir === 'DESC' }">
-            {{ f.name }}
+            :class="{ 'sort-asc': sortCol === f.name && sortDir === 'ASC', 'sort-desc': sortCol === f.name && sortDir === 'DESC' }"
+            :aria-sort="sortCol === f.name ? (sortDir === 'ASC' ? 'ascending' : 'descending') : 'none'"
+            :title="sortTitle(f.name)">
+            {{ f.name }}<span class="sort-icon" :class="{ active: sortCol === f.name }" aria-hidden="true">{{ sortIcon(f.name) }}</span>
             <span v-if="hasTable" class="resize-handle" @pointerdown="startColumnResize(f.name, $event)"></span>
           </th>
         </tr>
@@ -1023,7 +1036,7 @@ watch(() => props.filterConditions, (conds) => {
 .btn:disabled { opacity: 0.5; cursor: default; }
 .input { font-size: 12px; padding: 2px 6px; background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 3px; }
-.grid-wrap { flex: 1; overflow: auto; outline: none; }
+.grid-wrap { flex: 1 1 0; min-height: 0; overflow: auto; outline: none; }
 .search-input { width: 180px; max-width: 40vw; }
 .selected-count { font-size: 11px; color: var(--vscode-descriptionForeground, #808080); }
 .row-num { width: 48px; min-width: 48px; text-align: right; color: var(--vscode-descriptionForeground, #808080); font-variant-numeric: tabular-nums; }
@@ -1032,8 +1045,9 @@ table { border-collapse: collapse; font-size: 13px; }
 th, td { border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); padding: 4px 10px; text-align: left; white-space: nowrap; }
 th { position: sticky; top: 0; background: var(--vscode-editor-background, #1e1e1e); cursor: pointer; user-select: none; }
 th:hover { background: var(--vscode-list-hoverBackground, #2a2d2e); }
-th.sort-asc::after { content: " ▲"; }
-th.sort-desc::after { content: " ▼"; }
+.sort-icon { margin-left: 4px; font-size: 10px; color: var(--vscode-descriptionForeground, #808080); opacity: 0; }
+th:hover .sort-icon, .sort-icon.active { opacity: 1; }
+th.sort-asc, th.sort-desc { color: var(--vscode-textLink-foreground, #4daafc); }
 td { max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
 td.cell-active { outline: 2px solid var(--vscode-focusBorder, #007fd4); outline-offset: -2px; }
 .row-selected, .row-selected td { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #fff); }

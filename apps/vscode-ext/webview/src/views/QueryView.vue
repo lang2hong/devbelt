@@ -374,9 +374,10 @@ function handleSort(col: string) {
     post({ type: 'sort', column: col });
     return;
   }
-  // 任意结果集：本地排序 + 方向切换。
-  if (sortCol.value === col) sortDir.value = sortDir.value === 'ASC' ? 'DESC' : 'ASC';
-  else { sortCol.value = col; sortDir.value = 'ASC'; }
+  // 任意结果集：升序 → 降序 → 取消（三态循环）。
+  if (sortCol.value !== col) { sortCol.value = col; sortDir.value = 'ASC'; }
+  else if (sortDir.value === 'ASC') sortDir.value = 'DESC';
+  else { sortCol.value = ''; sortDir.value = ''; }
 }
 
 function handleFilter(conditions: { column: string; op: string; value?: string }[]) {
@@ -591,8 +592,9 @@ function onKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.app { display: flex; flex-direction: column; height: 100vh; font-family: var(--vscode-font-family, sans-serif); }
-.editor { width: 100%; box-sizing: border-box; padding: 8px; min-height: 80px; resize: vertical;
+.app { display: flex; flex-direction: column; height: 100vh; min-height: 0; overflow: hidden; font-family: var(--vscode-font-family, sans-serif); }
+/* 编辑器手动拉高时也要给结果和分页留出空间（否则分页被挤出视口）。 */
+.editor { width: 100%; box-sizing: border-box; padding: 8px; min-height: 80px; max-height: 40vh; resize: vertical;
   background: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #d4d4d4);
   border: none; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
   font-family: var(--vscode-editor-font-family, monospace); font-size: 13px; }
@@ -608,7 +610,14 @@ function onKeydown(e: KeyboardEvent) {
 .comp-item.kind-function { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
 .comp-item.kind-operator { color: var(--vscode-symbolIcon-operatorForeground, #d4d4d4); }
 .action-bar { padding: 4px 8px; display: flex; gap: 6px; align-items: center; border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
-.result-footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 8px; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18)); }
+.result-footer {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 8px; border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.18));
+  /* 始终贴在结果区底部：结果再长也不把分页挤到视口外。 */
+  position: sticky; bottom: 0; z-index: 2;
+  flex: 0 0 auto;
+  background: var(--vscode-editor-background, #1e1e1e);
+}
 .result-footer .page-info { display: inline-flex; align-items: center; gap: 4px; }
   .spacer { flex: 1; }
   .page-info { font-size: 12px; color: var(--vscode-descriptionForeground, #808080); white-space: nowrap; }
