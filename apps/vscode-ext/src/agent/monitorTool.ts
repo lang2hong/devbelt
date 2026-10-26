@@ -17,12 +17,11 @@ export const MONITOR_TOOL_NAME = 'propose_monitor';
 export const MONITOR_TOOL_DEFINITION: ToolDefinition = {
   name: MONITOR_TOOL_NAME,
   description: [
-    'Propose a background monitoring task for a table on the current connection. It is NOT created until the user confirms the card shown in the chat.',
-    'kind=rowCount: watch COUNT(*). kind=metric: provide one read-only SELECT returning exactly 1 row and 1-10 numeric columns; watchColumn is the column the notification compares.',
-    'kind=newRows: provide cursorColumn, an existing monotonically increasing integer or datetime/timestamp column of that table (use describe_table first; never invent a column). If the table has no such column, do not call this tool with newRows: suggest rowCount or a metric instead.',
-    'conditionType: anyChange | increaseBy | decreaseBy | changePercent | above | below; conditionValue is the number for it. For newRows use increaseBy (new rows >= N) or above (new rows > N).',
-    'IMPORTANT: only set a condition when the user actually said when to be alerted. If the user only said what to watch (for example "monitor the per-minute upload volume"), omit conditionType/conditionValue entirely: the confirmation card asks the user to choose. Never invent a threshold, and never present one in your reply as if the user had asked for it.',
-    'Translate the intent, do not invert the metric: "no new data for more than N minutes" -> SELECT that computes the lag in seconds and condition above N*60; "fewer than N" -> below N; "more than N new rows" -> kind=newRows with increaseBy N; "tell me on any change" -> anyChange. Do not compare a latest-timestamp column against a fixed value: that value goes stale.',
+    'Propose a background monitoring task for a table on the current connection; it is NOT created until the user confirms the card.',
+    'kind=rowCount watches COUNT(*). kind=metric needs one read-only SELECT returning 1 row and 1-10 numeric columns; watchColumn is the column compared by the alert.',
+    'kind=newRows needs cursorColumn: an existing monotonic integer or datetime column of that table (use describe_table first; never invent one).',
+    'Only set conditionType/conditionValue when the user said when to be alerted; otherwise omit both and let the user choose on the card. Never invent a threshold.',
+    "Map intent, don't invert it: 'no new data for N minutes' = SQL computing the lag in seconds + above N*60; 'fewer than N' = below N; 'more than N new rows' = kind=newRows + increaseBy N; 'any change' = anyChange.",
   ].join(' '),
   riskClass: 'R1',
   engines: ['MYSQL', 'PG', 'SQLITE'],
