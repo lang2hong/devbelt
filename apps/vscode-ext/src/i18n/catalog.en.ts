@@ -1767,6 +1767,7 @@ export const en: MessageCatalog = {
   'wv.ai.openChat': 'Open AI chat with this SQL prefilled (it is not sent)',
   'wv.ai.more': 'More',
   'wv.ai.drawer.close': 'Close',
+  'wv.ai.drawer.resize': 'Resize panel',
   'wv.ai.agent.label': 'Agent',
   'wv.ai.run': 'Run',
   'wv.ai.quota.title': 'Credits',

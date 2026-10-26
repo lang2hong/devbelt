@@ -1745,6 +1745,7 @@ export const zh: MessageCatalog = {
   'wv.ai.openChat': '打开 AI 对话并预填当前 SQL（不会自动发送）',
   'wv.ai.more': '更多',
   'wv.ai.drawer.close': '关闭',
+  'wv.ai.drawer.resize': '拖动调整宽度',
   'wv.ai.agent.label': 'Agent',
   'wv.ai.run': '运行',
   'wv.ai.quota.title': '积分额度',

@@ -78,7 +78,7 @@ function onUnit(event: Event): void {
   apply(amount.value * factorOf(next));
 }
 
-const presets = [10_000, 30_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+const presets = [5_000, 15_000, 30_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 </script>
 
 <template>

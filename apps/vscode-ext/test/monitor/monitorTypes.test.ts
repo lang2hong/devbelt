@@ -31,6 +31,7 @@ describe('monitor rules', () => {
   it('clamps the interval to 1 minute … 24 hours', () => {
     expect(clampInterval(1000)).toBe(MIN_INTERVAL_MS);
     expect(clampInterval(30_000)).toBe(30_000); // 秒级可用
+    expect(clampInterval(3_000)).toBe(5_000); // 最短 5 秒
     expect(clampInterval(2 * 60_000 + 30_000)).toBe(150_000); // 自定义间隔
     expect(clampInterval(10 * 24 * 3_600_000)).toBe(MAX_INTERVAL_MS);
     expect(clampInterval(NaN)).toBe(DEFAULT_INTERVAL_MS);

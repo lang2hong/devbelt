@@ -83,8 +83,8 @@ export interface MonitorPoint {
   skipped?: true;
 }
 
-/** 最短 10 秒：再短对数据库压力过大，且秒级监控主要给新鲜度指标用。 */
-export const MIN_INTERVAL_MS = 10_000;
+/** 最短 5 秒：再短对数据库压力过大，且秒级监控主要给新鲜度指标用。 */
+export const MIN_INTERVAL_MS = 5_000;
 export const MAX_INTERVAL_MS = 24 * 3_600_000;
 export const DEFAULT_INTERVAL_MS = 5 * 60_000;
 /** 估算行数超过该值时提示 COUNT(*) 成本，默认间隔放宽。 */

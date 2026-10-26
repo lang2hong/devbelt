@@ -41,6 +41,17 @@ describe('输入法组合时不误发送', () => {
   });
 });
 
+describe('侧抽屉可拖宽', () => {
+  it('拖动手柄、键盘调整、记住上次宽度', () => {
+    expect(drawer).toContain('class="ai-drawer-resize"');
+    expect(drawer).toContain('role="separator"');
+    expect(drawer).toContain("localStorage.getItem(WIDTH_KEY)");
+    expect(drawer).toContain("localStorage.setItem(WIDTH_KEY, String(width.value))");
+    expect(drawer).toContain("event.key === 'ArrowLeft'");
+    expect(drawer).toContain('MIN_WIDTH = 320');
+  });
+});
+
 describe('Agent 降级提示', () => {
   it('带上被拒绝的原因，而不是一句话断定为模型不支持', () => {
     expect(view).toContain("t('wv.ai.agent.degradedReason', { reason: msg.agentDegradedReason })");
