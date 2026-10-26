@@ -425,8 +425,8 @@ export type AiUpMessage =
   | { type: 'monitorDetail'; id: string }
   | { type: 'monitorAction'; id: string; action: 'resume' | 'pause' | 'runNow' | 'remove' }
   | { type: 'monitorResumeAll' }
-  | { type: 'monitorConfirm'; proposalId: string; intervalMinutes?: number; condition?: AiMonitorConditionInput }
-  | { type: 'monitorEdit'; id: string; intervalMinutes?: number; condition?: AiMonitorConditionInput }
+  | { type: 'monitorConfirm'; proposalId: string; intervalMs?: number; intervalMinutes?: number; condition?: AiMonitorConditionInput }
+  | { type: 'monitorEdit'; id: string; intervalMs?: number; intervalMinutes?: number; condition?: AiMonitorConditionInput }
   | { type: 'monitorDiscard'; proposalId: string }
   | { type: 'monitorExplain'; id: string; includeRows?: boolean }
   | { type: 'applyCode'; text: string }

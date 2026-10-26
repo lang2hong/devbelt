@@ -230,6 +230,25 @@ describe('MonitorScheduler across windows', () => {
     expect(deps.run).not.toHaveBeenCalled();
   });
 
+  it('exposes the next run and whether a check is in flight', async () => {
+    const { scheduler, deps } = setup();
+    await scheduler.add(task());
+    expect(scheduler.nextRun('m1')).toBeDefined();
+    expect(scheduler.isExecuting('m1')).toBe(false);
+
+    let release!: (n: number) => void;
+    deps.run = vi.fn(() => new Promise<number>((r) => { release = r; }));
+    const running = scheduler.runNow('m1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scheduler.isExecuting('m1')).toBe(true);
+    release(1);
+    await running;
+    expect(scheduler.isExecuting('m1')).toBe(false);
+
+    await scheduler.pause('m1');
+    expect(scheduler.nextRun('m1')).toBeUndefined();
+  });
+
   it('relinquish stops local timers', async () => {
     let owner = true;
     const { scheduler, deps } = setup({ isOwner: () => owner });

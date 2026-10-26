@@ -45,6 +45,8 @@ export interface MonitorSchedulerDeps {
   onHit?(task: MonitorTask, previous: number | undefined, value: number): void;
   /** 每次成功执行后（AI Chat 抽屉实时刷新用）。 */
   onRun?(task: MonitorTask): void;
+  /** 一次检查开始时（界面显示「检查中」）。 */
+  onRunStart?(): void;
   onAutoPaused?(task: MonitorTask): void;
   onChanged?(tasks: readonly MonitorTask[]): void;
   now?: () => number;
@@ -63,6 +65,8 @@ export class MonitorScheduler {
   private tasks: MonitorTask[] = [];
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly inFlight = new Set<string>();
+  /** 下一次计划执行时间（界面显示「下次 X 后」）。 */
+  private readonly nextRuns = new Map<string, number>();
   /** B：每个任务最近一次的新增行（只放内存，不落盘）。 */
   private readonly recentRows = new Map<string, { at: number; rows: Array<Record<string, unknown>>; more: boolean }>();
   private disposed = false;
@@ -140,6 +144,16 @@ export class MonitorScheduler {
 
   get(id: string): MonitorTask | undefined {
     return this.tasks.find((t) => t.id === id);
+  }
+
+  /** 下一次计划执行的时间戳；没有计时器（暂停 / 已释放）时为空。 */
+  nextRun(id: string): number | undefined {
+    return this.nextRuns.get(id);
+  }
+
+  /** 这一次是否正在执行。 */
+  isExecuting(id: string): boolean {
+    return this.inFlight.has(id);
   }
 
   /** B：最近一次新增的行（内存；VS Code 重启后为空）。 */
@@ -234,6 +248,7 @@ export class MonitorScheduler {
       return;
     }
     this.inFlight.add(id);
+    this.deps.onRunStart?.();
     const started = this.now();
     try {
       const raw = await this.deps.run(task);
@@ -285,9 +300,11 @@ export class MonitorScheduler {
     const delay = task.intervalMs + (withJitter ? jitterDelay(task.intervalMs, this.random) : 0);
     const handle = this.setTimer(() => {
       this.timers.delete(id);
+      this.nextRuns.delete(id);
       void this.tick(id);
     }, delay);
     this.timers.set(id, handle);
+    this.nextRuns.set(id, this.now() + delay);
   }
 
   private async tick(id: string): Promise<void> {
@@ -300,6 +317,7 @@ export class MonitorScheduler {
     const handle = this.timers.get(id);
     if (handle) this.clearTimer(handle);
     this.timers.delete(id);
+    this.nextRuns.delete(id);
   }
 
   private async update(id: string, patch: Partial<MonitorTask>): Promise<void> {

@@ -17,6 +17,16 @@ export interface MonitorTaskView {
   schema?: string;
   status: MonitorTask['status'];
   pausedReason?: MonitorTask['pausedReason'];
+  /** 创建时间（列表按它倒序）。 */
+  createdAt: number;
+  /** 下一次计划检查的时间（暂停 / 未调度时为空）。 */
+  nextRunAt?: number;
+  /** 这一次是否正在执行。 */
+  running?: boolean;
+  /** 最近一次提醒时间（冷却期判断用）。 */
+  lastNotifiedAt?: number;
+  /** 连续失败次数（达到 3 次会自动暂停）。 */
+  consecutiveFailures: number;
   intervalMs: number;
   /** 结构化条件（编辑用）；任务一定有，提案可能没有。 */
   condition?: MonitorTask['condition'];
@@ -43,9 +53,9 @@ export interface MonitorBridgeHandlers {
   detail(id: string): Promise<MonitorDetail | undefined>;
   action(id: string, action: 'resume' | 'pause' | 'runNow' | 'remove'): Promise<void>;
   resumeAll(): Promise<void>;
-  confirm(proposalId: string, overrides?: { intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string; issues: ValidationIssue[] }>;
+  confirm(proposalId: string, overrides?: { intervalMs?: number; intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string; issues: ValidationIssue[] }>;
   /** 修改已创建任务的间隔 / 条件。 */
-  edit(id: string, patch: { intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string }>;
+  edit(id: string, patch: { intervalMs?: number; intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string }>;
   discard(proposalId: string): void;
   /** 本窗口是否执行（另一窗口持锁时只显示）。 */
   executing(): boolean;

@@ -749,12 +749,12 @@ function newChatFromDrawer(): void {
   drawer.value = null;
 }
 
-function confirmProposal(proposalId: string, intervalMinutes: number, condition: ConditionInput): void {
+function confirmProposal(proposalId: string, intervalMs: number, condition: ConditionInput): void {
   proposals.value = proposals.value.map((p) => (p.proposal.id === proposalId ? { ...p, status: 'creating', error: undefined } : p));
   post({
     type: 'monitorConfirm',
     proposalId,
-    intervalMinutes,
+    intervalMs,
     condition: { type: condition.type, ...(condition.value !== undefined ? { value: condition.value } : {}) },
   });
 }
@@ -766,6 +766,7 @@ function discardProposal(proposalId: string): void {
 }
 
 function explainMonitor(id: string, includeRows: boolean): void {
+  // 解读会新建一个会话并切过去；关掉抽屉，让用户看到正在生成的回答。
   drawer.value = null;
   post({ type: 'monitorExplain', id, includeRows });
 }

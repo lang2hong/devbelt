@@ -83,7 +83,8 @@ export interface MonitorPoint {
   skipped?: true;
 }
 
-export const MIN_INTERVAL_MS = 60_000;
+/** 最短 10 秒：再短对数据库压力过大，且秒级监控主要给新鲜度指标用。 */
+export const MIN_INTERVAL_MS = 10_000;
 export const MAX_INTERVAL_MS = 24 * 3_600_000;
 export const DEFAULT_INTERVAL_MS = 5 * 60_000;
 /** 估算行数超过该值时提示 COUNT(*) 成本，默认间隔放宽。 */
@@ -249,10 +250,12 @@ export function pauseAllOnStartup(tasks: readonly MonitorTask[]): MonitorTask[] 
 }
 
 export function formatInterval(ms: number, zh: boolean): string {
-  const minutes = Math.round(ms / 60_000);
-  if (minutes < 60) return zh ? `${minutes} 分钟` : `${minutes} min`;
-  const hours = Math.round((minutes / 60) * 10) / 10;
-  return zh ? `${hours} 小时` : `${hours} h`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return zh ? `${seconds} 秒` : `${seconds}s`;
+  const round1 = (n: number): number => Math.round(n * 10) / 10;
+  const minutes = seconds / 60;
+  if (minutes < 60) return zh ? `${round1(minutes)} 分钟` : `${round1(minutes)} min`;
+  return zh ? `${round1(minutes / 60)} 小时` : `${round1(minutes / 60)} h`;
 }
 
 /**

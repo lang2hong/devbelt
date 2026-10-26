@@ -94,6 +94,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       emitChanged();
     },
     onRun: () => emitChanged(),
+    onRunStart: () => emitChanged(),
   });
 
   const audit = (action: 'create' | 'remove' | 'pause' | 'resume' | 'autoPause' | 'edit', task: MonitorTask): void => {
@@ -148,6 +149,11 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       ...(task.schema ? { schema: task.schema } : {}),
       status: task.status,
       ...(task.pausedReason ? { pausedReason: task.pausedReason } : {}),
+      createdAt: task.createdAt,
+      ...(scheduler.nextRun(task.id) !== undefined ? { nextRunAt: scheduler.nextRun(task.id)! } : {}),
+      ...(scheduler.isExecuting(task.id) ? { running: true } : {}),
+      ...(task.lastNotifiedAt ? { lastNotifiedAt: task.lastNotifiedAt } : {}),
+      consecutiveFailures: task.consecutiveFailures,
       intervalMs: task.intervalMs,
       condition: task.condition,
       conditionText: describeTaskCondition(task),

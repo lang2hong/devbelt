@@ -630,10 +630,12 @@ export class AiChatView extends BaseWebView {
         const bridge = MonitorBridge.tryGet();
         if (!bridge || typeof msg.proposalId !== 'string') return;
         const minutes = typeof msg.intervalMinutes === 'number' ? msg.intervalMinutes : undefined;
+        const intervalMs = typeof msg.intervalMs === 'number' ? msg.intervalMs : undefined;
         const condition = msg.condition && typeof msg.condition === 'object' ? msg.condition : undefined;
         let result: Awaited<ReturnType<typeof bridge.handlers.confirm>>;
         try {
           result = await bridge.handlers.confirm(msg.proposalId, {
+            ...(intervalMs !== undefined ? { intervalMs } : {}),
             ...(minutes !== undefined ? { intervalMinutes: minutes } : {}),
             ...(condition ? { condition } : {}),
           });
@@ -655,10 +657,12 @@ export class AiChatView extends BaseWebView {
         const bridge = MonitorBridge.tryGet();
         if (!bridge || typeof msg.id !== 'string') return;
         const minutes = typeof msg.intervalMinutes === 'number' ? msg.intervalMinutes : undefined;
+        const intervalMs = typeof msg.intervalMs === 'number' ? msg.intervalMs : undefined;
         const condition = msg.condition && typeof msg.condition === 'object' ? msg.condition : undefined;
         let result: Awaited<ReturnType<typeof bridge.handlers.edit>>;
         try {
           result = await bridge.handlers.edit(msg.id, {
+            ...(intervalMs !== undefined ? { intervalMs } : {}),
             ...(minutes !== undefined ? { intervalMinutes: minutes } : {}),
             ...(condition ? { condition } : {}),
           });

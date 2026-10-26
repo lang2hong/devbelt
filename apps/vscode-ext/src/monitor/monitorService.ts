@@ -53,6 +53,8 @@ export interface ProposalInput {
   table: string;
   label?: string;
   intervalMinutes?: number;
+  /** 卡片 / 编辑表单按毫秒回传（支持秒级与自定义），优先于 intervalMinutes。 */
+  intervalMs?: number;
   condition?: MonitorCondition;
   sql?: string;
   watchColumn?: string;
@@ -104,6 +106,15 @@ function intervalFrom(minutes: unknown): number {
   return clampInterval(Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, n * 60_000)));
 }
 
+/** 毫秒优先级高于分钟（卡片 / 编辑表单按毫秒回传，支持秒级和自定义）。 */
+function intervalMsFrom(ms: unknown, minutes: unknown): number {
+  if (ms !== undefined) {
+    const n = Number(ms);
+    if (Number.isFinite(n) && n > 0) return clampInterval(n);
+  }
+  return intervalFrom(minutes);
+}
+
 export class MonitorService {
   /** 试执行超过这个耗时时在卡片上提示成本，并建议放宽间隔。 */
   static readonly SLOW_TRIAL_MS = 5_000;
@@ -151,7 +162,7 @@ export class MonitorService {
       ...(schema ? { schema } : {}),
       table: input.table,
       ...(input.label ? { label: input.label.slice(0, 80) } : {}),
-      intervalMs: intervalFrom(input.intervalMinutes),
+      intervalMs: intervalMsFrom(input.intervalMs, input.intervalMinutes),
       ...(sanitized.condition ? { condition: sanitized.condition } : {}),
     };
 
@@ -225,7 +236,7 @@ export class MonitorService {
    * 用户在卡片上确认：只接受由本服务生成且仍有效的提案 id；只允许修改间隔与条件。
    * 重新跑一遍 propose 的校验，再取基线并创建任务。
    */
-  async confirm(proposalId: string, overrides: { intervalMinutes?: number; condition?: unknown } = {}): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string; issues: ValidationIssue[] }> {
+  async confirm(proposalId: string, overrides: { intervalMs?: number; intervalMinutes?: number; condition?: unknown } = {}): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string; issues: ValidationIssue[] }> {
     if (!ID_RE.test(proposalId)) return { ok: false, reason: 'unknownProposal', issues: [] };
     const stored = this.getProposal(proposalId);
     if (!stored) return { ok: false, reason: 'unknownProposal', issues: [] };
@@ -241,7 +252,7 @@ export class MonitorService {
       kind: stored.kind,
       table: stored.table,
       ...(stored.label ? { label: stored.label } : {}),
-      intervalMinutes: (overrides.intervalMinutes ?? stored.intervalMs / 60_000),
+      intervalMs: intervalMsFrom(overrides.intervalMs, overrides.intervalMinutes ?? stored.intervalMs / 60_000),
       condition: picked.condition,
       ...(stored.sql ? { sql: stored.sql } : {}),
       ...(stored.watchColumn ? { watchColumn: stored.watchColumn } : {}),
@@ -289,11 +300,13 @@ export class MonitorService {
    * 修改已创建的任务（间隔 / 提醒条件）。只在卡片之外改这两项；SQL 与列不能改。
    * 条件缺省表示未提供（不改），显式传 null 视为非法。
    */
-  async edit(id: string, patch: { intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string }> {
+  async edit(id: string, patch: { intervalMs?: number; intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string }> {
     const task = this.deps.scheduler.get(id);
     if (!task) return { ok: false, reason: 'unknownTask' };
     const next: { intervalMs?: number; condition?: MonitorCondition } = {};
-    if (patch.intervalMinutes !== undefined) next.intervalMs = intervalFrom(patch.intervalMinutes);
+    if (patch.intervalMs !== undefined || patch.intervalMinutes !== undefined) {
+      next.intervalMs = intervalMsFrom(patch.intervalMs, patch.intervalMinutes);
+    }
     if (patch.condition !== undefined) {
       const sanitized = sanitizeCondition(patch.condition, task.kind);
       if (!sanitized.ok) return { ok: false, reason: 'conditionInvalid' };

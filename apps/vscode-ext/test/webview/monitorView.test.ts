@@ -8,7 +8,7 @@ const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
 
 function detail(over: Partial<MonitorDetail['task']>, points: MonitorDetail['points']): MonitorDetail {
   return {
-    task: { id: 'm1', kind: 'rowCount', label: 't', connName: 'c', table: 't', status: 'running', intervalMs: 60_000, conditionText: '', ...over },
+    task: { id: 'm1', kind: 'rowCount', label: 't', connName: 'c', table: 't', status: 'running', intervalMs: 60_000, conditionText: '', createdAt: 0, consecutiveFailures: 0, ...over },
     points,
   };
 }
@@ -76,6 +76,27 @@ describe('monitor UI contracts', () => {
     expect(panel).toContain("watch(() => props.focusId, (id) => { if (id) open(id); }, { immediate: true })");
     // 定时 / 立即检查后（lastRunAt 变化）刷新详情
     expect(panel).toMatch(/watch\(\s*\(\) => props\.tasks\.find\(\(task\) => task\.id === selectedId\.value\)\?\.lastRunAt/);
+  });
+
+  it('lists tasks newest first and shows the checking state', () => {
+    expect(panel).toContain('const sortedTasks = computed(() => [...props.tasks].sort((a, b) => b.createdAt - a.createdAt))');
+    expect(panel).toContain('v-for="task in sortedTasks"');
+    expect(panel).toContain("t('monitor.ui.checking')");
+    expect(panel).toContain("nextRunAt");
+  });
+
+  it('labels new-row conditions with their own wording and resets the value', () => {
+    const editor = read('../../webview/src/components/ai/MonitorConditionEditor.vue');
+    expect(editor).toContain("`monitor.cond.newRows.${type}`");
+    expect(editor).toContain("const fallback = next === 'changePercent' ? 10 : 1;");
+  });
+
+  it('offers seconds and custom intervals', () => {
+    const picker = read('../../webview/src/components/ai/MonitorIntervalPicker.vue');
+    expect(picker).toContain("unit: 's'");
+    expect(picker).toContain('presets');
+    expect(panel).toContain('<MonitorIntervalPicker');
+    expect(card).toContain('<MonitorIntervalPicker');
   });
 
   it('keeps SQL collapsed, removes discarded cards and collapses created ones', () => {

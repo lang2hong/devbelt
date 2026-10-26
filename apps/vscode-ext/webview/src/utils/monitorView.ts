@@ -26,9 +26,6 @@ export interface HistoryTable {
   rows: Array<{ time: string; cells: Record<string, string>; duration: string; error?: string }>;
 }
 
-/** 间隔候选（分钟），卡片与「后台任务」编辑共用。 */
-export const INTERVAL_CHOICES = [1, 5, 15, 30, 60, 360, 1440];
-
 /** 卡片 / 编辑表单回传的条件；`type` 为空表示还没选。 */
 export interface ConditionInput {
   type: string;

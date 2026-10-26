@@ -2,7 +2,8 @@
 import { computed, ref } from 'vue';
 import { useI18n } from '../../composables/useI18n';
 import MonitorConditionEditor from './MonitorConditionEditor.vue';
-import { INTERVAL_CHOICES, isConditionComplete, type ConditionInput } from '../../utils/monitorView';
+import MonitorIntervalPicker from './MonitorIntervalPicker.vue';
+import { isConditionComplete, type ConditionInput } from '../../utils/monitorView';
 import type { MonitorProposalView } from '../../../../src/monitor/monitorBridge';
 
 /**
@@ -18,13 +19,13 @@ export interface ProposalState {
 
 const props = defineProps<{ state: ProposalState }>();
 const emit = defineEmits<{
-  confirm: [proposalId: string, intervalMinutes: number, condition: ConditionInput];
+  confirm: [proposalId: string, intervalMs: number, condition: ConditionInput];
   discard: [proposalId: string];
   openTasks: [];
 }>();
 const { t } = useI18n();
 
-const interval = ref(props.state.proposal.intervalMinutes);
+const interval = ref(props.state.proposal.intervalMinutes * 60_000);
 // AI 给的条件只是建议：未点「采用」前不生效，创建按钮保持禁用。
 const condition = ref<ConditionInput | undefined>(undefined);
 const ready = computed(() => isConditionComplete(condition.value));
@@ -37,16 +38,11 @@ function adoptSuggestion(): void {
   if (s) condition.value = { ...s };
 }
 const p = computed(() => props.state.proposal);
-const intervalOptions = computed(() => [...new Set([...INTERVAL_CHOICES, p.value.intervalMinutes])].sort((a, b) => a - b));
 const busy = computed(() => props.state.status === 'creating');
 const target = computed(() => {
   const scope = [p.value.database, p.value.schema].filter(Boolean).join('.');
   return `${p.value.connName} / ${scope ? `${scope}.` : ''}${p.value.table}`;
 });
-
-function intervalLabel(minutes: number): string {
-  return minutes < 60 ? t('monitor.ui.minutes', { n: minutes }) : t('monitor.ui.hours', { n: Math.round((minutes / 60) * 10) / 10 });
-}
 
 function formatValue(value: number | null): string {
   return value === null ? 'NULL' : value.toLocaleString();
@@ -114,12 +110,10 @@ function formatValue(value: number | null): string {
     <p v-if="props.state.status === 'failed'" class="mp-error" role="alert">{{ props.state.error }}</p>
 
     <footer class="mp-actions">
-      <label class="mp-interval">
+      <span class="mp-interval">
         <span>{{ t('monitor.ui.interval') }}</span>
-        <select v-model.number="interval" :disabled="busy">
-          <option v-for="m in intervalOptions" :key="m" :value="m">{{ intervalLabel(m) }}</option>
-        </select>
-      </label>
+        <MonitorIntervalPicker v-model="interval" :disabled="busy" compact />
+      </span>
       <span class="mp-spacer"></span>
       <button class="ai-btn" :disabled="busy" @click="emit('discard', p.id)">{{ t('monitor.proposal.discard') }}</button>
       <button
@@ -205,14 +199,7 @@ function formatValue(value: number | null): string {
 
 .mp-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 2px; }
 .mp-spacer { flex: 1; }
-.mp-interval { display: inline-flex; align-items: center; gap: 6px; color: var(--vscode-descriptionForeground); }
-.mp-interval select {
-  background: var(--vscode-dropdown-background);
-  color: var(--vscode-dropdown-foreground);
-  border: 1px solid var(--vscode-dropdown-border, transparent);
-  border-radius: 3px;
-  padding: 2px 6px;
-}
+.mp-interval { display: inline-flex; align-items: center; gap: 6px; color: var(--vscode-descriptionForeground); flex-wrap: wrap; }
 
 .mp-done {
   flex-direction: row;

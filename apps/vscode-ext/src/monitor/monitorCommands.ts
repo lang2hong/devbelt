@@ -11,6 +11,8 @@ import {
   estimatedRowsFromDescription,
   LARGE_TABLE_ROWS,
   type CreateRejectReason,
+  MIN_INTERVAL_MS,
+  MAX_INTERVAL_MS,
   type MonitorCondition,
   type MonitorTask,
 } from './monitorTypes';
@@ -38,6 +40,7 @@ export interface MonitorCommandDeps {
 }
 
 const INTERVAL_CHOICES_MIN = [1, 5, 15, 30, 60, 360, 1440];
+const CUSTOM_INTERVAL = -1;
 
 function rejectMessage(reason: CreateRejectReason): string {
   return l10n(`monitor.reject.${reason}`);
@@ -84,13 +87,15 @@ export async function createRowCountMonitor(deps: MonitorCommandDeps, node: Moni
   const estimated = estimatedRowsFromDescription(node.description);
   const large = estimated !== undefined && estimated > LARGE_TABLE_ROWS;
   const defaultMs = defaultIntervalFor(estimated);
-  const intervalItems = INTERVAL_CHOICES_MIN.map((minutes) => ({
+  type IntervalItem = vscode.QuickPickItem & { ms: number };
+  const intervalItems: IntervalItem[] = INTERVAL_CHOICES_MIN.map((minutes) => ({
     label: describeInterval(minutes * 60_000),
     ms: minutes * 60_000,
     ...(minutes * 60_000 === defaultMs ? { description: l10n('monitor.pick.recommended') } : {}),
   }));
+  intervalItems.push({ label: l10n('monitor.pick.custom'), ms: CUSTOM_INTERVAL });
   intervalItems.sort((a, b) => (a.ms === defaultMs ? -1 : b.ms === defaultMs ? 1 : 0));
-  const interval = await vscode.window.showQuickPick(intervalItems, {
+  const interval = await vscode.window.showQuickPick<IntervalItem>(intervalItems, {
     title: l10n('monitor.pick.intervalTitle', { table }),
     placeHolder: large
       ? l10n('monitor.pick.largeTable', { rows: Math.round(estimated!).toLocaleString() })
@@ -98,6 +103,8 @@ export async function createRowCountMonitor(deps: MonitorCommandDeps, node: Moni
     ignoreFocusOut: true,
   });
   if (!interval) return;
+  const intervalMs = interval.ms === CUSTOM_INTERVAL ? await pickCustomInterval() : interval.ms;
+  if (intervalMs === undefined) return;
 
   const condition = await pickCondition(table);
   if (!condition) return;
@@ -109,7 +116,7 @@ export async function createRowCountMonitor(deps: MonitorCommandDeps, node: Moni
     ...(node.database ? { database: node.database } : {}),
     ...(node.schema ? { schema: node.schema } : {}),
     table,
-    intervalMs: interval.ms,
+    intervalMs,
     condition,
     status: 'running',
     createdAt: Date.now(),
@@ -132,6 +139,24 @@ export async function createRowCountMonitor(deps: MonitorCommandDeps, node: Moni
     ? await vscode.window.showWarningMessage(message, open)
     : await vscode.window.showInformationMessage(message, open);
   if (picked === open) await vscode.commands.executeCommand('devbelt.monitor.tasks');
+}
+
+/** 自定义间隔：按秒输入，夹到 [MIN_INTERVAL_MS, MAX_INTERVAL_MS]。 */
+async function pickCustomInterval(): Promise<number | undefined> {
+  const min = Math.round(MIN_INTERVAL_MS / 1000);
+  const max = Math.round(MAX_INTERVAL_MS / 1000);
+  const raw = await vscode.window.showInputBox({
+    title: l10n('monitor.pick.custom'),
+    prompt: l10n('monitor.pick.customPrompt', { min, max }),
+    value: '30',
+    ignoreFocusOut: true,
+    validateInput: (v) => {
+      const n = Number(v);
+      return Number.isInteger(n) && n >= min && n <= max ? undefined : l10n('monitor.pick.customInvalid', { min, max });
+    },
+  });
+  if (raw === undefined) return undefined;
+  return Number(raw) * 1000;
 }
 
 async function pickCondition(table: string): Promise<MonitorCondition | undefined> {

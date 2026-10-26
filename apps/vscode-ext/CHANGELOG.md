@@ -16,7 +16,8 @@ All notable changes to DevBelt DB Client are documented in this file.
   - **New rows**: watches an existing integer or date/time column for rows added since the last check; rows sharing the same value are de-duplicated by primary key.
   - In Agent mode the assistant can only **propose** a metric or new-rows task with `propose_monitor`; a card shows the SQL / column, current values and warnings, and nothing is created until you click *Create and start*. The proposal is validated again on confirmation. Right-click → *Set Up Monitoring with AI…* opens the chat with Agent on.
   - **The alert condition is yours to decide**: the condition the assistant suggests is shown as a suggestion, and creating stays disabled until you adopt it or pick your own type and value. The assistant is told not to invent a threshold when you did not ask for one, and a suggested condition never takes effect on its own.
-  - **Background Tasks** (More menu in AI Chat, status bar, or command): list, line or bar chart, check history, latest new rows, pause / resume / check now / remove, **edit the interval and alert condition**, and *Ask AI to explain*, which sends only the numeric history unless you tick *include the latest new rows* (sensitive columns redacted).
+  - **Background Tasks** (More menu in AI Chat, status bar, or command), newest first: list, line or bar chart, check history, latest new rows, next check time and failure count, pause / resume / check now / remove, **edit the interval and alert condition**, and *Ask AI to explain*, which sends only the numeric history unless you tick *include the latest new rows* (sensitive columns redacted).
+  - Intervals: 1 minute to 24 hours in the picker, plus custom values from 10 seconds (10 s is the floor, to protect the database); the interval can be changed later without recreating the task.
   - Safety: checks run on an isolated session made read-only at the database level, with a 30 s timeout, no query history and one check at a time per connection + database + schema; production connections are refused unless `devbelt.ai.monitor.allowProduction` is on; at most 5 tasks per connection and 20 in total; tasks are paused every time VS Code starts, after three failures in a row, or when their connection is removed or changed; only one VS Code window runs and edits them (other windows are view-only; when that window closes, another takes over with the tasks paused). Task definitions and up to 500 history points per task stay under the extension's global storage, including the cursor value and up to 1000 primary-key values of rows already seen for new-rows tasks; new-row contents are kept in memory only.
 - Settings: `devbelt.ai.monitor.enabled`, `allowProduction`, `queryTimeoutSeconds`, `notifyCooldownMinutes`, `maxTasks`.
 
@@ -39,7 +40,8 @@ All notable changes to DevBelt DB Client are documented in this file.
   - **新增行**：基于表里已有的整数或时间列，检查上次之后新增的行；游标值相同的行按主键去重。
   - Agent 模式下，助手只能用 `propose_monitor` **提出**指标或新增行任务；对话里显示提案卡片（SQL / 列、当前值、提示），你点「创建并开始」才会创建，确认时会再校验一次。表右键 →「让 AI 帮我设置监控…」会打开对话并开启 Agent。
   - **提醒条件由你决定**：助手给出的条件只作为建议显示，必须你点「采用」或自己选类型和数值，创建按钮才可用。助手被告知你没说阈值时不要自己编，建议的条件也不会自动生效。
-  - **后台任务**（AI Chat「⋯」菜单、状态栏或命令）：任务列表、折线图或柱状图、检查记录、最近新增的行，暂停 / 继续 / 立即检查 / 删除、**修改间隔和提醒条件**，以及「让 AI 解读」——默认只发送数值历史，勾选「附带最近的新增行」才会发送行内容（敏感列遮蔽）。
+  - **后台任务**（AI Chat「⋯」菜单、状态栏或命令），按创建时间倒序：任务列表、折线图或柱状图、检查记录、最近新增的行、下次检查时间与连续失败次数，暂停 / 继续 / 立即检查 / 删除、**修改间隔和提醒条件**，以及「让 AI 解读」——默认只发送数值历史，勾选「附带最近的新增行」才会发送行内容（敏感列遮蔽）。
+  - 间隔：预设 1 分钟到 24 小时，也可以自定义，最短 10 秒（保护数据库）；创建后还能直接改间隔，不用重建任务。
   - 安全：在独立会话上执行并在数据库层设为只读；单次超时 30 秒，不写查询历史，同一「连接 + 库 + schema」一次只跑一个检查；生产连接默认拒绝，需开启 `devbelt.ai.monitor.allowProduction`；每个连接最多 5 个、总共最多 20 个任务；每次启动 VS Code、连续失败 3 次、连接被删除或修改时任务自动暂停；只有一个 VS Code 窗口执行和修改任务（其他窗口只能查看；该窗口关闭后由其他窗口接手，任务先暂停）。任务定义和每个任务最多 500 个历史点保存在扩展的全局存储里，新增行任务还会保存游标值和最多 1000 个已见行的主键值；新增行内容只保存在内存中。
 - 设置：`devbelt.ai.monitor.enabled`、`allowProduction`、`queryTimeoutSeconds`、`notifyCooldownMinutes`、`maxTasks`。
 

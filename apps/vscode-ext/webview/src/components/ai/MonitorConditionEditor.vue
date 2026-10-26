@@ -16,6 +16,10 @@ const emit = defineEmits<{ 'update:modelValue': [value: ConditionInput | undefin
 const { t } = useI18n();
 
 const types = computed(() => conditionTypes(props.kind));
+/** 新增行任务的条件语义是「本次新增」，不能复用增减类的措辞。 */
+function labelKey(type: string): string {
+  return props.kind === 'newRows' ? `monitor.cond.newRows.${type}` : `monitor.cond.${type}`;
+}
 const type = computed(() => props.modelValue?.type ?? '');
 const needsValue = computed(() => conditionNeedsValue(type.value));
 const percent = computed(() => type.value === 'changePercent');
@@ -24,8 +28,9 @@ function onType(event: Event): void {
   const next = (event.target as HTMLSelectElement).value;
   if (!next) { emit('update:modelValue', undefined); return; }
   if (next === 'anyChange') { emit('update:modelValue', { type: next }); return; }
-  const fallback = percent.value ? 10 : 1;
-  emit('update:modelValue', { type: next, value: props.modelValue?.value ?? fallback });
+  // 换类型就换回该类型的默认值：避免把「变化 ≥ 10%」的 10 带到「高于 10」上。
+  const fallback = next === 'changePercent' ? 10 : 1;
+  emit('update:modelValue', { type: next, value: fallback });
 }
 
 function onValue(event: Event): void {
@@ -39,7 +44,7 @@ function onValue(event: Event): void {
   <span class="mce">
     <select class="mce-type" :value="type" :disabled="props.disabled" @change="onType">
       <option value="">{{ t('monitor.cond.pick') }}</option>
-      <option v-for="option in types" :key="option" :value="option">{{ t(`monitor.cond.${option}`) }}</option>
+      <option v-for="option in types" :key="option" :value="option">{{ t(labelKey(option)) }}</option>
     </select>
     <template v-if="needsValue">
       <input
