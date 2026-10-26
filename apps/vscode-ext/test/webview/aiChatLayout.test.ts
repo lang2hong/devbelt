@@ -41,6 +41,13 @@ describe('输入法组合时不误发送', () => {
   });
 });
 
+describe('Agent 降级提示', () => {
+  it('带上被拒绝的原因，而不是一句话断定为模型不支持', () => {
+    expect(view).toContain("t('wv.ai.agent.degradedReason', { reason: msg.agentDegradedReason })");
+    expect(view).toContain("t('wv.ai.agent.degraded')");
+  });
+});
+
 describe('AI Chat 顶栏', () => {
   it('只有一行常规内容，不再显示 tokens / 表数摘要和额度进度条', () => {
     const tpl = template(bar);

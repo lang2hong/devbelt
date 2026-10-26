@@ -1672,6 +1672,7 @@ export const en: MessageCatalog = {
   'wv.ai.agent.stop.max_tool_calls': 'Tool-call limit reached; task stopped.',
   'wv.ai.agent.stop.timeout': 'Time limit reached; task stopped.',
   'wv.ai.agent.degraded': 'This model does not support tool calling; fell back to plain chat.',
+  'wv.ai.agent.degradedReason': 'The model rejected the tool definitions; fell back to plain chat ({reason}).',
   'wv.ai.jumpBottom': 'Jump to latest',
   'wv.ai.suggest.explain': 'Explain the current SQL',
   'wv.ai.suggest.optimize': 'Optimize a slow query',

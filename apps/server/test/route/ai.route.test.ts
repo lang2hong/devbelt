@@ -31,6 +31,8 @@ interface BuildOptions {
   configured?: boolean;
   limit?: number;
   rateLimitPerMinute?: number;
+  /** 收集 warn 日志（pino JSON 行），用于断言校验失败被记录。 */
+  logs?: string[];
 }
 
 function sseBody(events: string[]): string {
@@ -45,7 +47,9 @@ async function buildApp(opts: BuildOptions): Promise<{
   topupRepo: MemoryAiTopupRepo;
   settleReservedCleared: () => boolean;
 }> {
-  const app = Fastify({ logger: false });
+  const app = Fastify(opts.logs
+    ? { logger: { level: 'warn', stream: { write: (line: string) => { opts.logs!.push(line); } } } }
+    : { logger: false });
   registerErrorHandler(app);
   await app.register(requestId);
 
@@ -179,8 +183,9 @@ describe('POST /api/ai/chat（认证 / 配额 / 限流 / 配置）', () => {
     await app.close();
   });
 
-  it('请求体非法 → 400 VALIDATION_FAILED', async () => {
-    const { app, token } = await buildApp({ fetchImpl: (async () => new Response('')) as typeof fetch });
+  it('请求体非法 → 400 VALIDATION_FAILED，并记一条 warn（只有字段原因，没有内容）', async () => {
+    const logs: string[] = [];
+    const { app, token } = await buildApp({ fetchImpl: (async () => new Response('')) as typeof fetch, logs });
     const res = await app.inject({
       method: 'POST',
       url: '/api/ai/chat',
@@ -188,6 +193,8 @@ describe('POST /api/ai/chat（认证 / 配额 / 限流 / 配置）', () => {
       payload: { messages: [] },
     });
     expect(res.statusCode).toBe(400);
+    const rejected = logs.map((line) => JSON.parse(line) as Record<string, unknown>).find((entry) => entry.msg === 'ai chat request rejected');
+    expect(rejected).toMatchObject({ code: 'VALIDATION_FAILED', reason: expect.stringContaining('messages') });
     await app.close();
   });
 });

@@ -147,6 +147,23 @@ describe('AgentRunner', () => {
     expect(requests[1]!.tools).toBeUndefined();
   });
 
+  it('does not degrade on a 400 that is not about tools', async () => {
+    const err = Object.assign(new Error('AI request failed (HTTP 400): {"code":"VALIDATION_FAILED","message":"messages total length exceeds 120000 characters"}'), { status: 400 });
+    const { r, requests } = runner([err]);
+    const result = await r.run([{ role: 'user', content: 'go' }]);
+    expect(result.degraded).toBeUndefined();
+    expect(result.stopReason).toBe('model_error');
+    expect(result.error).toContain('messages total length exceeds');
+    expect(requests).toHaveLength(1); // 没有无工具重试
+  });
+
+  it('records why the tool definitions were rejected', async () => {
+    const err = Object.assign(new Error('AI request failed (HTTP 400): tools[0].function.name is invalid'), { status: 400 });
+    const { r } = runner([err, { text: 'plain' }]);
+    const result = await r.run([{ role: 'user', content: 'go' }]);
+    expect(result).toMatchObject({ degraded: true, degradedReason: expect.stringContaining('tools[0]') });
+  });
+
   it('surfaces a model error without retrying unrelated failures', async () => {
     const { r, requests } = runner([new Error('boom')]);
     const result = await r.run([{ role: 'user', content: 'go' }]);

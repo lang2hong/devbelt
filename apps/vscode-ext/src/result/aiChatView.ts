@@ -934,6 +934,7 @@ export class AiChatView extends BaseWebView {
         ...(assistant ? { content: assistant } : {}),
         agentStopReason: result.stopReason,
         ...(result.degraded ? { agentDegraded: true } : {}),
+        ...(result.degradedReason ? { agentDegradedReason: result.degradedReason } : {}),
         ...(result.error ? { error: { code: 'AI_AGENT_ERROR', message: result.error } } : {}),
       } as never);
     } catch (err) {

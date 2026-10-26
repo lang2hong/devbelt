@@ -94,6 +94,8 @@ export interface AiFinishDown {
   /** Agent 模式：停止原因与降级提示（普通聊天不填）。 */
   agentStopReason?: string;
   agentDegraded?: boolean;
+  /** 降级时被模型 / 服务端拒绝工具定义的原因（用于提示）。 */
+  agentDegradedReason?: string;
   error?: { code: string; message: string };
   /**
    * 权威最终正文（P9 保留字补引）：host 收流后对 ```sql 块做过本地修正的版本。

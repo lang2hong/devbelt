@@ -53,6 +53,12 @@ export async function aiChatRoutes(app: FastifyInstance, opts: AiChatRouteOption
               });
               return null;
             }
+            // 校验失败只记 code 与原因（字段名，不含消息内容），便于排查 400。
+            const code = (e as { code?: unknown } | null)?.code;
+            if (code === 'VALIDATION_FAILED') {
+              const reason = e instanceof Error ? e.message.slice(0, 200) : '';
+              req.log.warn({ code, reason }, 'ai chat request rejected');
+            }
             if (e instanceof AiQuotaExceededError) {
               reply.code(409).send({
                 message: e.message,

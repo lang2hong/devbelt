@@ -1650,6 +1650,7 @@ export const zh: MessageCatalog = {
   'wv.ai.agent.stop.max_tool_calls': '已到工具调用上限，任务停止。',
   'wv.ai.agent.stop.timeout': '已到时间上限，任务停止。',
   'wv.ai.agent.degraded': '当前模型不支持工具调用，已退回普通问答。',
+  'wv.ai.agent.degradedReason': '模型拒绝了工具定义，已退回普通问答（{reason}）。',
   'wv.ai.jumpBottom': '回到底部',
   'wv.ai.suggest.explain': '解释当前 SQL',
   'wv.ai.suggest.optimize': '优化慢查询',

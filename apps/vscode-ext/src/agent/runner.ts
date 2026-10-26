@@ -47,6 +47,8 @@ export interface AgentRunResult {
   stopReason: AgentStopReason;
   /** Set when the provider rejected tools and the turn was retried without them. */
   degraded?: boolean;
+  /** 降级时上游 / 服务端给出的原始错误（已截断），用于界面提示。 */
+  degradedReason?: string;
   error?: string;
 }
 
@@ -96,11 +98,11 @@ export class AgentRunner {
       try {
         response = await this.streamTurn(transcript);
       } catch (err) {
-        // First request rejected with 400 (tools unsupported): retry once without tools.
+        // 明确是「工具定义被拒绝」时才降级重试；其他 400 原样报错（不再吞掉真实原因）。
         if (step === 0 && content === '' && isToolUnsupported(err)) {
           try {
             const plain = await this.streamTurn(transcript, false);
-            return { content: plain.text, steps, stopReason: 'completed', degraded: true };
+            return { content: plain.text, steps, stopReason: 'completed', degraded: true, degradedReason: truncate(messageOf(err), 200) };
           } catch (retryErr) {
             return { content, steps, stopReason: 'model_error', error: messageOf(retryErr) };
           }
@@ -199,11 +201,21 @@ export class AgentRunner {
   }
 }
 
+/**
+ * 是否「工具定义本身被拒绝」。只有错误内容明确提到 tools / tool_choice / function
+ * 才算：服务端 400 还可能是上下文超长、字段格式等，那些必须原样报错，
+ * 否则会被误标成「模型不支持工具调用」。
+ */
 function isToolUnsupported(err: unknown): boolean {
   const e = err as { status?: number; code?: string; message?: string } | null;
   if (!e) return false;
-  if (e.status === 400) return true;
-  return e.code === 'AI_NETWORK_ERROR' && typeof e.message === 'string' && /tool|function/i.test(e.message);
+  const message = typeof e.message === 'string' ? e.message : '';
+  if (!/\btools?\b|tool_choice|\btool_calls?\b|function_call/i.test(message)) return false;
+  return e.status === 400 || e.code === 'AI_NETWORK_ERROR';
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 function messageOf(err: unknown): string {

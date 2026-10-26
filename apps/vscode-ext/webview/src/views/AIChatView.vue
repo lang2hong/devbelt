@@ -318,7 +318,11 @@ onMounted(() => {
         const reasoning = streaming.value?.reasoning ?? '';
         const usage = msg.usage && typeof msg.usage === 'object' ? msg.usage as AiMessageUsage : undefined;
         streaming.value = null;
-        if (msg.agentDegraded) agentNotice.value = t('wv.ai.agent.degraded');
+        if (msg.agentDegraded) {
+          agentNotice.value = typeof msg.agentDegradedReason === 'string' && msg.agentDegradedReason
+            ? t('wv.ai.agent.degradedReason', { reason: msg.agentDegradedReason })
+            : t('wv.ai.agent.degraded');
+        }
         else if (msg.agentStopReason === 'max_steps') agentNotice.value = t('wv.ai.agent.stop.max_steps');
         else if (msg.agentStopReason === 'max_tool_calls') agentNotice.value = t('wv.ai.agent.stop.max_tool_calls');
         else if (msg.agentStopReason === 'timeout') agentNotice.value = t('wv.ai.agent.stop.timeout');
