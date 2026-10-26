@@ -37,7 +37,8 @@ export function describeCondition(condition: MonitorCondition, kind: MonitorTask
 }
 
 /** 任务的提醒说明：指标任务前缀绑定列名。 */
-export function describeTaskCondition(task: Pick<MonitorTask, 'kind' | 'condition' | 'watchColumn'>): string {
+export function describeTaskCondition(task: Pick<MonitorTask, 'kind' | 'watchColumn'> & { condition?: MonitorCondition }): string {
+  if (!task.condition) return '';
   const text = describeCondition(task.condition, task.kind);
   return task.kind === 'metric' && task.watchColumn ? `${task.watchColumn}: ${text}` : text;
 }

@@ -72,6 +72,41 @@ describe.skipIf(!enabled)('real model propose_monitor', () => {
     }
   }, 90_000);
 
+  it('leaves the alert condition to the user when only the metric is given', async () => {
+    const calls = await callsFor([
+      { role: 'system', content: 'You are a database assistant. Use tools. Reply in Chinese.' },
+      { role: 'user', content: '监控 lc_data_event 每分钟的上传量。' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'd1', type: 'function', function: { name: 'describe_table', arguments: '{"table":"lc_data_event"}' } }] },
+      { role: 'tool', toolCallId: 'd1', content: JSON.stringify({ name: 'lc_data_event', columns: [
+        { name: 'id', type: 'bigint', primaryKey: true }, { name: 'received_time', type: 'bigint', comment: '接收时间（毫秒）' },
+        { name: 'kind', type: 'varchar(32)' }], indexes: [{ name: 'PRIMARY', columns: ['id'] }] }) },
+    ]);
+    const proposals = calls.filter((c) => c.name === 'propose_monitor').map((c) => JSON.parse(c.args || '{}') as Record<string, unknown>);
+    // 用户没说什么时候提醒。模型可以给建议，但卡片上必须由用户点「采用」后才生效，
+    // 所以这里只检查建议本身是形如「低于/高于 N」的阈值，而不是自动生效。
+    for (const a of proposals) {
+      if (a.conditionType === undefined) continue;
+      expect(['anyChange', 'below', 'above'], JSON.stringify(a)).toContain(a.conditionType);
+      if (a.conditionType !== 'anyChange') expect(Number.isFinite(Number(a.conditionValue)), JSON.stringify(a)).toBe(true);
+    }
+  }, 90_000);
+
+  it('maps an explicit threshold to the matching condition', async () => {
+    const calls = await callsFor([
+      { role: 'system', content: 'You are a database assistant. Use tools. Reply in Chinese.' },
+      { role: 'user', content: '监控 lc_batch，如果每 10 分钟新增的行数少于 50 就提醒我。' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'd1', type: 'function', function: { name: 'describe_table', arguments: '{"table":"lc_batch"}' } }] },
+      { role: 'tool', toolCallId: 'd1', content: JSON.stringify({ name: 'lc_batch', columns: [
+        { name: 'id', type: 'bigint', primaryKey: true }, { name: 'received_time', type: 'bigint' }], indexes: [{ name: 'PRIMARY', columns: ['id'] }] }) },
+    ]);
+    const propose = calls.find((c) => c.name === 'propose_monitor');
+    expect(propose, JSON.stringify(calls)).toBeTruthy();
+    const args = JSON.parse(propose!.args || '{}') as Record<string, unknown>;
+    expect(args.conditionType).toBe('below');
+    expect(Number(args.conditionValue)).toBe(50);
+    expect(Number(args.intervalMinutes)).toBe(10);
+  }, 90_000);
+
   it('does not invent a cursor column when the table has none', async () => {
     const calls = await callsFor([
       { role: 'system', content: 'You are a database assistant. Use tools. Reply in Chinese.' },

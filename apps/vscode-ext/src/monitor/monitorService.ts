@@ -32,7 +32,8 @@ export interface MonitorProposal {
   table: string;
   label?: string;
   intervalMs: number;
-  condition: MonitorCondition;
+  /** 用户 / 模型给出的提醒条件；缺省表示还没定，由用户在卡片上选择。 */
+  condition?: MonitorCondition;
   /** A2 */
   sql?: string;
   columns?: string[];
@@ -60,7 +61,7 @@ export interface ProposalInput {
 
 export type ProposalResult =
   | { ok: true; proposal: MonitorProposal }
-  | { ok: false; reason: CreateRejectReason | 'validation' | 'disabled' | 'unsupportedKind' | 'otherWindow'; issues: ValidationIssue[]; detail?: string };
+  | { ok: false; reason: CreateRejectReason | 'validation' | 'disabled' | 'unsupportedKind' | 'otherWindow' | 'conditionMissing' | 'conditionInvalid'; issues: ValidationIssue[]; detail?: string };
 
 export interface MonitorServiceDeps {
   scheduler: MonitorScheduler;
@@ -72,7 +73,7 @@ export interface MonitorServiceDeps {
   enabled(): boolean;
   /** 读列 / 索引元数据（B 校验）；走独立只读会话，不调用模型。 */
   describe(conn: SavedConnection, database: string | undefined, schema: string | undefined, table: string): Promise<{ columns: ColumnMeta[]; indexes: IndexMeta[] }>;
-  audit(action: 'create' | 'remove' | 'pause' | 'resume', task: MonitorTask): void;
+  audit(action: 'create' | 'remove' | 'pause' | 'resume' | 'edit', task: MonitorTask): void;
   /** 本窗口是否拥有任务（持锁）；缺省视为拥有。非拥有者不试执行、不创建。 */
   isOwner?(): boolean;
 }
@@ -80,18 +81,21 @@ export interface MonitorServiceDeps {
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const VALID_CONDITIONS = new Set(['anyChange', 'increaseBy', 'decreaseBy', 'changePercent', 'above', 'below']);
 
-/** 模型给的条件做白名单 + 数值检查；非法时回退默认（新增行：≥1；其他：任意变化）。 */
-export function sanitizeCondition(raw: unknown, kind: MonitorKind): MonitorCondition {
-  const fallback: MonitorCondition = kind === 'newRows' ? { type: 'increaseBy', value: 1 } : { type: 'anyChange' };
-  if (!raw || typeof raw !== 'object') return fallback;
+/**
+ * 条件白名单 + 数值检查。缺省表示「用户还没定」——不猜默认值，交给卡片上的选择；
+ * 非法则返回 `ok: false` 让调用方明确拒绝（模型据此重新提问，不再静默换成别的条件）。
+ */
+export function sanitizeCondition(raw: unknown, kind: MonitorKind): { ok: true; condition?: MonitorCondition } | { ok: false } {
+  if (raw === undefined || raw === null) return { ok: true };
+  if (typeof raw !== 'object') return { ok: false };
   const c = raw as { type?: unknown; value?: unknown };
-  if (typeof c.type !== 'string' || !VALID_CONDITIONS.has(c.type)) return fallback;
-  if (c.type === 'anyChange') return { type: 'anyChange' };
+  if (typeof c.type !== 'string' || !VALID_CONDITIONS.has(c.type)) return { ok: false };
+  if (c.type === 'anyChange') return { ok: true, condition: { type: 'anyChange' } };
   const value = Number(c.value);
-  if (!Number.isFinite(value)) return fallback;
-  if (kind === 'newRows' && c.type !== 'increaseBy' && c.type !== 'above') return fallback;
-  if ((c.type === 'increaseBy' || c.type === 'decreaseBy' || c.type === 'changePercent') && value <= 0) return fallback;
-  return { type: c.type, value } as MonitorCondition;
+  if (!Number.isFinite(value)) return { ok: false };
+  if (kind === 'newRows' && c.type !== 'increaseBy' && c.type !== 'above' && c.type !== 'anyChange') return { ok: false };
+  if ((c.type === 'increaseBy' || c.type === 'decreaseBy' || c.type === 'changePercent') && value <= 0) return { ok: false };
+  return { ok: true, condition: { type: c.type, value } as MonitorCondition };
 }
 
 function intervalFrom(minutes: unknown): number {
@@ -136,6 +140,8 @@ export class MonitorService {
     );
     if (reject) return { ok: false, reason: reject, issues: [] };
 
+    const sanitized = sanitizeCondition(input.condition, input.kind);
+    if (!sanitized.ok) return { ok: false, reason: 'conditionInvalid', issues: [] };
     const base = {
       id: `p${Date.now().toString(36)}${randomBytes(4).toString('hex')}`,
       kind: input.kind,
@@ -146,7 +152,7 @@ export class MonitorService {
       table: input.table,
       ...(input.label ? { label: input.label.slice(0, 80) } : {}),
       intervalMs: intervalFrom(input.intervalMinutes),
-      condition: sanitizeCondition(input.condition, input.kind),
+      ...(sanitized.condition ? { condition: sanitized.condition } : {}),
     };
 
     if (input.kind === 'metric') {
@@ -219,10 +225,16 @@ export class MonitorService {
    * 用户在卡片上确认：只接受由本服务生成且仍有效的提案 id；只允许修改间隔与条件。
    * 重新跑一遍 propose 的校验，再取基线并创建任务。
    */
-  async confirm(proposalId: string, overrides: { intervalMinutes?: number; condition?: MonitorCondition } = {}): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string; issues: ValidationIssue[] }> {
+  async confirm(proposalId: string, overrides: { intervalMinutes?: number; condition?: unknown } = {}): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string; issues: ValidationIssue[] }> {
     if (!ID_RE.test(proposalId)) return { ok: false, reason: 'unknownProposal', issues: [] };
     const stored = this.getProposal(proposalId);
     if (!stored) return { ok: false, reason: 'unknownProposal', issues: [] };
+    // 卡片上选的条件优先（用户的最终决定）；没有就要求先选，不替用户猜。
+    const picked = overrides.condition !== undefined
+      ? sanitizeCondition(overrides.condition, stored.kind)
+      : { ok: true as const, condition: stored.condition };
+    if (!picked.ok) return { ok: false, reason: 'conditionInvalid', issues: [] };
+    if (!picked.condition) return { ok: false, reason: 'conditionMissing', issues: [] };
     const conn = this.deps.getConnection(stored.connId);
     if (!conn) return { ok: false, reason: 'connectionMissing', issues: [] };
     const again = await this.propose(conn, stored.database, stored.schema, {
@@ -230,7 +242,7 @@ export class MonitorService {
       table: stored.table,
       ...(stored.label ? { label: stored.label } : {}),
       intervalMinutes: (overrides.intervalMinutes ?? stored.intervalMs / 60_000),
-      condition: overrides.condition ?? stored.condition,
+      condition: picked.condition,
       ...(stored.sql ? { sql: stored.sql } : {}),
       ...(stored.watchColumn ? { watchColumn: stored.watchColumn } : {}),
       ...(stored.cursorColumn ? { cursorColumn: stored.cursorColumn } : {}),
@@ -257,7 +269,7 @@ export class MonitorService {
       table: p.table,
       ...(p.label ? { label: p.label } : {}),
       intervalMs: p.intervalMs,
-      condition: p.condition,
+      condition: p.condition!,
       status: 'running',
       createdAt: Date.now(),
       consecutiveFailures: 0,
@@ -271,6 +283,26 @@ export class MonitorService {
     await this.deps.scheduler.add(task);
     this.deps.audit('create', task);
     return { ok: true, task: this.deps.scheduler.get(task.id) ?? task };
+  }
+
+  /**
+   * 修改已创建的任务（间隔 / 提醒条件）。只在卡片之外改这两项；SQL 与列不能改。
+   * 条件缺省表示未提供（不改），显式传 null 视为非法。
+   */
+  async edit(id: string, patch: { intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTask } | { ok: false; reason: string }> {
+    const task = this.deps.scheduler.get(id);
+    if (!task) return { ok: false, reason: 'unknownTask' };
+    const next: { intervalMs?: number; condition?: MonitorCondition } = {};
+    if (patch.intervalMinutes !== undefined) next.intervalMs = intervalFrom(patch.intervalMinutes);
+    if (patch.condition !== undefined) {
+      const sanitized = sanitizeCondition(patch.condition, task.kind);
+      if (!sanitized.ok) return { ok: false, reason: 'conditionInvalid' };
+      if (!sanitized.condition) return { ok: false, reason: 'conditionMissing' };
+      next.condition = sanitized.condition;
+    }
+    await this.deps.scheduler.edit(id, next);
+    this.deps.audit('edit', task);
+    return { ok: true, task: this.deps.scheduler.get(id) ?? task };
   }
 
   discard(proposalId: string): void {

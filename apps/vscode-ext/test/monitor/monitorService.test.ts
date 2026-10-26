@@ -90,10 +90,13 @@ describe('MonitorService proposals', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.proposal.cursorColumn).toBe('id');
+    expect(r.proposal.condition).toBeUndefined(); // 用户没说条件：不替用户猜
     expect(tasks).toHaveLength(0);
-    const confirmed = await service.confirm(r.proposal.id, { intervalMinutes: 30 });
+    // 没选条件时不能创建
+    expect(await service.confirm(r.proposal.id)).toMatchObject({ ok: false, reason: 'conditionMissing' });
+    const confirmed = await service.confirm(r.proposal.id, { intervalMinutes: 30, condition: { type: 'increaseBy', value: 5 } });
     expect(confirmed.ok).toBe(true);
-    expect(tasks[0]).toMatchObject({ kind: 'newRows', cursorColumn: 'id', primaryKey: ['id'], cursorValue: '100', cursorSeen: [JSON.stringify(['100'])], intervalMs: 1_800_000, origin: 'ai', connFingerprint: 'fp' });
+    expect(tasks[0]).toMatchObject({ kind: 'newRows', cursorColumn: 'id', primaryKey: ['id'], cursorValue: '100', cursorSeen: [JSON.stringify(['100'])], intervalMs: 1_800_000, origin: 'ai', connFingerprint: 'fp', condition: { type: 'increaseBy', value: 5 } });
     expect(deps.audit).toHaveBeenCalledWith('create', expect.objectContaining({ kind: 'newRows' }));
     expect(await service.confirm(r.proposal.id)).toMatchObject({ ok: false, reason: 'unknownProposal' });
   });
@@ -107,7 +110,7 @@ describe('MonitorService proposals', () => {
   it('fails confirmation when the table changed since the proposal', async () => {
     let columns = [col('id', 'bigint', { isPrimary: true })];
     const { service, tasks } = setup({ describe: async () => ({ columns, indexes: [] }) });
-    const r = await service.propose(conn, 'app', undefined, { kind: 'newRows', table: 'events', cursorColumn: 'id' });
+    const r = await service.propose(conn, 'app', undefined, { kind: 'newRows', table: 'events', cursorColumn: 'id', condition: { type: 'increaseBy', value: 1 } });
     if (!r.ok) throw new Error('expected a proposal');
     columns = [];
     expect(await service.confirm(r.proposal.id)).toMatchObject({ ok: false, reason: 'validation', issues: [{ code: 'tableMissing' }] });
@@ -117,7 +120,7 @@ describe('MonitorService proposals', () => {
   it('a window that does not own the tasks neither trial-runs nor creates', async () => {
     let owner = true;
     const { service, trial, tasks } = setup({ isOwner: () => owner });
-    const r = await service.propose(conn, 'app', undefined, { kind: 'metric', table: 't', sql: 'SELECT 1 AS lag_seconds, 2 AS rows_last_1h' });
+    const r = await service.propose(conn, 'app', undefined, { kind: 'metric', table: 't', sql: 'SELECT 1 AS lag_seconds, 2 AS rows_last_1h', condition: { type: 'above', value: 5 } });
     if (!r.ok) throw new Error('expected a proposal');
     trial.mockClear();
     owner = false;
@@ -155,11 +158,42 @@ describe('MonitorService proposals', () => {
     expect(r.proposal.intervalMs).toBe(300_000);
   });
 
-  it('sanitizes model-supplied conditions', () => {
-    expect(sanitizeCondition({ type: 'above', value: 600 }, 'metric')).toEqual({ type: 'above', value: 600 });
-    expect(sanitizeCondition({ type: 'drop_table', value: 1 }, 'metric')).toEqual({ type: 'anyChange' });
-    expect(sanitizeCondition({ type: 'decreaseBy', value: 3 }, 'newRows')).toEqual({ type: 'increaseBy', value: 1 });
-    expect(sanitizeCondition({ type: 'increaseBy', value: -1 }, 'rowCount')).toEqual({ type: 'anyChange' });
+  it('validates model-supplied conditions instead of silently replacing them', () => {
+    expect(sanitizeCondition({ type: 'above', value: 600 }, 'metric')).toEqual({ ok: true, condition: { type: 'above', value: 600 } });
+    expect(sanitizeCondition(undefined, 'metric')).toEqual({ ok: true });
+    // 非法：不再换成默认值，交给调用方拒绝
+    expect(sanitizeCondition({ type: 'drop_table', value: 1 }, 'metric')).toEqual({ ok: false });
+    expect(sanitizeCondition({ type: 'decreaseBy', value: 3 }, 'newRows')).toEqual({ ok: false });
+    expect(sanitizeCondition({ type: 'increaseBy', value: -1 }, 'rowCount')).toEqual({ ok: false });
+    expect(sanitizeCondition({ type: 'above' }, 'metric')).toEqual({ ok: false });
+  });
+
+  it('rejects an invalid condition and reports a missing one', async () => {
+    const { service, tasks } = setup();
+    expect(await service.propose(conn, 'app', undefined, { kind: 'rowCount', table: 't', condition: { type: 'drop_table', value: 1 } as never })).toMatchObject({ ok: false, reason: 'conditionInvalid' });
+    const r = await service.propose(conn, 'app', undefined, { kind: 'rowCount', table: 't' });
+    if (!r.ok) throw new Error('expected a proposal');
+    expect(await service.confirm(r.proposal.id, { condition: { type: 'increaseBy', value: 0 } })).toMatchObject({ ok: false, reason: 'conditionInvalid' });
+    expect(tasks).toHaveLength(0);
+  });
+
+  it('edits the interval and condition of a created task', async () => {
+    const { service, scheduler, tasks, deps } = setup();
+    const r = await service.propose(conn, 'app', undefined, { kind: 'rowCount', table: 't', condition: { type: 'anyChange' } });
+    if (!r.ok) throw new Error('expected a proposal');
+    const created = await service.confirm(r.proposal.id, { intervalMinutes: 5 });
+    if (!created.ok) throw new Error('confirm failed');
+    (scheduler as unknown as { edit: (id: string, patch: Record<string, unknown>) => Promise<void> }).edit = vi.fn(
+      async (id: string, patch: Record<string, unknown>) => {
+        const task = tasks.find((t) => t.id === id)!;
+        Object.assign(task, patch);
+      },
+    );
+    expect(await service.edit(created.task.id, { intervalMinutes: 30, condition: { type: 'below', value: 3 } }))
+      .toMatchObject({ ok: true, task: { intervalMs: 1_800_000, condition: { type: 'below', value: 3 } } });
+    expect(deps.audit).toHaveBeenCalledWith('edit', expect.objectContaining({ id: created.task.id }));
+    expect(await service.edit('nope', { intervalMinutes: 5 })).toMatchObject({ ok: false, reason: 'unknownTask' });
+    expect(await service.edit(created.task.id, { condition: { type: 'nope' } as never })).toMatchObject({ ok: false, reason: 'conditionInvalid' });
   });
 });
 

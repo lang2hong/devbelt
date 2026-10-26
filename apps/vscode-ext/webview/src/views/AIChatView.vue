@@ -11,7 +11,7 @@ import QuotaPanel from '../components/ai/QuotaPanel.vue';
 import MonitorPanel from '../components/ai/MonitorPanel.vue';
 import MonitorProposalCard, { type ProposalState } from '../components/ai/MonitorProposalCard.vue';
 import type { MonitorDetail, MonitorTaskView } from '../../../src/monitor/monitorBridge';
-import { proposalFailureText } from '../utils/monitorView';
+import { proposalFailureText, type ConditionInput } from '../utils/monitorView';
 import type { MoreMenuItem } from '../components/ai/MoreMenu.vue';
 import ContextDetailDrawer, { type ContextDetailState } from '../components/ai/ContextDetailDrawer.vue';
 import TableNoteDialog, { type TableNoteColumn } from '../components/ai/TableNoteDialog.vue';
@@ -137,6 +137,8 @@ const monitorAvailable = ref(false);
 const monitorDetails = ref<Record<string, MonitorDetail | null>>({});
 const monitorFocusId = ref<string | null>(null);
 const proposals = ref<ProposalState[]>([]);
+/** 编辑已创建任务的结果（抽屉里的保存反馈）。 */
+const editResult = ref<{ id: string; ok: boolean; reason?: string } | null>(null);
 function openDrawer(kind: DrawerKind): void {
   drawer.value = kind;
   if (kind === 'monitor') post({ type: 'monitorRequestList' });
@@ -433,6 +435,9 @@ onMounted(() => {
           const status = msg.status === 'created' ? 'created' : 'pending';
           proposals.value = [...proposals.value, { proposal: msg.proposal, status }];
         }
+        break;
+      case 'monitorEditResult':
+        editResult.value = { id: String(msg.id ?? ''), ok: msg.ok === true, ...(typeof msg.reason === 'string' ? { reason: msg.reason } : {}) };
         break;
       case 'monitorConfirmResult': {
         const at = proposals.value.findIndex((p) => p.proposal.id === msg.proposalId);
@@ -740,9 +745,14 @@ function newChatFromDrawer(): void {
   drawer.value = null;
 }
 
-function confirmProposal(proposalId: string, intervalMinutes: number): void {
+function confirmProposal(proposalId: string, intervalMinutes: number, condition: ConditionInput): void {
   proposals.value = proposals.value.map((p) => (p.proposal.id === proposalId ? { ...p, status: 'creating', error: undefined } : p));
-  post({ type: 'monitorConfirm', proposalId, intervalMinutes });
+  post({
+    type: 'monitorConfirm',
+    proposalId,
+    intervalMinutes,
+    condition: { type: condition.type, ...(condition.value !== undefined ? { value: condition.value } : {}) },
+  });
 }
 
 function discardProposal(proposalId: string): void {
@@ -843,6 +853,7 @@ function explainMonitor(id: string, includeRows: boolean): void {
         :executing="monitorExecuting"
         :focus-id="monitorFocusId"
         :details="monitorDetails"
+        :edit-result="editResult"
         @explain="explainMonitor"
       />
       <QuotaPanel

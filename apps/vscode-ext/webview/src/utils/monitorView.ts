@@ -26,6 +26,35 @@ export interface HistoryTable {
   rows: Array<{ time: string; cells: Record<string, string>; duration: string; error?: string }>;
 }
 
+/** 间隔候选（分钟），卡片与「后台任务」编辑共用。 */
+export const INTERVAL_CHOICES = [1, 5, 15, 30, 60, 360, 1440];
+
+/** 卡片 / 编辑表单回传的条件；`type` 为空表示还没选。 */
+export interface ConditionInput {
+  type: string;
+  value?: number;
+}
+
+/** 每种任务可用的提醒条件（新增行只按本次新增行数比较）。 */
+export function conditionTypes(kind: 'rowCount' | 'metric' | 'newRows'): string[] {
+  return kind === 'newRows'
+    ? ['anyChange', 'increaseBy', 'above']
+    : ['anyChange', 'increaseBy', 'decreaseBy', 'changePercent', 'above', 'below'];
+}
+
+export function conditionNeedsValue(type: string | undefined): boolean {
+  return !!type && type !== 'anyChange';
+}
+
+/** 条件是否可用：选了类型且（需要数值时）数值合法。 */
+export function isConditionComplete(condition: ConditionInput | undefined): boolean {
+  if (!condition || !condition.type) return false;
+  if (!conditionNeedsValue(condition.type)) return true;
+  const value = Number(condition.value);
+  if (!Number.isFinite(value)) return false;
+  return condition.type === 'above' || condition.type === 'below' ? true : value > 0;
+}
+
 const MAX_CHART_POINTS = 60;
 
 /**

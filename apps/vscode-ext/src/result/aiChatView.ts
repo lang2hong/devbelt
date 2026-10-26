@@ -630,9 +630,13 @@ export class AiChatView extends BaseWebView {
         const bridge = MonitorBridge.tryGet();
         if (!bridge || typeof msg.proposalId !== 'string') return;
         const minutes = typeof msg.intervalMinutes === 'number' ? msg.intervalMinutes : undefined;
+        const condition = msg.condition && typeof msg.condition === 'object' ? msg.condition : undefined;
         let result: Awaited<ReturnType<typeof bridge.handlers.confirm>>;
         try {
-          result = await bridge.handlers.confirm(msg.proposalId, minutes !== undefined ? { intervalMinutes: minutes } : {});
+          result = await bridge.handlers.confirm(msg.proposalId, {
+            ...(minutes !== undefined ? { intervalMinutes: minutes } : {}),
+            ...(condition ? { condition } : {}),
+          });
         } catch (err) {
           result = { ok: false, reason: err instanceof Error && err.name === 'MonitorNotOwnerError' ? 'otherWindow' : 'error', issues: [] };
         }
@@ -644,6 +648,24 @@ export class AiChatView extends BaseWebView {
             ? { ok: true, task: result.task }
             : { ok: false, reason: result.reason, issues: result.issues.map((i) => ({ code: i.code, ...(i.detail ? { detail: i.detail.slice(0, 200) } : {}) })) }),
         } as never);
+        this.pushMonitorList();
+        return;
+      }
+      case 'monitorEdit': {
+        const bridge = MonitorBridge.tryGet();
+        if (!bridge || typeof msg.id !== 'string') return;
+        const minutes = typeof msg.intervalMinutes === 'number' ? msg.intervalMinutes : undefined;
+        const condition = msg.condition && typeof msg.condition === 'object' ? msg.condition : undefined;
+        let result: Awaited<ReturnType<typeof bridge.handlers.edit>>;
+        try {
+          result = await bridge.handlers.edit(msg.id, {
+            ...(minutes !== undefined ? { intervalMinutes: minutes } : {}),
+            ...(condition ? { condition } : {}),
+          });
+        } catch (err) {
+          result = { ok: false, reason: err instanceof Error && err.name === 'MonitorNotOwnerError' ? 'otherWindow' : 'error' };
+        }
+        this.post({ type: 'monitorEditResult', id: msg.id, ...result } as never);
         this.pushMonitorList();
         return;
       }

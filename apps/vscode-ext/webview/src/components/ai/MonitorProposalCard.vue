@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from '../../composables/useI18n';
+import MonitorConditionEditor from './MonitorConditionEditor.vue';
+import { INTERVAL_CHOICES, isConditionComplete, type ConditionInput } from '../../utils/monitorView';
 import type { MonitorProposalView } from '../../../../src/monitor/monitorBridge';
 
 /**
@@ -15,13 +17,27 @@ export interface ProposalState {
 }
 
 const props = defineProps<{ state: ProposalState }>();
-const emit = defineEmits<{ confirm: [proposalId: string, intervalMinutes: number]; discard: [proposalId: string]; openTasks: [] }>();
+const emit = defineEmits<{
+  confirm: [proposalId: string, intervalMinutes: number, condition: ConditionInput];
+  discard: [proposalId: string];
+  openTasks: [];
+}>();
 const { t } = useI18n();
 
-const INTERVALS = [1, 5, 15, 30, 60, 360, 1440];
 const interval = ref(props.state.proposal.intervalMinutes);
+// AI 给的条件只是建议：未点「采用」前不生效，创建按钮保持禁用。
+const condition = ref<ConditionInput | undefined>(undefined);
+const ready = computed(() => isConditionComplete(condition.value));
+const suggestion = computed(() => (props.state.proposal.condition ? props.state.proposal.condition : undefined));
+const suggestedText = computed(() => (props.state.proposal.conditionText || '').trim());
+const suggestedTouched = computed(() => !!condition.value);
+
+function adoptSuggestion(): void {
+  const s = suggestion.value;
+  if (s) condition.value = { ...s };
+}
 const p = computed(() => props.state.proposal);
-const intervalOptions = computed(() => [...new Set([...INTERVALS, p.value.intervalMinutes])].sort((a, b) => a - b));
+const intervalOptions = computed(() => [...new Set([...INTERVAL_CHOICES, p.value.intervalMinutes])].sort((a, b) => a - b));
 const busy = computed(() => props.state.status === 'creating');
 const target = computed(() => {
   const scope = [p.value.database, p.value.schema].filter(Boolean).join('.');
@@ -58,7 +74,18 @@ function formatValue(value: number | null): string {
     <dl class="mp-rows">
       <div class="mp-row">
         <dt>{{ t('monitor.ui.condition') }}</dt>
-        <dd>{{ p.conditionText }}</dd>
+        <dd>
+          <MonitorConditionEditor
+            v-model="condition"
+            :kind="p.kind"
+            :disabled="busy"
+          />
+          <span v-if="!ready && !(suggestion && !suggestedTouched)" class="mp-hint">{{ t('monitor.proposal.conditionMissing') }}</span>
+          <div v-if="suggestion && !suggestedTouched" class="mp-suggest">
+            <span>{{ t('monitor.proposal.suggested', { text: suggestedText || t(`monitor.cond.${suggestion.type}`) }) }}</span>
+            <button class="mp-link" @click="adoptSuggestion">{{ t('monitor.proposal.adopt') }}</button>
+          </div>
+        </dd>
       </div>
       <div v-if="p.cursorColumn" class="mp-row">
         <dt>{{ t('monitor.ui.cursor') }}</dt>
@@ -95,7 +122,12 @@ function formatValue(value: number | null): string {
       </label>
       <span class="mp-spacer"></span>
       <button class="ai-btn" :disabled="busy" @click="emit('discard', p.id)">{{ t('monitor.proposal.discard') }}</button>
-      <button class="ai-btn ai-btn-primary" :disabled="busy" @click="emit('confirm', p.id, interval)">
+      <button
+        class="ai-btn ai-btn-primary"
+        :disabled="busy || !ready"
+        :title="ready ? undefined : t('monitor.proposal.conditionMissing')"
+        @click="ready && emit('confirm', p.id, interval, condition!)"
+      >
         {{ busy ? t('monitor.proposal.creating') : t('monitor.proposal.create') }}
       </button>
     </footer>
@@ -168,6 +200,8 @@ function formatValue(value: number | null): string {
 }
 .mp-warn li + li { margin-top: 2px; }
 .mp-error { margin: 0; color: var(--vscode-errorForeground, #f85149); }
+.mp-hint { margin-left: 8px; color: var(--vscode-descriptionForeground); }
+.mp-suggest { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--vscode-descriptionForeground); }
 
 .mp-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-top: 2px; }
 .mp-spacer { flex: 1; }

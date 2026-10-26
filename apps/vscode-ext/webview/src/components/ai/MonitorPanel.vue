@@ -5,7 +5,11 @@ import { useVsCode } from '../../composables/useVsCode';
 import LineChart from './charts/LineChart.vue';
 import BarChart from './charts/BarChart.vue';
 import type { MonitorDetail, MonitorTaskView } from '../../../../src/monitor/monitorBridge';
-import { historySeries, formatMonitorTime, formatIntervalText } from '../../utils/monitorView';
+import MonitorConditionEditor from './MonitorConditionEditor.vue';
+import {
+  historySeries, formatMonitorTime, formatIntervalText, proposalFailureText,
+  INTERVAL_CHOICES, isConditionComplete, type ConditionInput,
+} from '../../utils/monitorView';
 
 /**
  * 「后台任务」抽屉内容：任务列表 → 详情（A 类折线图 + 表格；B 类新增行表格 + 每次新增柱状图）。
@@ -16,6 +20,7 @@ const props = defineProps<{
   executing: boolean;
   focusId?: string | null;
   details: Record<string, MonitorDetail | null>;
+  editResult?: { id: string; ok: boolean; reason?: string } | null;
 }>();
 const emit = defineEmits<{ explain: [id: string, includeRows: boolean] }>();
 const { t, isZh } = useI18n();
@@ -23,6 +28,11 @@ const { post } = useVsCode();
 
 const selectedId = ref<string | null>(props.focusId ?? null);
 const includeRows = ref(false);
+const editing = ref(false);
+const editInterval = ref(5);
+const editCondition = ref<ConditionInput | undefined>(undefined);
+const editError = ref('');
+const editReady = computed(() => editing.value && isConditionComplete(editCondition.value));
 watch(() => props.focusId, (id) => { if (id) open(id); });
 
 const selected = computed(() => props.tasks.find((task) => task.id === selectedId.value) ?? null);
@@ -35,7 +45,42 @@ const rowColumns = computed(() => (latestRows.value?.rows[0] ? Object.keys(lates
 function open(id: string): void {
   selectedId.value = id;
   includeRows.value = false;
+  editing.value = false;
   post({ type: 'monitorDetail', id });
+}
+
+function startEdit(task: MonitorTaskView): void {
+  editing.value = true;
+  editError.value = '';
+  editInterval.value = Math.round(task.intervalMs / 60_000);
+  editCondition.value = task.condition ? { ...task.condition } : undefined;
+}
+
+function cancelEdit(): void {
+  editing.value = false;
+  editError.value = '';
+}
+
+function saveEdit(): void {
+  if (!selected.value || !editCondition.value) return;
+  editError.value = '';
+  const condition = editCondition.value;
+  post({
+    type: 'monitorEdit',
+    id: selected.value.id,
+    intervalMinutes: editInterval.value,
+    condition: { type: condition.type, ...(condition.value !== undefined ? { value: condition.value } : {}) },
+  });
+}
+
+watch(() => props.editResult, (result) => {
+  if (!result || result.id !== selectedId.value) return;
+  if (result.ok) { editing.value = false; return; }
+  editError.value = t('monitor.edit.failed', { reason: proposalFailureText(t, result.reason, []) });
+});
+
+function intervalLabel(minutes: number): string {
+  return minutes < 60 ? t('monitor.ui.minutes', { n: minutes }) : t('monitor.ui.hours', { n: Math.round((minutes / 60) * 10) / 10 });
 }
 
 function act(id: string, action: 'resume' | 'pause' | 'runNow' | 'remove'): void {
@@ -103,8 +148,18 @@ function cell(value: unknown): string {
       <dl class="mon-meta">
         <dt>{{ t('monitor.ui.kind') }}</dt><dd>{{ kindText(selected) }}</dd>
         <dt>{{ t('monitor.ui.target') }}</dt><dd>{{ selected.connName }}{{ selected.database ? ` / ${selected.database}` : '' }} · {{ selected.table }}</dd>
-        <dt>{{ t('monitor.ui.interval') }}</dt><dd>{{ formatIntervalText(selected.intervalMs, isZh) }}</dd>
-        <dt>{{ t('monitor.ui.condition') }}</dt><dd>{{ selected.conditionText }}</dd>
+        <dt>{{ t('monitor.ui.interval') }}</dt>
+        <dd v-if="!editing">{{ formatIntervalText(selected.intervalMs, isZh) }}</dd>
+        <dd v-else>
+          <select v-model.number="editInterval" class="mon-select">
+            <option v-for="m in INTERVAL_CHOICES" :key="m" :value="m">{{ intervalLabel(m) }}</option>
+          </select>
+        </dd>
+        <dt>{{ t('monitor.ui.condition') }}</dt>
+        <dd v-if="!editing">{{ selected.conditionText || '—' }}</dd>
+        <dd v-else>
+          <MonitorConditionEditor v-model="editCondition" :kind="selected.kind" />
+        </dd>
         <template v-if="selected.cursorColumn"><dt>{{ t('monitor.ui.cursor') }}</dt><dd><code>{{ selected.cursorColumn }}</code></dd></template>
         <dt>{{ t('monitor.ui.status') }}</dt><dd>{{ statusText(selected) }}</dd>
         <dt>{{ t('monitor.ui.last') }}</dt><dd :class="{ err: selected.lastError }">{{ lastText(selected) }}</dd>
@@ -115,9 +170,16 @@ function cell(value: unknown): string {
         <button v-if="selected.status === 'paused'" class="ai-btn ai-btn-primary" @click="act(selected.id, 'resume')">{{ t('monitor.action.resume') }}</button>
         <button v-else class="ai-btn" @click="act(selected.id, 'pause')">{{ t('monitor.action.pause') }}</button>
         <button class="ai-btn" :disabled="!props.executing" @click="act(selected.id, 'runNow')">{{ t('monitor.action.runNow') }}</button>
+        <button class="ai-btn" :disabled="!props.executing" @click="startEdit(selected)">{{ t('monitor.action.edit') }}</button>
         <button class="ai-btn" @click="emit('explain', selected.id, includeRows)">{{ t('monitor.ui.explain') }}</button>
         <button class="ai-btn mon-danger" @click="act(selected.id, 'remove')">{{ t('monitor.action.remove') }}</button>
       </div>
+      <div v-if="editing" class="mon-actions">
+        <button class="ai-btn ai-btn-primary" :disabled="!editReady" @click="saveEdit">{{ t('monitor.action.save') }}</button>
+        <button class="ai-btn" @click="cancelEdit">{{ t('monitor.action.cancel') }}</button>
+        <span v-if="!editReady" class="mon-note">{{ t('monitor.proposal.conditionMissing') }}</span>
+      </div>
+      <p v-if="editing && editError" class="err" role="alert">{{ editError }}</p>
       <label v-if="selected.kind === 'newRows'" class="mon-check">
         <input v-model="includeRows" type="checkbox" />
         {{ t('monitor.ui.explainIncludeRows') }}
@@ -190,6 +252,13 @@ function cell(value: unknown): string {
 .mon-status { color: var(--vscode-descriptionForeground); white-space: nowrap; }
 .err { color: var(--vscode-errorForeground, #f85149); }
 .mon-back { align-self: flex-start; }
+.mon-select {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
 .mon-h { margin: 4px 0 0; font-size: 13px; }
 .mon-h4 { margin: 8px 0 0; font-size: 12px; }
 .mon-meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; }

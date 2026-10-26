@@ -45,15 +45,30 @@ describe('monitor UI contracts', () => {
   const view = read('../../webview/src/views/AIChatView.vue');
 
   it('creates a task only through the explicit confirm button', () => {
-    expect(card).toContain("emit('confirm', p.id, interval)");
+    expect(card).toContain("emit('confirm', p.id, interval, condition!)");
     expect(card).not.toMatch(/<textarea|contenteditable/);
-    expect(view).toContain("post({ type: 'monitorConfirm', proposalId, intervalMinutes })");
+    expect(view).toContain("condition: { type: condition.type");
     expect(view.match(/type: 'monitorConfirm'/g)).toHaveLength(1);
   });
 
   it('shows warnings and the current values on the proposal card', () => {
     expect(card).toContain('monitor.warning.');
     expect(card).toContain('p.preview');
+  });
+
+  it('lets the user pick the alert condition, including on created tasks', () => {
+    expect(card).toContain('<MonitorConditionEditor');
+    expect(card).toContain(':disabled="busy || !ready"');
+    expect(panel).toContain("startEdit(selected)");
+    expect(panel).toContain("type: 'monitorEdit'");
+  });
+
+  it('treats the AI condition as a suggestion that must be adopted', () => {
+    // 初始不采用模型给的条件，必须点「采用」或自己选
+    expect(card).toContain('const condition = ref<ConditionInput | undefined>(undefined)');
+    expect(card).toContain("emit('confirm', p.id, interval, condition!)");
+    expect(card).toContain('adoptSuggestion');
+    expect(card).toContain('monitor.proposal.suggested');
   });
 
   it('keeps SQL collapsed, removes discarded cards and collapses created ones', () => {

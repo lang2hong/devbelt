@@ -121,6 +121,29 @@ describe('MonitorScheduler', () => {
     expect(deps.store.deleteHistory).toHaveBeenCalledWith('m1');
   });
 
+  it('edit changes the condition and re-arms the timer with the new interval', async () => {
+    const { scheduler, deps } = setup();
+    await scheduler.add(task());
+    expect(deps.run).toHaveBeenCalledTimes(1);
+    await scheduler.edit('m1', { condition: { type: 'above', value: 100 } });
+    expect(scheduler.get('m1')?.condition).toEqual({ type: 'above', value: 100 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.run).toHaveBeenCalledTimes(2);
+    await scheduler.edit('m1', { intervalMs: 5 * 60_000 });
+    expect(scheduler.get('m1')?.intervalMs).toBe(5 * 60_000);
+    // 旧计时器已停：按新间隔触发
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(deps.run).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(deps.run).toHaveBeenCalledTimes(3);
+  });
+
+  it('edit is refused without the lock', async () => {
+    const { scheduler } = setup({ isOwner: () => false }, [task()]);
+    await scheduler.start();
+    await expect(scheduler.edit('m1', { intervalMs: 60_000 })).rejects.toMatchObject({ name: 'MonitorNotOwnerError' });
+  });
+
   it('resumeAll resumes only paused tasks', async () => {
     const { scheduler } = setup({}, [task(), task({ id: 'm2', table: 'b' })]);
     await scheduler.start();

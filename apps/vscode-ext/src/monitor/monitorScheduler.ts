@@ -178,6 +178,17 @@ export class MonitorScheduler {
     for (const task of [...this.tasks]) if (task.status === 'paused') await this.resume(task.id);
   }
 
+  /** 修改间隔 / 提醒条件（只有拥有者）。间隔变化后按新间隔重新计时。 */
+  async edit(id: string, patch: { intervalMs?: number; condition?: MonitorTask['condition'] }): Promise<void> {
+    this.assertOwner();
+    const task = this.get(id);
+    if (!task) return;
+    const intervalMs = clampInterval(patch.intervalMs ?? task.intervalMs);
+    const next: MonitorTask = { ...task, intervalMs, ...(patch.condition ? { condition: patch.condition } : {}) };
+    await this.replace(next);
+    if (next.status === 'running' || next.status === 'error') this.schedule(id, false);
+  }
+
   async pause(id: string): Promise<void> {
     this.assertOwner();
     this.unschedule(id);

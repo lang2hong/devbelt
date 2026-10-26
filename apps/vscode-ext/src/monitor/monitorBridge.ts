@@ -18,6 +18,8 @@ export interface MonitorTaskView {
   status: MonitorTask['status'];
   pausedReason?: MonitorTask['pausedReason'];
   intervalMs: number;
+  /** 结构化条件（编辑用）；任务一定有，提案可能没有。 */
+  condition?: MonitorTask['condition'];
   conditionText: string;
   lastValue?: number;
   lastValues?: Record<string, number | null>;
@@ -41,7 +43,9 @@ export interface MonitorBridgeHandlers {
   detail(id: string): Promise<MonitorDetail | undefined>;
   action(id: string, action: 'resume' | 'pause' | 'runNow' | 'remove'): Promise<void>;
   resumeAll(): Promise<void>;
-  confirm(proposalId: string, overrides?: { intervalMinutes?: number }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string; issues: ValidationIssue[] }>;
+  confirm(proposalId: string, overrides?: { intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string; issues: ValidationIssue[] }>;
+  /** 修改已创建任务的间隔 / 条件。 */
+  edit(id: string, patch: { intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string }>;
   discard(proposalId: string): void;
   /** 本窗口是否执行（另一窗口持锁时只显示）。 */
   executing(): boolean;
@@ -60,6 +64,7 @@ export interface MonitorProposalView {
   database?: string;
   schema?: string;
   intervalMinutes: number;
+  condition?: MonitorTask['condition'];
   conditionText: string;
   sql?: string;
   columns?: string[];

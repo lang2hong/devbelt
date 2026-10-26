@@ -242,6 +242,12 @@ export interface AiToolRunningDown {
 }
 
 /** Agent 模式的一步工具调用（进行中 / 完成）。 */
+/** 卡片 / 编辑表单回传的提醒条件（结构校验在扩展端再做一遍）。 */
+export interface AiMonitorConditionInput {
+  type: string;
+  value?: number;
+}
+
 export interface AiAgentStepDown {
   type: 'agentStep';
   sessionId: string;
@@ -253,6 +259,14 @@ export interface AiAgentStepDown {
     durationMs?: number;
     errorCode?: string;
   };
+}
+
+/** 编辑已创建任务的结果（失败时 reason 为 `conditionInvalid` / `otherWindow` 等）。 */
+export interface AiMonitorEditResultDown {
+  type: 'monitorEditResult';
+  id: string;
+  ok?: boolean;
+  reason?: string;
 }
 
 export type AiDownMessage =
@@ -274,7 +288,8 @@ export type AiDownMessage =
   | AiAgentStepDown
   | AiTableOptionsDown
   | AiTableNoteDown
-  | AiColumnSampleDown;
+  | AiColumnSampleDown
+  | AiMonitorEditResultDown;
 
 // ── Up（webview → host）──
 
@@ -408,7 +423,8 @@ export type AiUpMessage =
   | { type: 'monitorDetail'; id: string }
   | { type: 'monitorAction'; id: string; action: 'resume' | 'pause' | 'runNow' | 'remove' }
   | { type: 'monitorResumeAll' }
-  | { type: 'monitorConfirm'; proposalId: string; intervalMinutes?: number }
+  | { type: 'monitorConfirm'; proposalId: string; intervalMinutes?: number; condition?: AiMonitorConditionInput }
+  | { type: 'monitorEdit'; id: string; intervalMinutes?: number; condition?: AiMonitorConditionInput }
   | { type: 'monitorDiscard'; proposalId: string }
   | { type: 'monitorExplain'; id: string; includeRows?: boolean }
   | { type: 'applyCode'; text: string }

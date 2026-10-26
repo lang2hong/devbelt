@@ -250,8 +250,10 @@ describe.skipIf(!hasSqlite())('monitoring on real SQLite', () => {
       const rows = await h.service.propose(h.conn, undefined, undefined, { kind: 'newRows', table: 'events', cursorColumn: 'id' });
       expect(count.ok && rows.ok).toBe(true);
       if (!count.ok || !rows.ok) return;
-      const c = await h.service.confirm(count.proposal.id);
-      const r = await h.service.confirm(rows.proposal.id);
+      // 用户没说条件时不能创建；卡片上选了才创建
+      expect(await h.service.confirm(rows.proposal.id)).toMatchObject({ ok: false, reason: 'conditionMissing' });
+      const c = await h.service.confirm(count.proposal.id, { condition: { type: 'anyChange' } });
+      const r = await h.service.confirm(rows.proposal.id, { condition: { type: 'increaseBy', value: 1 } });
       if (!c.ok || !r.ok) throw new Error('confirm failed');
       expect(h.scheduler.get(c.task.id)?.lastValue).toBe(2);
       exec(`INSERT INTO events (created) VALUES ('c');`);

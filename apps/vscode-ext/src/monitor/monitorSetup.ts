@@ -96,7 +96,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
     onRun: () => emitChanged(),
   });
 
-  const audit = (action: 'create' | 'remove' | 'pause' | 'resume' | 'autoPause', task: MonitorTask): void => {
+  const audit = (action: 'create' | 'remove' | 'pause' | 'resume' | 'autoPause' | 'edit', task: MonitorTask): void => {
     const conn = deps.store.get(task.connId);
     AuditLogger.tryLog({
       action: 'monitor_task',
@@ -149,6 +149,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       status: task.status,
       ...(task.pausedReason ? { pausedReason: task.pausedReason } : {}),
       intervalMs: task.intervalMs,
+      condition: task.condition,
       conditionText: describeTaskCondition(task),
       ...(task.lastValue !== undefined ? { lastValue: task.lastValue } : {}),
       ...(task.lastValues ? { lastValues: task.lastValues } : {}),
@@ -188,6 +189,11 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       const result = await service.confirm(proposalId, overrides ?? {});
       return result.ok ? { ok: true, task: view(result.task) } : result;
     },
+    edit: async (id, patch) => {
+      if (!lock.isHeld) throw new MonitorNotOwnerError();
+      const result = await service.edit(id, patch);
+      return result.ok ? { ok: true, task: view(result.task) } : result;
+    },
     discard: (proposalId) => service.discard(proposalId),
     executing: () => lock.isHeld,
     onChanged: (listener) => {
@@ -203,6 +209,7 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       ...(p.database ? { database: p.database } : {}),
       ...(p.schema ? { schema: p.schema } : {}),
       intervalMinutes: Math.round(p.intervalMs / 60_000),
+      ...(p.condition ? { condition: p.condition } : {}),
       conditionText: describeTaskCondition(p),
       ...(p.sql ? { sql: p.sql } : {}),
       ...(p.columns ? { columns: p.columns } : {}),

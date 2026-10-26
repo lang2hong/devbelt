@@ -20,7 +20,9 @@ export const MONITOR_TOOL_DEFINITION: ToolDefinition = {
     'Propose a background monitoring task for a table on the current connection. It is NOT created until the user confirms the card shown in the chat.',
     'kind=rowCount: watch COUNT(*). kind=metric: provide one read-only SELECT returning exactly 1 row and 1-10 numeric columns; watchColumn is the column the notification compares.',
     'kind=newRows: provide cursorColumn, an existing monotonically increasing integer or datetime/timestamp column of that table (use describe_table first; never invent a column). If the table has no such column, do not call this tool with newRows: suggest rowCount or a metric instead.',
-    'conditionType: anyChange | increaseBy | decreaseBy | changePercent | above | below; conditionValue is the number for it. For newRows use increaseBy (new rows >= N).',
+    'conditionType: anyChange | increaseBy | decreaseBy | changePercent | above | below; conditionValue is the number for it. For newRows use increaseBy (new rows >= N) or above (new rows > N).',
+    'IMPORTANT: only set a condition when the user actually said when to be alerted. If the user only said what to watch (for example "monitor the per-minute upload volume"), omit conditionType/conditionValue entirely: the confirmation card asks the user to choose. Never invent a threshold, and never present one in your reply as if the user had asked for it.',
+    'Translate the intent, do not invert the metric: "no new data for more than N minutes" -> SELECT that computes the lag in seconds and condition above N*60; "fewer than N" -> below N; "more than N new rows" -> kind=newRows with increaseBy N; "tell me on any change" -> anyChange. Do not compare a latest-timestamp column against a fixed value: that value goes stale.',
   ].join(' '),
   riskClass: 'R1',
   engines: ['MYSQL', 'PG', 'SQLITE'],
@@ -53,6 +55,24 @@ export interface MonitorToolHost {
 }
 
 /** 参数 → 提案输入（guard 已做类型 / 白名单校验，这里只做组装）。 */
+/** 条件的中文说明（工具结果里回给模型，要求它原样转述）。 */
+export function conditionTextOf(input: { kind: string; condition?: MonitorCondition; watchColumn?: string }): string {
+  const c = input.condition;
+  if (!c) return '未设置（由用户在卡片上选择）';
+  const n = 'value' in c ? c.value : 0;
+  const text = (() => {
+    switch (c.type) {
+      case 'anyChange': return input.kind === 'newRows' ? '有新增行时提醒' : '任何变化时提醒';
+      case 'increaseBy': return input.kind === 'newRows' ? `本次新增 ≥ ${n} 行时提醒` : `增加 ≥ ${n} 时提醒`;
+      case 'above': return input.kind === 'newRows' ? `本次新增 > ${n} 行时提醒` : `高于 ${n} 时提醒`;
+      case 'decreaseBy': return `减少 ≥ ${n} 时提醒`;
+      case 'changePercent': return `变化 ≥ ${n}% 时提醒`;
+      case 'below': return `低于 ${n} 时提醒`;
+    }
+  })();
+  return input.kind === 'metric' && input.watchColumn ? `${input.watchColumn}: ${text}` : text;
+}
+
 export function toProposalInput(args: Record<string, unknown>): ProposalInput {
   const kind = String(args.kind) as MonitorKind;
   const conditionType = typeof args.conditionType === 'string' ? args.conditionType : undefined;
@@ -103,14 +123,14 @@ export function buildMonitorTool(host: MonitorToolHost): {
             kind: p.kind,
             table: p.table,
             intervalMinutes: Math.round(p.intervalMs / 60_000),
-            condition: p.condition,
+            ...(p.condition ? { condition: p.condition, conditionText: conditionTextOf(p) } : {}),
             ...(p.watchColumn ? { watchColumn: p.watchColumn } : {}),
             ...(p.preview ? { currentValues: p.preview } : {}),
             ...(p.cursorColumn ? { cursorColumn: p.cursorColumn } : {}),
             warnings: p.warnings.map((w) => w.code),
           },
         }),
-        summary: `已生成监控提案：${p.label ?? p.table}（待你确认）`,
+        summary: `已生成监控提案：${p.label ?? p.table}（${conditionTextOf(p)}，待你确认）`,
       };
     },
   };
