@@ -26,6 +26,16 @@ const emit = defineEmits<{
 }>();
 
 const input = ref('');
+/** 输入法组合中（选候选词）：此时的回车不是执行。 */
+const composing = ref(false);
+
+function onCompositionStart(): void {
+  composing.value = true;
+}
+
+function onCompositionEnd(): void {
+  setTimeout(() => { composing.value = false; }, 0);
+}
 const inputEl = ref<HTMLInputElement | null>(null);
 const resultsEl = ref<HTMLElement | null>(null);
 const commandHistory = ref<string[]>([]);
@@ -88,6 +98,8 @@ function onKeydown(e: KeyboardEvent): void {
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey) {
+    // 输入法选词时的回车不是执行：组合期间的 keydown 一律忽略。
+    if (e.isComposing || e.keyCode === 229 || composing) return;
     e.preventDefault();
     submit();
   }
@@ -189,7 +201,15 @@ onUnmounted(() => {
       <div v-if="!visibleResults.length" class="empty">{{ t('wv.redis.console.empty') }}</div>
     </div>
     <div class="input-row">
-      <input ref="inputEl" v-model="input" list="redis-cmd-suggest" :placeholder="t('wv.redis.console.placeholder')" @keydown="onKeydown" />
+      <input
+        ref="inputEl"
+        v-model="input"
+        list="redis-cmd-suggest"
+        :placeholder="t('wv.redis.console.placeholder')"
+        @keydown="onKeydown"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
+      />
       <datalist id="redis-cmd-suggest">
         <option v-for="c in suggestions" :key="c" :value="c" />
       </datalist>

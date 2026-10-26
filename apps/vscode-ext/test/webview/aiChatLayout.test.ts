@@ -21,6 +21,26 @@ const input = read('../../webview/src/components/ai/ChatInput.vue');
 const bubble = read('../../webview/src/components/ai/MessageBubble.vue');
 const codeBlock = read('../../webview/src/components/ai/CodeBlock.vue');
 
+describe('输入法组合时不误发送', () => {
+  it('AI 输入框忽略组合期间的回车', () => {
+    expect(input).toContain('event.isComposing');
+    expect(input).toContain('event.keyCode === 229');
+    expect(input).toContain('@compositionstart="onCompositionStart"');
+    expect(input).toContain('@compositionend="onCompositionEnd"');
+    const handler = input.slice(input.indexOf('function onKeydown'), input.indexOf('</script>'));
+    // 组合判断必须在发送之前
+    expect(handler.indexOf('composing.value')).toBeLessThan(handler.indexOf("emit('send')"));
+  });
+
+  it('Redis 命令行同样忽略组合期间的回车', () => {
+    const console = read('../../webview/src/components/redis/CliConsole.vue');
+    expect(console).toContain('e.isComposing');
+    expect(console).toContain('@compositionstart="onCompositionStart"');
+    const handler = console.slice(console.indexOf('function onKeydown'), console.indexOf('function scrollToBottom'));
+    expect(handler.indexOf('composing')).toBeLessThan(handler.indexOf('submit()'));
+  });
+});
+
 describe('AI Chat 顶栏', () => {
   it('只有一行常规内容，不再显示 tokens / 表数摘要和额度进度条', () => {
     const tpl = template(bar);

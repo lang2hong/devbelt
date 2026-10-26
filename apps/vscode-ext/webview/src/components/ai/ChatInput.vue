@@ -12,6 +12,23 @@ const props = defineProps<{
 const emit = defineEmits<{ send: []; stop: []; toggleAgent: [] }>();
 const { t } = useI18n();
 const box = ref<HTMLTextAreaElement | null>(null);
+/**
+ * 输入法正在组合文字（选候选词）。
+ *
+ * 组合期间的回车是「选词」，不能当成发送：Chromium 里这个 keydown 通常带
+ * `isComposing` / `keyCode 229`，但有些输入法在 `compositionend` 之后才发 keydown，
+ * 那时 `isComposing` 已经被置回 false，所以再用组合状态兜一层（延迟一拍清除，
+ * 避免把紧跟其后的回车也吞掉）。
+ */
+const composing = ref(false);
+
+function onCompositionStart(): void {
+  composing.value = true;
+}
+
+function onCompositionEnd(): void {
+  setTimeout(() => { composing.value = false; }, 0);
+}
 
 function resize(): void {
   const el = box.value;
@@ -24,6 +41,7 @@ onMounted(() => void nextTick(resize));
 watch(model, () => void nextTick(resize));
 
 function onKeydown(event: KeyboardEvent): void {
+  if (composing.value || event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     emit('send');
@@ -42,6 +60,8 @@ function onKeydown(event: KeyboardEvent): void {
         :placeholder="t('wv.ai.input.placeholder')"
         :disabled="props.generating"
         @keydown="onKeydown"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
         @input="resize"
       ></textarea>
       <div class="ai-input-actions">
