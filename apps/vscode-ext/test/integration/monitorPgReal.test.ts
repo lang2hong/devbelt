@@ -184,7 +184,7 @@ describe.skipIf(!PG_URL)('monitoring on real PostgreSQL', () => {
 
       const t = await h.service.confirm(byTime.proposal.id);
       const i = await h.service.confirm(byId.proposal.id);
-      if (!t.ok || !i.ok) throw new Error('confirm failed');
+      if (!t.ok || !i.ok) throw new Error(`confirm failed: t=${JSON.stringify(t)} i=${JSON.stringify(i)}`);
       expect(t.task.cursorSeen?.length).toBe(2); // ids 1 and 2 share the same timestamp
       // 用例按顺序执行：上一个用例插入了 id=4，所以基线是 4。
       expect(i.task.cursorValue).toBe('4');
