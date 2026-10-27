@@ -2108,4 +2108,11 @@ export const en: MessageCatalog = {
   'wv.ai.context.historyMeta': 'History: last {recent} messages verbatim; {summarized} older messages summarized (~{chars} chars injected)',
   'wv.ai.agent.autoOn': 'This looks like a monitoring request, so Agent mode was turned on; nothing is created until you confirm the card.',
   'form.testTimeout': 'Connection test timed out after {seconds}s: check the network, firewall/security group, proxy or SSH tunnel',
+  'monitor.list.takeOver': 'Run in this window',
+  'monitor.takeOver.title': 'Take over monitoring?',
+  'monitor.takeOver.detail': 'This window will take over monitoring; the other window stops running tasks and becomes read-only. Tasks are paused and need to be resumed manually.',
+  'monitor.takeOver.confirmAction': 'Take over',
+  'monitor.takeOver.done': 'Monitoring is now owned by this window; tasks are paused and can be resumed in Background Tasks.',
+  'monitor.notify.ownerMoved': 'Another VS Code window took over monitoring; this window stopped running tasks and is read-only.',
+  'monitor.proposal.otherWindowHint': 'Monitoring runs in another VS Code window. Take over here first, then create the task.',
 };

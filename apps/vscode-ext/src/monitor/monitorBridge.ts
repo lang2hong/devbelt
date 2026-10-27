@@ -53,6 +53,8 @@ export interface MonitorBridgeHandlers {
   detail(id: string): Promise<MonitorDetail | undefined>;
   action(id: string, action: 'resume' | 'pause' | 'runNow' | 'remove'): Promise<void>;
   resumeAll(): Promise<void>;
+  /** 用户主动把执行权接到本窗口（另一个窗口会停止执行并转为只读）。 */
+  takeOver(): Promise<boolean>;
   confirm(proposalId: string, overrides?: { intervalMs?: number; intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string; issues: ValidationIssue[] }>;
   /** 修改已创建任务的间隔 / 条件。 */
   edit(id: string, patch: { intervalMs?: number; intervalMinutes?: number; condition?: unknown }): Promise<{ ok: true; task: MonitorTaskView } | { ok: false; reason: string }>;

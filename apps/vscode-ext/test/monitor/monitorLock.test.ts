@@ -32,6 +32,17 @@ describe('MonitorLock', () => {
     expect(a.isHeld).toBe(false);
   });
 
+  it('force-acquires a fresh lock held by another window (explicit takeover)', async () => {
+    const now = 1_000;
+    const a = new MonitorLock({ dir, ownerId: 'a', heartbeatMs: 1_000, now: () => now });
+    const b = new MonitorLock({ dir, ownerId: 'b', heartbeatMs: 1_000, now: () => now });
+    expect(await a.tryAcquire()).toBe(true);
+    expect(await b.forceAcquire()).toBe(true);
+    expect(b.isHeld).toBe(true);
+    expect(await a.tryAcquire()).toBe(false); // 原窗口下一次心跳发现失锁
+    expect(a.isHeld).toBe(false);
+  });
+
   it('releases only its own lock', async () => {
     const now = 1_000;
     const a = new MonitorLock({ dir, ownerId: 'a', heartbeatMs: 1_000, now: () => now });

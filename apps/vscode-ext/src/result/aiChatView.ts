@@ -177,7 +177,7 @@ export class AiChatView extends BaseWebView {
    * 对话里的监控提案卡片（按会话 id）：webview 重载 / 切换会话后重新下发，
    * 否则模型已经说了「请点卡片」，用户却看不到卡片。只在内存里，随面板销毁。
    */
-  private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created' }>>();
+  private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created'; reason?: string }>>();
   /** 最近一次发送时的历史压缩统计（上下文抽屉展示）。 */
   private lastHistoryStats?: { recent: number; summarized: number; chars: number };
 
@@ -266,7 +266,20 @@ export class AiChatView extends BaseWebView {
   private replayProposals(sessionId: string | undefined): void {
     if (!sessionId) return;
     for (const card of this.proposalCards.get(sessionId) ?? []) {
-      this.post({ type: 'monitorProposal', sessionId, proposal: card.proposal, status: card.status } as never);
+      this.post({
+        type: 'monitorProposal',
+        sessionId,
+        proposal: card.proposal,
+        status: card.status,
+        ...(card.reason ? { reason: card.reason } : {}),
+      } as never);
+    }
+  }
+
+  private markProposalReason(proposalId: string, reason: string): void {
+    for (const list of this.proposalCards.values()) {
+      const card = list.find((c) => c.proposal.id === proposalId);
+      if (card) card.reason = reason;
     }
   }
 
@@ -620,6 +633,38 @@ export class AiChatView extends BaseWebView {
         }
         return;
       }
+      case 'monitorTakeOver': {
+        const bridge = MonitorBridge.tryGet();
+        if (!bridge) return;
+        const ok = l10n('monitor.takeOver.confirmAction');
+        const picked = await vscode.window.showWarningMessage(
+          l10n('monitor.takeOver.title'),
+          { modal: true, detail: l10n('monitor.takeOver.detail') },
+          ok,
+        );
+        if (picked !== ok) return;
+        let taken = false;
+        try {
+          taken = await bridge.handlers.takeOver();
+        } catch {
+          taken = false;
+        }
+        this.post({ type: 'monitorTakeOverResult', ok: taken } as never);
+        if (taken) {
+          // 失败原因是 otherWindow 的卡片回到待确认，用户可以直接重试。
+          for (const list of this.proposalCards.values()) {
+            for (const card of list) {
+              if (card.status === 'pending' || card.reason === 'otherWindow') {
+                card.reason = undefined;
+              }
+            }
+          }
+          this.replayProposals(this.activeSessionId);
+          this.post({ type: 'agentNotice', text: l10n('monitor.takeOver.done') } as never);
+        }
+        this.pushMonitorList();
+        return;
+      }
       case 'monitorResumeAll': {
         try {
           await MonitorBridge.tryGet()?.handlers.resumeAll();
@@ -650,6 +695,7 @@ export class AiChatView extends BaseWebView {
           result = { ok: false, reason: err instanceof Error && err.name === 'MonitorNotOwnerError' ? 'otherWindow' : 'error', issues: [] };
         }
         if (result.ok) this.markProposal(msg.proposalId, 'created');
+        else this.markProposalReason(msg.proposalId, result.reason);
         this.post({
           type: 'monitorConfirmResult',
           proposalId: msg.proposalId,

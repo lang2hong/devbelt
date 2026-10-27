@@ -99,6 +99,14 @@ describe('monitor UI contracts', () => {
     expect(card).toContain('<MonitorIntervalPicker');
   });
 
+  it('offers an explicit takeover from another window', () => {
+    expect(panel).toContain("t('monitor.list.takeOver')");
+    expect(panel).toContain("emit('takeOver')");
+    expect(card).toContain("props.state.reason === 'otherWindow'");
+    expect(view).toContain("type: 'monitorTakeOver'");
+    expect(view).toContain("case 'monitorTakeOverResult'");
+  });
+
   it('keeps SQL collapsed, removes discarded cards and collapses created ones', () => {
     expect(card).toMatch(/<details v-if="p.sql"/);
     expect(card).not.toContain("'discarded'");

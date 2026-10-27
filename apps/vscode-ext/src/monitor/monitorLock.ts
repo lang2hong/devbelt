@@ -61,6 +61,18 @@ export class MonitorLock {
     return this.held;
   }
 
+  /**
+   * 主动接管（用户在本窗口点「在此窗口执行」）：不等锁过期，直接把锁写成本窗口。
+   * 原持锁窗口会在下一次心跳发现失锁并自行停下（协作式，不会杀进程）。
+   */
+  async forceAcquire(): Promise<boolean> {
+    const now = this.now();
+    await this.write({ owner: this.opts.ownerId, heartbeat: now, pid: process.pid });
+    const confirmed = await this.read();
+    this.held = confirmed?.owner === this.opts.ownerId;
+    return this.held;
+  }
+
   /** 主动释放（窗口关闭）：只删除属于自己的锁。 */
   async release(): Promise<void> {
     const current = await this.read();

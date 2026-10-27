@@ -2086,4 +2086,11 @@ export const zh: MessageCatalog = {
   'wv.ai.context.historyMeta': '历史：最近 {recent} 条原文，更早的 {summarized} 条已摘要（注入约 {chars} 字符）',
   'wv.ai.agent.autoOn': '这次请求像是要创建监控任务，已自动开启 Agent 模式；提案仍需你确认后才会创建。',
   'form.testTimeout': '测试连接超时（{seconds} 秒）：请检查网络、安全组、代理或 SSH 隧道',
+  'monitor.list.takeOver': '在此窗口执行',
+  'monitor.takeOver.title': '接管监控任务？',
+  'monitor.takeOver.detail': '当前窗口将接管监控任务的执行权，另一个窗口会停止执行并变为只读；任务会先暂停，需要你手动继续。',
+  'monitor.takeOver.confirmAction': '接管',
+  'monitor.takeOver.done': '已接管监控任务；任务已暂停，可在「后台任务」里继续。',
+  'monitor.notify.ownerMoved': '监控执行权已转移到另一个 VS Code 窗口，这里已停止执行（只读）。',
+  'monitor.proposal.otherWindowHint': '监控任务由另一个 VS Code 窗口执行。你可以先接管，再创建。',
 };

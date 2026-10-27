@@ -443,7 +443,19 @@ onMounted(() => {
         if (msg.proposal && typeof msg.proposal.id === 'string' && !proposals.value.some((p) => p.proposal.id === msg.proposal.id)) {
           if (msg.status === 'discarded') break;
           const status = msg.status === 'created' ? 'created' : 'pending';
-          proposals.value = [...proposals.value, { proposal: msg.proposal, status }];
+          proposals.value = [...proposals.value, {
+            proposal: msg.proposal,
+            status,
+            ...(typeof msg.reason === 'string' ? { reason: msg.reason } : {}),
+          }];
+        }
+        break;
+      case 'monitorTakeOverResult':
+        if (msg.ok === true) {
+          monitorExecuting.value = true;
+          proposals.value = proposals.value.map((p) => (p.reason === 'otherWindow'
+            ? { ...p, status: 'pending', error: undefined, reason: undefined }
+            : p));
         }
         break;
       case 'monitorEditResult':
@@ -455,7 +467,12 @@ onMounted(() => {
         const next = [...proposals.value];
         next[at] = msg.ok
           ? { ...next[at]!, status: 'created' }
-          : { ...next[at]!, status: 'failed', error: t('monitor.proposal.failed', { reason: proposalFailureText(t, msg.reason, msg.issues) }) };
+          : {
+            ...next[at]!,
+            status: 'failed',
+            ...(typeof msg.reason === 'string' ? { reason: msg.reason } : {}),
+            error: t('monitor.proposal.failed', { reason: proposalFailureText(t, msg.reason, msg.issues) }),
+          };
         proposals.value = next;
         break;
       }
@@ -771,6 +788,11 @@ function discardProposal(proposalId: string): void {
   post({ type: 'monitorDiscard', proposalId });
 }
 
+/** 主动把监控执行权接到本窗口（另一个窗口会停止执行，任务先暂停）。 */
+function takeOverMonitor(): void {
+  post({ type: 'monitorTakeOver' });
+}
+
 function explainMonitor(id: string, includeRows: boolean): void {
   // 解读会新建一个会话并切过去；关掉抽屉，让用户看到正在生成的回答。
   drawer.value = null;
@@ -817,6 +839,7 @@ function explainMonitor(id: string, includeRows: boolean): void {
             @confirm="confirmProposal"
             @discard="discardProposal"
             @open-tasks="openDrawer('monitor')"
+            @take-over="takeOverMonitor"
           />
         </div>
         <div v-if="agentNotice" class="ai-agent-notice">{{ agentNotice }}</div>
@@ -866,6 +889,7 @@ function explainMonitor(id: string, includeRows: boolean): void {
         :details="monitorDetails"
         :edit-result="editResult"
         @explain="explainMonitor"
+        @take-over="takeOverMonitor"
       />
       <QuotaPanel
         v-else-if="drawer === 'quota'"

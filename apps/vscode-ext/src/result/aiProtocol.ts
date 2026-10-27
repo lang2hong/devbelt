@@ -265,6 +265,12 @@ export interface AiAgentStepDown {
   };
 }
 
+/** 用户主动接管监控执行权的结果。 */
+export interface AiMonitorTakeOverDown {
+  type: 'monitorTakeOverResult';
+  ok: boolean;
+}
+
 /** 编辑已创建任务的结果（失败时 reason 为 `conditionInvalid` / `otherWindow` 等）。 */
 export interface AiMonitorEditResultDown {
   type: 'monitorEditResult';
@@ -293,7 +299,8 @@ export type AiDownMessage =
   | AiTableOptionsDown
   | AiTableNoteDown
   | AiColumnSampleDown
-  | AiMonitorEditResultDown;
+  | AiMonitorEditResultDown
+  | AiMonitorTakeOverDown;
 
 // ── Up（webview → host）──
 
@@ -427,6 +434,7 @@ export type AiUpMessage =
   | { type: 'monitorDetail'; id: string }
   | { type: 'monitorAction'; id: string; action: 'resume' | 'pause' | 'runNow' | 'remove' }
   | { type: 'monitorResumeAll' }
+  | { type: 'monitorTakeOver' }
   | { type: 'monitorConfirm'; proposalId: string; intervalMs?: number; intervalMinutes?: number; condition?: AiMonitorConditionInput }
   | { type: 'monitorEdit'; id: string; intervalMs?: number; intervalMinutes?: number; condition?: AiMonitorConditionInput }
   | { type: 'monitorDiscard'; proposalId: string }

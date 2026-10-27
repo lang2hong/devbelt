@@ -7,6 +7,20 @@ import type { ToolOutcome } from './runner.js';
 
 export const MONITOR_TOOL_NAME = 'propose_monitor';
 
+/** 拒绝原因给模型看的可读说明（模型原样转告用户，不暴露内部代码）。 */
+const REJECTION_TEXT: Record<string, string> = {
+  otherWindow: '监控任务由另一个 VS Code 窗口执行。请到那个窗口操作，或在界面上点「在此窗口执行」后重试。',
+  duplicate: '这张表已经有相同的监控任务了，可以在「后台任务」里查看。',
+  production: '生产连接默认不允许创建监控。',
+  connectionLimit: '这个连接最多 5 个监控任务，请先删除不需要的。',
+  totalLimit: '监控任务总数已达上限，请先删除不需要的。',
+  conditionInvalid: '提醒条件不合法，请重新选择类型和数值。',
+  conditionMissing: '还没有选择提醒条件，请让用户在卡片上选择。',
+  disabled: '数据监控已关闭（设置 devbelt.ai.monitor.enabled）。',
+  unsupportedEngine: '只支持 MySQL、PostgreSQL、SQLite 表。',
+  validation: '提案没有通过校验。',
+};
+
 /**
  * Agent 工具 `propose_monitor`（P13）：只校验并生成「监控提案」，**不创建任务**。
  * 提案以卡片形式出现在对话里，用户点击确认后才由扩展再校验一次并创建。
@@ -104,11 +118,18 @@ export function buildMonitorTool(host: MonitorToolHost): {
       const result = await host.service.propose(host.conn, host.database, host.schema, toProposalInput(args));
       if (!result.ok) {
         const issues = result.issues.map((i) => `${i.code}${i.detail ? `(${i.detail})` : ''}`).join(', ');
+        const readable = REJECTION_TEXT[result.reason] ?? result.reason;
         return {
-          content: JSON.stringify({ created: false, rejected: result.reason, issues }),
+          content: JSON.stringify({
+            created: false,
+            rejected: result.reason,
+            message: readable,
+            issues,
+            note: 'Tell the user this in their language; do not repeat internal codes like otherWindow.',
+          }),
           isError: true,
           errorCode: result.reason,
-          summary: `监控提案被拒绝：${result.reason}${issues ? `（${issues}）` : ''}`,
+          summary: `监控提案被拒绝：${readable}${issues ? `（${issues}）` : ''}`,
         };
       }
       host.onProposal(result.proposal);

@@ -191,6 +191,14 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
       await scheduler.resumeAll();
       for (const task of scheduler.list()) if (task.status === 'running') audit('resume', task);
     },
+    takeOver: async () => {
+      if (!(await lock.forceAcquire())) return false;
+      // 以磁盘为准重新加载并把任务全部暂停：不在用户没看到时开始查询。
+      await scheduler.takeOver();
+      refreshStatus();
+      emitChanged();
+      return true;
+    },
     confirm: async (proposalId, overrides) => {
       const result = await service.confirm(proposalId, overrides ?? {});
       return result.ok ? { ok: true, task: view(result.task) } : result;
@@ -252,7 +260,11 @@ export function registerMonitor(context: vscode.ExtensionContext, deps: MonitorS
             .then((picked) => { if (picked === open) void vscode.commands.executeCommand('devbelt.monitor.tasks'); });
         }
       }
-      else if (before && !lock.isHeld) scheduler.relinquish();
+      else if (before && !lock.isHeld) {
+        scheduler.relinquish();
+        // 另一个窗口主动接管：明确告诉用户这里已经停止执行，避免以为监控还在跑。
+        void vscode.window.showInformationMessage(l10n('monitor.notify.ownerMoved'));
+      }
       else if (!lock.isHeld) await scheduler.reload();
       if (before !== lock.isHeld) refreshStatus();
     } catch (err) {

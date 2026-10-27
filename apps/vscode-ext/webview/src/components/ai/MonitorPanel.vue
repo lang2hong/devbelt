@@ -23,7 +23,7 @@ const props = defineProps<{
   details: Record<string, MonitorDetail | null>;
   editResult?: { id: string; ok: boolean; reason?: string } | null;
 }>();
-const emit = defineEmits<{ explain: [id: string, includeRows: boolean] }>();
+const emit = defineEmits<{ explain: [id: string, includeRows: boolean]; takeOver: [] }>();
 const { t, isZh } = useI18n();
 const { post } = useVsCode();
 
@@ -125,7 +125,10 @@ function cell(value: unknown): string {
 
 <template>
   <div class="mon">
-    <p v-if="!props.executing && props.tasks.length" class="mon-note">{{ t('monitor.list.otherWindowNote') }}</p>
+    <p v-if="!props.executing && props.tasks.length" class="mon-note">
+      {{ t('monitor.list.otherWindowNote') }}
+      <button class="mon-link" @click="emit('takeOver')">{{ t('monitor.list.takeOver') }}</button>
+    </p>
 
     <!-- 列表 -->
     <template v-if="!selected">

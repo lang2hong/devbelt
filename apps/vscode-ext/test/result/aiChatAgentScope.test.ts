@@ -95,7 +95,7 @@ beforeEach(() => {
   AiChatView.closeAll();
   MonitorBridge.init({
     list: () => [], detail: async () => undefined, action: async () => undefined, resumeAll: async () => undefined,
-    confirm: async () => ({ ok: true, task: {} as any }), edit: async () => ({ ok: true, task: {} as any }), discard: vi.fn(), executing: () => true,
+    confirm: async () => ({ ok: true, task: {} as any }), takeOver: async () => true, edit: async () => ({ ok: true, task: {} as any }), discard: vi.fn(), executing: () => true,
     onChanged: () => ({ dispose() {} }), describeProposal: () => ({}) as any,
   });
 });

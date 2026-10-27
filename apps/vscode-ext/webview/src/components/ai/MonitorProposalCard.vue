@@ -15,6 +15,8 @@ export interface ProposalState {
   proposal: MonitorProposalView;
   status: 'pending' | 'creating' | 'created' | 'failed';
   error?: string;
+  /** 创建失败的原因代码（`otherWindow` 时给出「在此窗口执行」）。 */
+  reason?: string;
 }
 
 const props = defineProps<{ state: ProposalState }>();
@@ -22,6 +24,7 @@ const emit = defineEmits<{
   confirm: [proposalId: string, intervalMs: number, condition: ConditionInput];
   discard: [proposalId: string];
   openTasks: [];
+  takeOver: [];
 }>();
 const { t } = useI18n();
 
@@ -107,7 +110,14 @@ function formatValue(value: number | null): string {
       <li v-for="w in p.warnings" :key="w.code">{{ t(`monitor.warning.${w.code}`, { detail: w.detail ?? '' }) }}</li>
     </ul>
 
-    <p v-if="props.state.status === 'failed'" class="mp-error" role="alert">{{ props.state.error }}</p>
+    <p v-if="props.state.status === 'failed'" class="mp-error" role="alert">
+      {{ props.state.error }}
+      <template v-if="props.state.reason === 'otherWindow'">
+        <br />
+        {{ t('monitor.proposal.otherWindowHint') }}
+        <button class="mp-link" @click="emit('takeOver')">{{ t('monitor.list.takeOver') }}</button>
+      </template>
+    </p>
 
     <footer class="mp-actions">
       <span class="mp-interval">
