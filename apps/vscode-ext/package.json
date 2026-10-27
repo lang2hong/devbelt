@@ -2832,7 +2832,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm -C ../../packages/db-core build && pnpm -C ../../packages/ai-core build && pnpm -C ../../packages/agent-core build && pnpm -C ../../packages/db-host build && pnpm -C ../../packages/explain-core build && pnpm -C ../../packages/masking-core build && cd webview && npx vite build && cd .. && node esbuild.js && vitest run",
-    "package": "vsce package --no-dependencies --baseImagesUrl https://raw.githubusercontent.com/lang2hong/devbelt/main/",
+    "package": "vsce package --no-dependencies --readme-path README.md --baseContentUrl https://raw.githubusercontent.com/lang2hong/devbelt/main/ --baseImagesUrl https://raw.githubusercontent.com/lang2hong/devbelt/main/",
     "vsix:smoke": "node scripts/vsix-smoke.mjs"
   },
   "dependencies": {
