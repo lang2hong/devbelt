@@ -54,7 +54,7 @@ rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist" "$ADMIN_SRC/dist" "$SITE_SRC/dist"
 (cd "$REPO_ROOT" && DEVBELT_DB_ADMIN_BASE="${DEVBELT_DB_ADMIN_BASE:-/admin/}" pnpm --filter @devbelt/admin-ui build)
 (cd "$REPO_ROOT" && pnpm --filter @devbelt/site build)
 
-echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
+echo "==> [3/7] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"
 # 备份当前版本（首次部署 dist 不存在，tar 失败时静默跳过）
 ssh "$REMOTE" \
@@ -73,7 +73,7 @@ ssh "$REMOTE" "cd '$DEPLOY_DIR' \
 # 服务端 dotenv 只读工作目录下的 .env
 scp "$SCRIPT_DIR/.env.production" "$REMOTE:$DEPLOY_DIR/.env"
 
-echo "==> [4/6] 推送 db-ui 产物到 ${REMOTE}:${CONSOLE_DIR}/dist"
+echo "==> [4/7] 推送 db-ui 产物到 ${REMOTE}:${CONSOLE_DIR}/dist"
 ssh "$REMOTE" "mkdir -p '$CONSOLE_DIR/backups'"
 # 备份当前控制台静态（首次不存在时静默跳过）
 ssh "$REMOTE" \
@@ -87,7 +87,7 @@ ssh "$REMOTE" "cd '$CONSOLE_DIR' \
   && mv .dist.staging/dist dist \
   && rm -rf dist.old .dist.staging"
 
-echo "==> [4b/6] 推送 auth-ui 产物到 ${REMOTE}:${AUTH_DIR}/dist"
+echo "==> [4b/7] 推送 auth-ui 产物到 ${REMOTE}:${AUTH_DIR}/dist"
 ssh "$REMOTE" "mkdir -p '$AUTH_DIR/backups'"
 ssh "$REMOTE" \
   "cd '$AUTH_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
@@ -99,7 +99,7 @@ ssh "$REMOTE" "cd '$AUTH_DIR' \
   && mv .dist.staging/dist dist \
   && rm -rf dist.old .dist.staging"
 
-echo "==> [4d/7] 推送 admin-ui 产物到 ${REMOTE}:${ADMIN_DIR}/dist"
+echo "==> [4c/7] 推送 admin-ui 产物到 ${REMOTE}:${ADMIN_DIR}/dist"
 ssh "$REMOTE" "mkdir -p '$ADMIN_DIR/backups'"
 ssh "$REMOTE" \
   "cd '$ADMIN_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
@@ -111,7 +111,7 @@ ssh "$REMOTE" "cd '$ADMIN_DIR' \
   && mv .dist.staging/dist dist \
   && rm -rf dist.old .dist.staging"
 
-echo "==> [4e/7] 推送 site（官网首页）产物到 ${REMOTE}:${SITE_DIR}/dist"
+echo "==> [4d/7] 推送 site（官网首页）产物到 ${REMOTE}:${SITE_DIR}/dist"
 ssh "$REMOTE" "mkdir -p '$SITE_DIR/backups'"
 ssh "$REMOTE" \
   "cd '$SITE_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
