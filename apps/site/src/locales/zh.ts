@@ -1,0 +1,152 @@
+import type { Copy } from '../lib/copy';
+
+export const zh: Copy = {
+  htmlLang: 'zh-CN',
+  meta: {
+    title: 'DevBelt — 在 VS Code 内完成数据库开发',
+    description:
+      'DevBelt 是一款 VS Code 扩展，把 MySQL、PostgreSQL、SQLite、Redis、Elasticsearch、AI 助手和数据监控整合在同一个编辑器内。',
+  },
+  nav: {
+    features: '功能',
+    new: '0.4.0 新功能',
+    install: '安装',
+    docs: '文档',
+    plans: '同步套餐',
+    github: 'GitHub',
+    login: '登录',
+    register: '免费注册',
+    console: '控制台',
+    langSwitch: 'English',
+  },
+  hero: {
+    eyebrowLabel: 'v0.4.0',
+    eyebrowDesc: '数据监控、AI 提案、多窗口接管、账号隔离',
+    h1Html: '在 <span class="accent">VS Code</span> 内完成<br/>数据库开发，无需切工具。',
+    lead:
+      'DevBelt 是一款开源 VS Code 扩展：SQL 编辑与结果网格、ER 图、Redis、Elasticsearch、AI 助手、EXPLAIN 可视化、端到端加密同步——全部在你的编辑器里。',
+    primary: '在 VS Code 中安装',
+    primaryConsole: '进入控制台',
+    secondary: '查看文档',
+    login: '登录',
+    register: '免费注册',
+    alt: 'DevBelt SQL 编辑器与结果表格',
+    caption: 'SQL 编辑器、上下文补全、多结果表格与图表，全部在 VS Code 内。',
+  },
+  features: {
+    title: '一个扩展，覆盖数据库工作的大部分场景',
+    sub: '从连接管理到 AI 诊断，从 Redis/ES 到定时监控——DevBelt 把它们整合到一个工作区里。',
+    items: [
+      { icon: 'SQL', title: 'SQL 工作台', desc: '连接分组、SSH 隧道、上下文补全、格式化、执行与取消、多结果网格、导入导出、库到库传输。' },
+      { icon: 'ER', title: '结构与数据', desc: 'ER 图、表设计器、DDL 生成、Schema 对比与同步、备份恢复、模拟数据生成、数据字典导出。' },
+      { icon: '🔍', title: '查询洞察', desc: 'MySQL/PG/SQLite 的可视化 EXPLAIN、AI 解释计划、索引建议、慢查询分析、SQL 诊断规则。' },
+      { icon: '▶▶', title: 'Redis', desc: '单机 / Cluster / Sentinel，SSH 隧道与 TLS；键树折叠、SCAN 分页、五种原生类型、Stream 消费组。' },
+      { icon: 'ES', title: 'Elasticsearch', desc: 'HTTP/HTTPS、Basic/API Key、TLS 与 SSH 隧道；集群/索引/mapping 浏览、DSL 控制台、文档 CRUD。' },
+      { icon: '✦', title: 'AI 助手', desc: '流式对话、历史压缩、Schema 上下文；Agent 模式可跑只读 SQL 和 EXPLAIN，写操作只会"提出"不自动执行。' },
+      { icon: '⏱', title: '数据监控', desc: '按行数、单值指标或新增行做定时只读检查，命中条件弹 VS Code 通知；AI 可以提出任务，但只有你确认后才会运行。' },
+      { icon: '🔒', title: '同步与审计', desc: '连接、分组、查询与 AI Key 端到端加密跨设备同步；按账号隔离数据、审计日志、备份调度、只读模式。' },
+    ],
+  },
+  showcase: {
+    title: '每个场景都为工作流设计',
+    sub: '不是把网页塞进 VS Code——界面、快捷键与交互都按编辑器习惯打磨。',
+    items: [
+      {
+        title: '画得出，看得懂：ER 图与结构',
+        paras: [
+          '自动从数据库反向生成 ER 图，按 Schema 过滤、拖拽排版、导出 PNG；表设计器所见即所得，变更统一生成 DDL 预览。',
+          'PostgreSQL 多 schema 写入、多库懒建会话；Schema 对比与同步 SQL 一键生成。',
+        ],
+        bullets: ['ER 图自动布局 + 手动调整', '表设计器 / DDL 预览 / 列、索引、外键编辑', '结构对比与同步 SQL', '数据字典导出为 Markdown / HTML'],
+        img: '/screenshots/02-er-diagram.png',
+        alt: 'ER 图',
+      },
+      {
+        title: 'AI 助手：会查数据库，但不会擅自动手',
+        paras: [
+          'AI Chat 流式回答、自动带上相关表结构；历史消息不会被截断，而是把更早的内容压成摘要保留上下文。',
+          'Agent 模式默认关闭。打开后，助手可以逐步查看结构、跑只读 SQL 和 EXPLAIN；任何写操作（DML/DDL）都必须你在原生确认框里批准。',
+        ],
+        bullets: [
+          '自然语言生成 SQL、解释与优化、错误诊断',
+          '结果可视化（柱状/折线/面积/饼/堆叠/横向条形图）',
+          'Agent 模式受步数、工具次数和时间预算限制',
+          '自带 API Key 或通过服务端代理',
+        ],
+        img: '/screenshots/05-ai-chat.png',
+        alt: 'AI Chat',
+        reverse: true,
+      },
+      {
+        title: '数据监控：定时只读检查，命中才提醒',
+        paras: [
+          '选一张表：看行数、跟踪一个数值指标、或按已有整型 / 时间戳列追踪新增行；AI 可以直接"提出"一个监控任务（卡片形式），间隔和条件由你选，确认后才开始跑。',
+          '多窗口同时打开 DevBelt 时，监控由单实例持有；你可以显式接管，交接时上一窗口的任务会自动暂停。',
+        ],
+        bullets: [
+          '检查间隔 5 秒到 24 小时，可自定义',
+          '三种监控类型：行数 / 单值指标 / 新增行（含游标去重）',
+          '后台任务抽屉：图表、历史、下次检查、失败次数',
+          '切换账号时自动暂停任务，避免串数据',
+        ],
+        img: '/screenshots/07-monitor-tasks.png',
+        alt: '后台监控任务',
+      },
+      {
+        title: 'EXPLAIN → 图表：把执行计划交给 AI',
+        paras: [
+          'MySQL（FORMAT=JSON）、PostgreSQL（FORMAT JSON）、SQLite（EXPLAIN QUERY PLAN）的可视化 EXPLAIN：计划树、节点详情、告警高亮（全扫描、文件排序、临时表、嵌套循环、缺索引）。',
+          '一键"AI 解释计划"，把精简摘要发给 AI Chat 解读；索引建议只给方案不自动执行。',
+        ],
+        bullets: ['只做 EXPLAIN，不执行语句', '高风险节点高亮与原因说明', '等值→范围→排序的索引建议，附置信度与风险', '结果一键图表化'],
+        img: '/screenshots/08-explain.png',
+        alt: 'SQL EXPLAIN 与 AI 解读',
+        reverse: true,
+      },
+    ],
+  },
+  news: {
+    badge: '0.4.0',
+    title: '这个版本的亮点',
+    colon: '：',
+    items: [
+      { h: '数据监控', t: '定时只读检查（行数 / 单值 / 新增行），命中条件发 VS Code 通知；AI 只"提出"任务卡，由你确认。' },
+      { h: '多窗口接管', t: '监控用文件锁 + 15 秒心跳实现单实例；显式接管时上一窗口任务自动暂停，避免重复检查。' },
+      { h: '账号级数据隔离', t: '连接、AI Key、历史、审计、备份全部按账号隔离；退出登录回到本地；切换账号时关闭所有会话并可选复制本地数据。' },
+      { h: 'AI 会话更稳', t: '近 8 条消息逐字保留，更早消息压成摘要；监控类意图自动启用 Agent；模型错误时自动回退到非工具调用。' },
+      { h: 'Redis 与 ES 体验', t: 'Redis 键树分页可配置（默认 2000）；ES 加 45 秒看门狗，在途请求可取消；IME 中文输入时 Enter 不误发送。' },
+    ],
+    changelog: '完整发布说明 →',
+  },
+  install: {
+    title: '安装方式',
+    sub: 'DevBelt 是一个 VS Code 扩展，支持 VS Code、VSCodium、Cursor、Windsurf 等 VS Code 兼容编辑器。',
+    vsc: {
+      tag: '推荐',
+      tagRec: 'rec',
+      title: 'VS Code Marketplace',
+      desc: '微软官方市场，VS Code / Cursor 等编辑器内置搜索即可安装。',
+      btn: '打开 Marketplace',
+    },
+    ovsx: {
+      tag: '开源',
+      title: 'Open VSX Registry',
+      sub: '',
+      desc: 'Eclipse 基金会维护的开源市场，VSCodium / Gitpod / Eclipse Theia 等默认使用。',
+      btn: '打开 Open VSX',
+    },
+    vsix: { title: 'VSIX 离线包', desc: '从 GitHub Releases 下载 .vsix，用命令行或 Extensions 面板"Install from VSIX…"安装。', size: 'v0.4.0 · 6.57 MB', btn: 'GitHub Releases' },
+  },
+  footer: {
+    tagline: 'DevBelt 是一款开源 VS Code 扩展，把 MySQL、PostgreSQL、SQLite、Redis、Elasticsearch、AI 助手和数据监控整合在同一个编辑器内。',
+    productHead: '产品',
+    product: { features: '功能', new: '0.4.0 新功能', plans: '同步套餐' },
+    resourcesHead: '资源',
+    resources: { docs: '文档', changelog: '更新日志', github: 'GitHub 仓库' },
+    getHead: '下载',
+    get: { vsc: 'VS Code Marketplace', ovsx: 'Open VSX' },
+    ver: (v) => `${v} · MIT 许可`,
+    license: 'MIT',
+    rights: '© DevBelt',
+  },
+};

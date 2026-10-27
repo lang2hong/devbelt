@@ -39,16 +39,20 @@ AUTH_DIR="$(dirname "$DEPLOY_DIR")/auth-ui"
 AUTH_SRC="$REPO_ROOT/apps/auth-ui"
 ADMIN_DIR="$(dirname "$DEPLOY_DIR")/admin-ui"
 ADMIN_SRC="$REPO_ROOT/apps/admin-ui"
+# site 是根路径的官网 SPA；dist 默认 <cwd>/../site/dist（见 siteDistDir()）
+SITE_DIR="$(dirname "$DEPLOY_DIR")/site"
+SITE_SRC="$REPO_ROOT/apps/site"
 
-echo "==> [1/6] 清理并构建 server -> apps/server/dist"
+echo "==> [1/7] 清理并构建 server -> apps/server/dist"
 rm -rf "$SCRIPT_DIR/dist"
 (cd "$REPO_ROOT" && pnpm --filter @devbelt/server build)
 
-echo "==> [2/6] 清理并构建 db-ui（base /db/）与 auth-ui（base /）"
-rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist" "$ADMIN_SRC/dist"
+echo "==> [2/7] 清理并构建前端：db-ui（base /db/）、auth-ui（base /）、admin-ui（base /admin/）、site（base /）"
+rm -rf "$CONSOLE_SRC/dist" "$AUTH_SRC/dist" "$ADMIN_SRC/dist" "$SITE_SRC/dist"
 (cd "$REPO_ROOT" && DEVBELT_DB_CONSOLE_BASE="${DEVBELT_DB_CONSOLE_BASE:-/db/}" pnpm --filter @devbelt/db-ui build)
 (cd "$REPO_ROOT" && DEVBELT_DB_AUTH_BASE="${DEVBELT_DB_AUTH_BASE:-/}" pnpm --filter @devbelt/auth-ui build)
 (cd "$REPO_ROOT" && DEVBELT_DB_ADMIN_BASE="${DEVBELT_DB_ADMIN_BASE:-/admin/}" pnpm --filter @devbelt/admin-ui build)
+(cd "$REPO_ROOT" && pnpm --filter @devbelt/site build)
 
 echo "==> [3/6] 推送 server 产物到 ${REMOTE}:${DEPLOY_DIR}"
 ssh "$REMOTE" "mkdir -p '$DEPLOY_DIR/backups'"
@@ -95,7 +99,7 @@ ssh "$REMOTE" "cd '$AUTH_DIR' \
   && mv .dist.staging/dist dist \
   && rm -rf dist.old .dist.staging"
 
-echo "==> [4c/6] 推送 admin-ui 产物到 ${REMOTE}:${ADMIN_DIR}/dist"
+echo "==> [4d/7] 推送 admin-ui 产物到 ${REMOTE}:${ADMIN_DIR}/dist"
 ssh "$REMOTE" "mkdir -p '$ADMIN_DIR/backups'"
 ssh "$REMOTE" \
   "cd '$ADMIN_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
@@ -107,7 +111,19 @@ ssh "$REMOTE" "cd '$ADMIN_DIR' \
   && mv .dist.staging/dist dist \
   && rm -rf dist.old .dist.staging"
 
-echo "==> [4d/6] AI 上游 Key -> ${REMOTE}:${DEPLOY_DIR}/ai.env（仅服务器本地 600；不写 .env/不进仓库）"
+echo "==> [4e/7] 推送 site（官网首页）产物到 ${REMOTE}:${SITE_DIR}/dist"
+ssh "$REMOTE" "mkdir -p '$SITE_DIR/backups'"
+ssh "$REMOTE" \
+  "cd '$SITE_DIR' && tar czf \"backups/dist-\$(date +%Y%m%d%H%M%S).tar.gz\" dist 2>/dev/null || true"
+ssh "$REMOTE" "rm -rf '$SITE_DIR/.dist.staging' && mkdir -p '$SITE_DIR/.dist.staging'"
+tar czf - -C "$SITE_SRC" dist | ssh "$REMOTE" "tar xzf - -C '$SITE_DIR/.dist.staging'"
+ssh "$REMOTE" "cd '$SITE_DIR' \
+  && rm -rf dist.old \
+  && if [ -d dist ]; then mv dist dist.old; fi \
+  && mv .dist.staging/dist dist \
+  && rm -rf dist.old .dist.staging"
+
+echo "==> [5/7] AI 上游 Key -> ${REMOTE}:${DEPLOY_DIR}/ai.env（仅服务器本地 600；不写 .env/不进仓库）"
 AI_KEY_SRC="${DEVBELT_AI_UPSTREAM_API_KEY:-${DASHSCOPE_API_KEY:-}}"
 if [[ -n "$AI_KEY_SRC" ]]; then
   printf 'DEVBELT_AI_UPSTREAM_API_KEY=%s\n' "$AI_KEY_SRC" | ssh "$REMOTE" "umask 077 && cat > '$DEPLOY_DIR/ai.env'"
@@ -115,7 +131,7 @@ else
   echo "    本机未找到 AI Key（DEVBELT_AI_UPSTREAM_API_KEY / DASHSCOPE_API_KEY）：保留服务器现有 ai.env（若不存在则 /api/ai/* 返回 503）"
 fi
 
-echo "==> [5/6] 写 systemd 服务"
+echo "==> [6/7] 写 systemd 服务"
 # bundle 自包含全部依赖，服务器无需 npm install（不再推 package.json / 装 node_modules）。
 # 只需定位 node 可执行文件用于 systemd ExecStart。
 NODE_BIN="$(ssh "$REMOTE" '. "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 && command -v node')"
@@ -148,14 +164,15 @@ StandardError=append:${LOG_FILE}
 WantedBy=multi-user.target
 EOF
 
-echo "==> [6/6] 重启服务并健康检查"
+echo "==> [7/7] 重启服务并健康检查"
 ssh "$REMOTE" \
   "sudo systemctl daemon-reload \
    && sudo systemctl enable --now '$SERVICE_NAME' \
    && sudo systemctl restart '$SERVICE_NAME'"
 ssh "$REMOTE" "sleep 1; systemctl --no-pager --full status '$SERVICE_NAME' || true"
 ssh "$REMOTE" "curl -sf '$HEALTH_URL' && echo '  <- /health OK'"
-# 静态资源健康检查：控制台 shell 可访问（dist 缺失/损坏时 fail-visible）。
+# 静态资源健康检查：控制台 shell 与官网首页均可访问（dist 缺失/损坏时 fail-visible）。
 ssh "$REMOTE" "curl -sf 'http://localhost:3000/db/' >/dev/null && echo '  <- console static OK'"
+ssh "$REMOTE" "curl -sf 'http://localhost:3000/' | grep -q '<div id=\"app\"></div>' && echo '  <- site static OK'"
 
 echo "部署完成"

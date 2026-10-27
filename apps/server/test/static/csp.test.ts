@@ -5,7 +5,12 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { registerConsoleStatic, BASE_CSP } from '../../src/consoleStatic.js';
 
-const ENV_KEYS = ['DEVBELT_DB_AUTH_DIST_DIR', 'DEVBELT_DB_CONSOLE_DIST_DIR', 'DEVBELT_DB_ADMIN_DIST_DIR'] as const;
+const ENV_KEYS = [
+  'DEVBELT_DB_AUTH_DIST_DIR',
+  'DEVBELT_DB_CONSOLE_DIST_DIR',
+  'DEVBELT_DB_ADMIN_DIST_DIR',
+  'DEVBELT_SITE_DIST_DIR',
+] as const;
 
 let root = '';
 let app: FastifyInstance;
@@ -17,7 +22,7 @@ function writeDist(dir: string, files: string[]): void {
 }
 
 function cspOf(res: { headers: Record<string, unknown> }): string {
-  return String(res.headers['content-security-policy'] ?? '');
+  return String(res.headers['content-security-policy'] ?? '').replace(/'nonce-[A-Za-z0-9+/=]+'/g, "'nonce-%NONCE%'");
 }
 
 beforeAll(async () => {
@@ -25,15 +30,20 @@ beforeAll(async () => {
   const auth = path.join(root, 'auth');
   const con = path.join(root, 'con');
   const admin = path.join(root, 'admin');
+  const site = path.join(root, 'site');
+  mkdirSync(path.join(site, 'assets', 'site'), { recursive: true });
+  mkdirSync(path.join(site, 'screenshots'), { recursive: true });
   writeDist(auth, ['index.html', 'login.html', 'register.html', 'verify-email.html']);
   writeDist(con, ['index.html', 'sync-reset.html']);
   writeDist(admin, ['index.html']);
+  writeFileSync(path.join(site, 'index.html'), '<html><head><!--INITIAL_STATE--></head><body><div id="app"></div></body></html>');
 
   saved = {};
   for (const k of ENV_KEYS) saved[k] = process.env[k];
   process.env.DEVBELT_DB_AUTH_DIST_DIR = auth;
   process.env.DEVBELT_DB_CONSOLE_DIST_DIR = con;
   process.env.DEVBELT_DB_ADMIN_DIST_DIR = admin;
+  process.env.DEVBELT_SITE_DIST_DIR = site;
 
   app = Fastify();
   await registerConsoleStatic(app);

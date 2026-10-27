@@ -1,0 +1,75 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --bg2: #0e152a;
+  --panel: #131a30;
+  --panel2: #182040;
+  --line: #232a44;
+  --line2: #2c3558;
+  --fg: #e6e9f2;
+  --muted: #9aa4bf;
+  --dim: #6b7596;
+  --accent: #3d6bff;
+  --accent2: #6b8bff;
+  --ok: #3ad29a;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --shadow-card: 0 12px 40px -18px rgba(0, 0, 0, 0.6);
+  --shadow-hero: 0 30px 80px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(61, 107, 255, 0.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 20%, rgba(58, 210, 154, 0.1), transparent 60%),
+    var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: rgba(61, 107, 255, 0.4);
+  color: #fff;
+}
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 600px) {
+  .wrap {
+    padding: 0 18px;
+  }
+}

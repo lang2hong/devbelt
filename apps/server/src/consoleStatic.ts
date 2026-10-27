@@ -1,26 +1,44 @@
+import { randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { renderHome, renderPlansPage, type HomePlan } from './home.js';
+import { renderPlansPage, type HomePlan } from './home.js';
 import { renderDocsIndex, renderDocPage } from './docs.js';
 
-/** 公开页/身份页/后台的严格 CSP（无第三方、无 eval、无 wasm、无 worker）。 */
+/**
+ * CSP for public pages / site SPA / auth UI.
+ *
+ * - self-bundled scripts and styles from /assets/site, /assets (auth-ui), /db/assets, /admin/assets
+ * - inline <style> is allowed in the plans/docs SSR pages (style-src 'unsafe-inline')
+ * - one inline bootstrap script carries the per-request nonce so the server can inject
+ *   `window.__INITIAL_STATE__` without widening script-src to 'unsafe-inline'
+ * - images only from this origin + data: URIs (the landing site ships screenshots locally)
+ */
 export const BASE_CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+  "default-src 'self'; " +
+  "script-src 'self' 'nonce-%NONCE%'; " +
+  "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; connect-src 'self'; base-uri 'none'; " +
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 
 // P6-S5b：仅 db-ui 控制台（`/db/*`）需在浏览器执行 Argon2id WASM（Web Worker）。
-// 单独放行 wasm-unsafe-eval 与 worker-src 'self'；不放开 img-src，也不允许内联/远程脚本。
+// 控制台 shell 里也可能引用文档页内嵌 SVG / data URL；img-src 保持和首页一致。
 export const DB_CSP =
-  "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
+  "default-src 'self'; " +
+  "script-src 'self' 'nonce-%NONCE%' 'wasm-unsafe-eval'; " +
+  "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; connect-src 'self'; worker-src 'self'; base-uri 'none'; " +
   "frame-ancestors 'none'; form-action 'self'; object-src 'none'";
 
 /** 身份页（auth-ui）dist：站点根，`/login`、`/register`、`/verify-email`。 */
 function authDistDir(): string {
   return process.env.DEVBELT_DB_AUTH_DIST_DIR || path.resolve(process.cwd(), '../auth-ui/dist');
+}
+
+/** DevBelt 官网（site）dist：站点根 `/` 的 SPA 落地页。 */
+function siteDistDir(): string {
+  return process.env.DEVBELT_SITE_DIST_DIR || path.resolve(process.cwd(), '../site/dist');
 }
 
 /** DB 控制台（db-ui）dist：`/db/` 下的 SPA 与 `/db/sync-reset`。 */
@@ -38,35 +56,40 @@ function notFound(_req: FastifyRequest, reply: FastifyReply): void {
 }
 
 /**
- * 前端静态托管（P2）。
+ * 前端静态托管。
  *
- * 两个构建产物同源托管：
- *   - auth-ui（base `/`）：根身份页 `/login`、`/register`、`/verify-email`，
- *     资源在 `/assets/*`。
- *   - db-ui（base `/db/`）：`/db/` 控制台 SPA（未知子路径回落壳，带扩展名者除外），
- *     `/db/sync-reset` 邮件落地页，资源在 `/db/assets/*`。
- * `/` 暂 302 到 `/login`（P3 换套件首页）。HTML 均 `no-store` + 严格 CSP；
- * hash 资源 immutable 一年缓存；`/api/*` 由 Fastify 显式路由优先。
+ * 同源托管四个 SPA + 静态资源：
+ *   - site（base `/`）：产品官网（`/`、`/en` 等），资源在 `/assets/site/`，截图在 `/screenshots/`。
+ *   - auth-ui（base `/`）：身份页 `/login`、`/register`、`/verify-email`，资源在 `/assets/`。
+ *   - db-ui（base `/db/`）：控制台 SPA，资源在 `/db/assets/`。
+ *   - admin-ui（base `/admin/`）：后台 SPA，资源在 `/admin/assets/`。
+ *
+ * HTML 均 no-store + 严格 CSP；hash 资源 immutable 一年缓存；`/api/*` 由 Fastify
+ * 显式路由优先。首页/套餐/文档页由服务端注入登录态或直接 SSR。
  */
 export interface ConsoleStaticOptions {
-  /** 套件首页的套餐数据来源（由组合根注入；缺省则首页不含套餐区）。 */
+  /** 套餐数据来源（由组合根注入；缺省则套餐页降级）。 */
   getHomePlans?: () => Promise<HomePlan[]>;
-  /** 首页登录态判定（由组合根按 refresh cookie 注入；缺省视为未登录）。 */
+  /** 登录态判定（由组合根按 refresh cookie 注入；缺省视为未登录）。 */
   isLoggedIn?: (req: FastifyRequest) => Promise<boolean>;
 }
 
 export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleStaticOptions = {}): Promise<void> {
   const authDist = authDistDir();
+  const siteDist = siteDistDir();
   const consoleDist = consoleDistDir();
   const adminDist = adminDistDir();
   const authReady = existsSync(authDist);
+  const siteReady = existsSync(siteDist);
   const consoleReady = existsSync(consoleDist);
   const adminReady = existsSync(adminDist);
 
   if (!authReady) app.log.warn(`[static] auth-ui dist not found at ${authDist}; identity pages unavailable`);
+  if (!siteReady) app.log.warn(`[static] site dist not found at ${siteDist}; marketing homepage unavailable`);
   if (!consoleReady) app.log.warn(`[static] db-ui dist not found at ${consoleDist}; console unavailable`);
   if (!adminReady) app.log.warn(`[static] admin-ui dist not found at ${adminDist}; admin console unavailable`);
 
+  // Hashed static assets (immutable, one-year cache)
   if (authReady) {
     await app.register(fastifyStatic, {
       root: path.join(authDist, 'assets'),
@@ -78,7 +101,29 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
       },
     });
   }
-
+  if (siteReady) {
+    // site 自己打包出的 JS/CSS 放在 /assets/site/ 子路径，避开 auth-ui 的 /assets/* 冲突
+    await app.register(fastifyStatic, {
+      root: path.join(siteDist, 'assets', 'site'),
+      prefix: '/assets/site/',
+      decorateReply: false,
+      index: false,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
+    // site public/ 下的静态资源（screenshots、icon、logo）直接挂在根
+    await app.register(fastifyStatic, {
+      root: siteDist,
+      prefix: '/',
+      decorateReply: false,
+      index: false,
+      allowedPath: (p) => p.startsWith('/screenshots/') || p === '/icon.png' || p === '/logo.svg' || p === '/favicon.ico',
+      setHeaders: (res, _reqPath) => {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      },
+    });
+  }
   if (consoleReady) {
     await app.register(fastifyStatic, {
       root: path.join(consoleDist, 'assets'),
@@ -90,7 +135,6 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
       },
     });
   }
-
   if (adminReady) {
     await app.register(fastifyStatic, {
       root: path.join(adminDist, 'assets'),
@@ -112,12 +156,21 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     }
   }
 
+  function newNonce(): string {
+    return randomBytes(16).toString('base64');
+  }
+
+  function applyCspNonce(csp: string, nonce: string): string {
+    return csp.replace(/%NONCE%/g, nonce);
+  }
+
   function sendHtml(reply: FastifyReply, html: string, csp: string = BASE_CSP): void {
+    const nonce = newNonce();
     reply
       .header('Cache-Control', 'no-store')
-      .header('Content-Security-Policy', csp)
+      .header('Content-Security-Policy', applyCspNonce(csp, nonce))
       .type('text/html')
-      .send(html);
+      .send(html.replace(/%NONCE%/g, nonce));
   }
 
   function serveHtml(html: string | null, csp: string = BASE_CSP) {
@@ -125,6 +178,13 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
       if (html == null) return notFound(req, reply);
       sendHtml(reply, html, csp);
     };
+  }
+
+  /** 把 `<!--INITIAL_STATE-->` 替换成带 nonce 的 bootstrap inline script。 */
+  function injectInitialState(shell: string, state: { loggedIn: boolean }, nonce: string): string {
+    const json = JSON.stringify(state);
+    const bootstrap = `<script nonce="${nonce}">window.__INITIAL_STATE__=${json};</script>`;
+    return shell.replace('<!--INITIAL_STATE-->', bootstrap);
   }
 
   /** 首页/套餐页共用的套餐数据源（失败降级为不含套餐）。 */
@@ -138,7 +198,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     }
   }
 
-  /** 公开页（首页/套餐/文档）共用的登录态判定；失败按未登录处理，不阻断渲染。 */
+  /** 公开页共用的登录态判定；失败按未登录处理，不阻断渲染。 */
   async function loadLoggedIn(req: FastifyRequest): Promise<boolean> {
     if (!opts.isLoggedIn) return false;
     try {
@@ -149,7 +209,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     }
   }
 
-  // 身份页（auth-ui，根路径）
+  // ---------- 身份页（auth-ui，根路径） ----------
   const authEntries: Array<[string, string]> = [
     ['/verify-email', 'verify-email.html'],
     ['/login', 'login.html'],
@@ -159,18 +219,43 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     app.get(route, serveHtml(authReady ? readHtml(authDist, file) : null));
   }
 
-  // 套件首页（套餐为服务端渲染；数据源失败时降级为不含套餐的页面）
-  app.get('/', async (req, reply) => {
-    sendHtml(reply, renderHome({ loggedIn: await loadLoggedIn(req) }));
-  });
+  // ---------- 官网 SPA（site，根路径） ----------
+  //
+  // index.html 在两处被发送：
+  //   - 直接访问 `/` 或 `/en`：服务端注入 __INITIAL_STATE__.loggedIn 再返回
+  //   - SPA fallback：其他合法客户端路径（带扩展名则视为静态资源走 404）
+  const siteShellRaw = siteReady ? readHtml(siteDist, 'index.html') : null;
 
-  // 公开套餐页（/plans，无需登录）
+  async function serveSiteShell(req: FastifyRequest, reply: FastifyReply, injectState = true): Promise<void> {
+    if (siteShellRaw == null) return notFound(req, reply);
+    if (!injectState) return serveHtml(siteShellRaw)(req, reply);
+    const loggedIn = await loadLoggedIn(req);
+    const nonce = newNonce();
+    const html = injectInitialState(
+      siteShellRaw
+        // index.html 默认 lang="zh-CN"；/en 路径下客户端 vue-router 会切到英文并改 documentElement.lang，
+        // 这里额外服务端替换 lang 属性，避免首屏 flash。
+        .replace('<html lang="zh-CN">', req.url === '/en' ? '<html lang="en">' : '<html lang="zh-CN">'),
+      { loggedIn },
+      nonce,
+    );
+    reply
+      .header('Cache-Control', 'no-store')
+      .header('Content-Security-Policy', applyCspNonce(BASE_CSP, nonce))
+      .type('text/html')
+      .send(html);
+  }
+
+  app.get('/', (req, reply) => serveSiteShell(req, reply));
+  app.get('/en', (req, reply) => serveSiteShell(req, reply));
+
+  // ---------- 公开套餐页（SSR，仍由 home.ts 直接输出 HTML） ----------
   app.get('/plans', async (req, reply) => {
     const [plans, loggedIn] = await Promise.all([loadHomePlans(), loadLoggedIn(req)]);
     sendHtml(reply, renderPlansPage(plans, { loggedIn }));
   });
 
-  // 公开文档中心（/db/docs，无需登录）。注册为静态路由，优先于下方 /db/* SPA fallback。
+  // ---------- 公开文档中心（SSR，/db/docs） ----------
   app.get('/db/docs', async (req, reply) => {
     sendHtml(reply, renderDocsIndex({ loggedIn: await loadLoggedIn(req) }));
   });
@@ -181,7 +266,7 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
     sendHtml(reply, html);
   });
 
-  // 控制台（db-ui，`/db` 前缀）
+  // ---------- 控制台（db-ui，`/db` 前缀） ----------
   const shellHtml = consoleReady ? readHtml(consoleDist, 'index.html') : null;
   const syncResetHtml = consoleReady ? readHtml(consoleDist, 'sync-reset.html') : null;
 
@@ -191,28 +276,40 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
   app.get('/db/', serveHtml(shellHtml, DB_CSP));
   app.get('/db/sync-reset', serveHtml(syncResetHtml, DB_CSP));
 
-  // SPA fallback：客户端路由。带扩展名的路径不落 fallback（避免把不存在的静态资源当页面）。
-  app.get('/db/*', async (req, reply) => {
-    const url = (req.url ?? '').split('?')[0];
-    const rel = url.replace(/^\/db\/?/, '');
-    if (/\.[A-Za-z0-9]+$/.test(rel)) {
-      return notFound(req, reply);
-    }
-    return serveHtml(shellHtml, DB_CSP)(req, reply);
-  });
+  // db-ui SPA fallback 通过 setNotFoundHandler 统一处理，避免和根 site fallback 抢 `/*`。
 
-  // 平台后台（admin-ui，`/admin` 前缀）
+  // ---------- 平台后台（admin-ui，`/admin` 前缀） ----------
   const adminShell = adminReady ? readHtml(adminDist, 'index.html') : null;
   app.get('/admin', async (_req, reply) => {
     reply.redirect('/admin/');
   });
   app.get('/admin/', serveHtml(adminShell));
-  app.get('/admin/*', async (req, reply) => {
+  // admin-ui SPA fallback 通过 setNotFoundHandler 统一处理。
+
+  // ---------- 统一 SPA / 资源 404 兜底 ----------
+  //
+  // 优先级（fastify 静态路由已先匹配）：
+  //   1. `/db/**`（除已注册的 /db/、/db/docs、/db/sync-reset、/db/assets/*） → db-ui shell 或 404
+  //   2. `/admin/**`（除已注册的 /admin/、/admin/assets/*） → admin-ui shell 或 404
+  //   3. `/api/**` → 交由上层路由处理；到这里说明没有匹配，返回 404
+  //   4. 其他根路径：带扩展名 → 404；不带扩展名 → site SPA shell（客户端路由决定 404/渲染）
+  app.setNotFoundHandler(async (req, reply) => {
     const url = (req.url ?? '').split('?')[0];
-    const rel = url.replace(/^\/admin\/?/, '');
-    if (/\.[A-Za-z0-9]+$/.test(rel)) {
+    const last = url.split('/').pop() ?? '';
+    const hasExt = last.includes('.') && !last.endsWith('/');
+
+    if (url.startsWith('/db/')) {
+      if (hasExt || !shellHtml) return notFound(req, reply);
+      return serveHtml(shellHtml, DB_CSP)(req, reply);
+    }
+    if (url.startsWith('/admin/')) {
+      if (hasExt || !adminShell) return notFound(req, reply);
+      return serveHtml(adminShell)(req, reply);
+    }
+    if (url.startsWith('/api/')) {
       return notFound(req, reply);
     }
-    return serveHtml(adminShell)(req, reply);
+    if (hasExt || !siteShellRaw) return notFound(req, reply);
+    return serveSiteShell(req, reply, false);
   });
 }

@@ -1,9 +1,9 @@
 /**
- * 套件首页（`/`）：DevBelt 落地页。
+ * 公开套餐页（`/plans`）SSR。
  *
- * 介绍 / 工具 / 套餐 / 入口四段。套餐为**服务端渲染**，由 app.ts 从 billing 套餐目录
- * 读取后以结构化 `HomePlan[]` 传入（单一数据源，无需登录，且不含内联 JS，符合严格 CSP）。
- * 有意保持零构建依赖（内联 HTML），后续可替换为独立首页应用。
+ * - HomePlan/planCard 等工具函数供 Fastify 组合根注入套餐目录时使用；
+ * - renderPlansPage 输出完整 HTML（复用品牌设计 token，保持暗色风格）；
+ * - 产品官网（首页/英文页）已迁移到独立的 @devbelt/site 包（Vue 3 + Vite SPA），由 consoleStatic.ts 挂载在站点根。
  */
 
 export interface HomePlan {
@@ -38,261 +38,94 @@ function formatUnit(plan: HomePlan): string {
 }
 
 function planCard(plan: HomePlan): string {
-  const highlights = plan.highlights
-    .map((h) => `<li>${escapeHtml(h)}</li>`)
-    .join('');
-  // 未登录 → 引导注册；已登录 → 不再显示「注册」，改为去控制台看/升级套餐。
-  // 套餐页公开（无需登录），统一指向 /plans。
-  const cta = `<a class="plan-cta" href="/plans">查看套餐</a>`;
+  const highlights = plan.highlights.map((h) => `<li>${escapeHtml(h)}</li>`).join('');
   return `
         <article class="plan">
           <h4>${escapeHtml(plan.name)}</h4>
           <p class="price">${escapeHtml(formatPrice(plan))}<span>${escapeHtml(formatUnit(plan))}</span></p>
           <ul>${highlights}</ul>
-          ${cta}
+          <a class="plan-cta" href="${plan.priceCents <= 0 ? '/register' : '/plans'}">${plan.priceCents <= 0 ? '免费开始' : '查看套餐'}</a>
         </article>`;
 }
 
-interface HomeTool {
-  name: string;
-  desc: string;
-  /** 外部链接；空表示尚未发布（「待开发」）。 */
-  href: string;
-  badge: string;
-}
-
-const TOOLS: readonly HomeTool[] = [
-  {
-    name: 'DevBelt',
-    desc: 'VS Code 数据库客户端：连接 MySQL / PostgreSQL / SQLite，SQL 编辑、结果面板、ER 图、表设计、备份与导入导出。',
-    href: 'https://marketplace.visualstudio.com/items?itemName=lang2hong.db-client',
-    badge: 'VS Code 扩展',
-  },
-  {
-    name: 'DevBelt DB Client',
-    desc: '正在开发的数据库客户端（lang2hong.devbelt-db-client）：查看使用文档。',
-    href: '/db/docs',
-    badge: '文档',
-  },
-  {
-    name: 'REST NEO',
-    desc: 'VS Code REST 客户端：在编辑器内编写并发送 HTTP 请求、管理环境与响应。',
-    href: 'https://marketplace.visualstudio.com/items?itemName=lang2hong.rest-client-neo',
-    badge: 'VS Code 扩展',
-  },
-  {
-    name: 'l2h-harness',
-    desc: '开发中的新工具。',
-    href: '',
-    badge: '待开发',
-  },
-];
-
-function toolCard(tool: HomeTool): string {
-  const inner = `<strong>${escapeHtml(tool.name)}<span class="badge">${escapeHtml(tool.badge)}</span></strong><span>${escapeHtml(tool.desc)}</span>`;
-  if (!tool.href) return `<div class="tool soon">${inner}</div>`;
-  // 站内相对链接（如 /db/docs）不新开标签页；外部链接新开并带 noreferrer。
-  return /^https?:\/\//.test(tool.href)
-    ? `<a class="tool" href="${tool.href}" target="_blank" rel="noopener noreferrer">${inner}</a>`
-    : `<a class="tool" href="${tool.href}">${inner}</a>`;
-}
-
-export interface HomeRenderOptions {
-  /** 请求是否已登录（由服务端按 refresh cookie 判定）。登录时 header/CTA 改为控制台入口。 */
-  loggedIn?: boolean;
-}
-
-/** 首页「介绍」区的能力卡片。 */
-const FEATURES: readonly { title: string; desc: string }[] = [
-  {
-    title: '本地数据库客户端',
-    desc: '在 VS Code 内连接 MySQL / PostgreSQL / SQLite，享受 SQL 编辑补全、结果面板、ER 图、表设计与导入导出。',
-  },
-  {
-    title: '端到端加密同步',
-    desc: '连接、分组与保存查询在本机加密后跨设备同步，服务端只保存密文，无法读取明文。',
-  },
-  {
-    title: 'Web 控制台',
-    desc: '在浏览器内管理账户与设备，查看与升级套餐、导出审计记录。',
-  },
-];
-
-function featureCard(f: { title: string; desc: string }): string {
-  return `<div class="tool"><strong>${escapeHtml(f.title)}</strong><span>${escapeHtml(f.desc)}</span></div>`;
-}
-
-export function renderHome(opts: HomeRenderOptions = {}): string {
-  // 登录态决定 header 右侧与 hero CTA：已登录不再显示「登录/注册」，改为进入控制台。
-  const navAuth = opts.loggedIn
-    ? `<a href="/db/">控制台</a>`
-    : `<a href="/login">登录</a>
-          <a href="/register">注册</a>`;
-  const heroCta = opts.loggedIn
-    ? `<a class="btn primary" href="/db/">进入控制台</a>
-          <a class="btn ghost" href="/db/docs">查看文档</a>`
-    : `<a class="btn primary" href="/register">免费开始</a>
-          <a class="btn ghost" href="/login">已有账户，登录</a>
-          <a class="btn ghost" href="/db/docs">查看文档</a>`;
-
-  return `<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DevBelt</title>
-    <meta name="description" content="DevBelt：VS Code 数据库客户端、Web 控制台与端到端加密同步。" />
-    <style>
-      :root { color-scheme: dark; --bg:#0b1020; --panel:#131a30; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --accent:#3d6bff; }
-      * { box-sizing: border-box; }
-      body { margin: 0; background: var(--bg); color: var(--fg);
-        font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
-      a { color: inherit; }
-      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
-      header.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 20px 0;
-        background: rgba(11,16,32,.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
-      header.top .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; color: inherit; text-decoration: none; }
-      header.top .spacer { flex: 1; }
-      header.top nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: .95rem; }
-      header.top nav a:hover { color: var(--fg); }
-      .hero { padding: 56px 0 40px; }
-      .hero h1 { font-size: 2.8rem; margin: 0 0 12px; letter-spacing: -0.03em; }
-      .hero p { color: var(--muted); font-size: 1.1rem; max-width: 680px; margin: 0 0 28px; }
-      .cta { display: flex; gap: 12px; flex-wrap: wrap; }
-      .btn { display: inline-block; padding: 11px 20px; border-radius: 10px; text-decoration: none; font-weight: 600; }
-      .btn.primary { background: var(--accent); color: #fff; }
-      .btn.ghost { border: 1px solid var(--line); color: var(--fg); }
-      section { padding: 36px 0; border-top: 1px solid var(--line); }
-      section > h2 { font-size: 1.5rem; margin: 0 0 6px; }
-      section > p.section-sub { color: var(--muted); margin: 0 0 24px; }
-      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-      .tool { display: block; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-decoration: none; color: inherit; }
-      a.tool:hover { border-color: var(--accent); }
-      .tool strong { display: block; margin-bottom: 6px; }
-      .tool span { display: block; color: var(--muted); font-size: .92rem; }
-      .tool .badge { display: inline-block; margin-left: 8px; padding: 1px 6px; border: 1px solid var(--line);
-        border-radius: 6px; color: var(--accent); font-size: .72rem; vertical-align: middle; }
-      .tool.soon { opacity: .6; }
-      .muted { color: var(--muted); }
-      footer { color: var(--muted); font-size: .85rem; padding: 28px 0 40px; border-top: 1px solid var(--line); }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <header class="top">
-        <a class="brand" href="/">DevBelt</a>
-        <span class="spacer"></span>
-        <nav>
-          <a href="#intro">介绍</a>
-          <a href="#tools">工具</a>
-          <a href="/plans">套餐</a>
-          <a href="/db/docs">文档</a>
-          ${navAuth}
-        </nav>
-      </header>
-
-      <div class="hero">
-        <h1>欢迎使用 DevBelt</h1>
-        <p>DevBelt 是面向开发者的工具套件：在 VS Code 中管理数据库连接与查询，跨设备端到端加密同步，并在 Web 控制台统一治理。</p>
-        <div class="cta">
-          ${heroCta}
-        </div>
-      </div>
-
-      <section id="intro">
-        <h2>介绍</h2>
-        <p class="section-sub">DevBelt 把常用开发工具与协作能力整合到一个套件里，减少在编辑器与独立工具之间的切换。</p>
-        <div class="grid">
-          ${FEATURES.map(featureCard).join('\n          ')}
-        </div>
-      </section>
-
-      <section id="tools">
-        <h2>工具</h2>
-        <p class="section-sub">已发布与开发中的工具，更多陆续添加。</p>
-        <div class="grid">
-          ${TOOLS.map(toolCard).join('\n          ')}
-        </div>
-      </section>
-
-      <footer>DevBelt</footer>
-    </div>
-  </body>
-</html>`;
-}
+const CSS = `
+  :root { color-scheme: dark; --bg:#0b1020; --bg2:#0e152a; --panel:#131a30; --panel2:#182040; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --dim:#6b7596; --accent:#3d6bff; --accent2:#6b8bff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 80% -10%, rgba(61,107,255,.18), transparent 60%), var(--bg); color: var(--fg); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height:1.6; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  header.top { position: sticky; top: 0; display: flex; align-items: center; gap:16px; padding:16px 0; background: rgba(11,16,32,.75); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  header.top .brand { font-weight:700; font-size:1.1rem; display:flex; align-items:center; gap:8px; }
+  .brand-dot { width:10px; height:10px; border-radius:3px; background:linear-gradient(135deg,var(--accent),var(--accent2)); }
+  .spacer { flex:1; }
+  header.top nav a { color:var(--muted); padding:6px 10px; border-radius:8px; font-size:.92rem; margin-left:4px; }
+  header.top nav a:hover { color:var(--fg); background:var(--panel); }
+  header.top nav .sep { display:inline-block; width:1px; height:18px; background:var(--line); margin:0 6px; vertical-align:middle; }
+  main { padding:32px 0 56px; }
+  h1 { font-size: clamp(1.6rem,3vw,2.1rem); margin:0 0 4px; letter-spacing:-0.02em; }
+  .sub { color:var(--muted); margin:0 0 28px; max-width:640px; }
+  .plans { display:grid; gap:14px; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); }
+  .plan { padding:22px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,var(--panel),var(--panel2)); display:flex; flex-direction:column; }
+  .plan h4 { margin:0 0 8px; font-size:1.1rem; }
+  .plan .price { font-size:1.6rem; font-weight:700; margin:0 0 14px; }
+  .plan .price span { font-size:.85rem; font-weight:400; color:var(--muted); margin-left:4px; }
+  .plan ul { list-style:none; padding:0; margin:0 0 18px; flex:1; }
+  .plan li { color:var(--muted); font-size:.92rem; padding:3px 0 3px 16px; position:relative; }
+  .plan li::before { content:"✓"; position:absolute; left:0; color:var(--accent); }
+  .plan-cta { text-align:center; padding:10px 14px; border:1px solid var(--line); border-radius:9px; font-size:.92rem; color:var(--fg); }
+  .plan-cta:hover { border-color:var(--accent); color:var(--accent2); }
+  .muted { color: var(--muted); }
+  footer { color:var(--dim); font-size:.82rem; }
+  footer .legal { border-top:1px solid var(--line); padding:18px 0; margin-top:24px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+`;
 
 /**
  * 公开套餐页（`/plans`）：无需登录，服务端渲染套餐目录。
- *
- * 与首页 `#pricing` 同源同款卡片；未登录用户也可查看并前往注册。
+ * 套餐数据由 Fastify 组合根从 billing 套餐目录读取后传入；缺省时降级为提示。
  */
 export function renderPlansPage(plans: HomePlan[] | null, opts: { loggedIn?: boolean } = {}): string {
   const personal = plans?.filter((p) => p.kind === 'personal') ?? [];
   const groups =
     personal.length > 0
-      ? `
-        <div class="plan-group">
-          <h3>个人</h3>
-          <div class="plans">${personal.map(planCard).join('')}</div>
-        </div>`
+      ? `<div class="plans">${personal.map(planCard).join('')}</div>`
       : `<p class="muted">套餐信息暂时不可用，请稍后再试。</p>`;
+  const navAuth = opts.loggedIn
+    ? `<a href="/db/">控制台</a>`
+    : `<a href="/login">登录</a><a href="/register" style="color:#fff;background:var(--accent);">免费注册</a>`;
+
   return `<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>套餐 · DevBelt</title>
-    <meta name="description" content="DevBelt 个人套餐。" />
-    <style>
-      :root { color-scheme: dark; --bg:#0b1020; --panel:#131a30; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --accent:#3d6bff; }
-      * { box-sizing: border-box; }
-      body { margin: 0; background: var(--bg); color: var(--fg);
-        font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
-      a { color: inherit; }
-      .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
-      header.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; padding: 18px 0;
-        background: rgba(11,16,32,.85); border-bottom: 1px solid var(--line); }
-      header.top .brand { font-weight: 700; font-size: 1.1rem; text-decoration: none; }
-      header.top .spacer { flex: 1; }
-      header.top nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: .95rem; }
-      header.top nav a:hover { color: var(--fg); }
-      main { padding: 32px 0 56px; }
-      h1 { font-size: 1.9rem; margin: 0 0 4px; }
-      .sub { color: var(--muted); margin: 0 0 24px; }
-      .plan-group { margin-bottom: 24px; }
-      .plan-group h3 { font-size: 1.05rem; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
-      .plans { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-      .plan { padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; }
-      .plan h4 { margin: 0 0 8px; font-size: 1.1rem; }
-      .plan .price { font-size: 1.6rem; font-weight: 700; margin: 0 0 14px; }
-      .plan .price span { font-size: .85rem; font-weight: 400; color: var(--muted); margin-left: 4px; }
-      .plan ul { list-style: none; padding: 0; margin: 0 0 18px; flex: 1; }
-      .plan li { color: var(--muted); font-size: .92rem; padding: 3px 0 3px 16px; position: relative; }
-      .plan li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); }
-      .plan-cta { text-align: center; padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px; text-decoration: none; font-size: .92rem; }
-      .plan-cta:hover { border-color: var(--accent); }
-      .muted { color: var(--muted); }
-      footer { color: var(--muted); font-size: .85rem; padding: 24px 0 40px; border-top: 1px solid var(--line); }
-    </style>
+    <title>同步套餐 · DevBelt</title>
+    <meta name="description" content="DevBelt 同步服务个人套餐。连接与查询在本机端到端加密后同步到云端，服务端只保存密文。" />
+    <style>${CSS}</style>
   </head>
   <body>
     <div class="wrap">
       <header class="top">
-        <a class="brand" href="/">DevBelt</a>
+        <a class="brand" href="/"><span class="brand-dot"></span>DevBelt</a>
         <span class="spacer"></span>
         <nav>
           <a href="/">首页</a>
           <a href="/db/docs">文档</a>
           <a href="/plans">套餐</a>
-          ${opts.loggedIn ? `<a href="/db/">控制台</a>` : `<a href="/login">登录</a>`}
+          <span class="sep"></span>
+          ${navAuth}
         </nav>
       </header>
       <main>
-        <h1>套餐</h1>
-        <p class="sub">按需选择；配额与引擎范围见各档说明。</p>
+        <h1>同步套餐</h1>
+        <p class="sub">按需选择；连接与查询在本机端到端加密后同步到云端，服务端只保存密文。配额与引擎范围见各档说明。</p>
         ${groups}
       </main>
-      <footer>DevBelt</footer>
+      <footer>
+        <div class="legal">
+          <span>© DevBelt · MIT 许可 · v0.4.0</span>
+          <span><a href="/">首页</a></span>
+        </div>
+      </footer>
     </div>
   </body>
 </html>`;

@@ -1,0 +1,26 @@
+{
+  "name": "@devbelt/site",
+  "version": "0.4.0",
+  "description": "DevBelt marketing / landing site (Vue 3 + Vite), served at the site root by the Fastify server.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "2.5.0",
+    "happy-dom": "20.14.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.7",
+    "vitest": "^4.1.10",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5"
+  }
+}
