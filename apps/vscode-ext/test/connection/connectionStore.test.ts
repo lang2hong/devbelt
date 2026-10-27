@@ -351,3 +351,63 @@ describe('stripSecrets', () => {
     expect(c.sshPassphrase).toBe('pass');
   });
 });
+
+describe('ConnectionStore 账号作用域密码', () => {
+  function mapMemento(initial: Record<string, unknown>) {
+    const values = new Map<string, unknown>(Object.entries(initial));
+    return {
+      values,
+      get<T>(key: string): T | undefined { return values.get(key) as T | undefined; },
+      async update(key: string, value: unknown): Promise<void> { values.set(key, value); },
+    };
+  }
+
+  function mapSecrets() {
+    const values = new Map<string, string>();
+    return {
+      values,
+      async get(key: string): Promise<string | undefined> { return values.get(key); },
+      async store(key: string, value: string): Promise<void> { values.set(key, value); },
+      async delete(key: string): Promise<void> { values.delete(key); },
+    };
+  }
+
+  it('密码按账号分键：账号里改/删不影响 local，切换后各读各的', async () => {
+    let scope: string | undefined;
+    const memento = mapMemento({
+      'devbelt.connections': { groups: [], connections: [conn({ id: 'c1', password: 'local-pw' })] },
+    });
+    const secrets = mapSecrets();
+    const store = new ConnectionStore(memento as never, secrets as never, () => scope);
+
+    await store.init();
+    expect(store.get('c1')!.password).toBe('local-pw');
+    expect(secrets.values.get('devbelt.connection.c1.password')).toBe('local-pw');
+
+    // 账号 u1 里有一条同 id 的连接（迁移复制的典型形态）：首次读取复制密码。
+    scope = 'u1';
+    memento.values.set('devbelt.connections::u.u1', { groups: [], connections: [conn({ id: 'c1' })] });
+    await store.init();
+    expect(store.get('c1')!.password).toBe('local-pw');
+    expect(secrets.values.get('devbelt.connection::u.u1.c1.password')).toBe('local-pw');
+
+    // 在账号里改密码：只改账号自己的键。
+    const c = store.get('c1')!;
+    c.password = 'u1-pw';
+    await store.save(c);
+    expect(secrets.values.get('devbelt.connection::u.u1.c1.password')).toBe('u1-pw');
+    expect(secrets.values.get('devbelt.connection.c1.password')).toBe('local-pw');
+
+    // 切回 local：仍是本机密码。
+    scope = undefined;
+    await store.init();
+    expect(store.get('c1')!.password).toBe('local-pw');
+
+    // 在账号里删除：只删账号密钥，local 不受影响。
+    scope = 'u1';
+    await store.init();
+    await store.remove('c1');
+    expect(secrets.values.has('devbelt.connection::u.u1.c1.password')).toBe(false);
+    expect(secrets.values.get('devbelt.connection.c1.password')).toBe('local-pw');
+  });
+});

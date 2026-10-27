@@ -65,16 +65,26 @@ export function writeScoped(memento: Memento, base: string, value: unknown, scop
 }
 
 /**
+ * scopedMemento 需要的 Memento 子集（便于测试注入最小实现）。
+ * vscode.Memento 结构上满足它。
+ */
+export interface ScopedMementoLike {
+  get<T>(key: string, defaultValue?: T): T | undefined;
+  update(key: string, value: unknown): unknown;
+  keys(): readonly string[];
+}
+
+/**
  * 只作用于「属于账号」的 Memento 键的包装器：get/update 自动加当前作用域后缀。
  * 未登录时行为与原始 Memento 完全一致。
  */
-export function scopedMemento<T extends Memento>(inner: T): T {
+export function scopedMemento<T extends ScopedMementoLike>(inner: T): T {
   const suffix = (): string => {
     const scope = accountScope();
     return scope === 'local' ? '' : `::u.${scope}`;
   };
   return {
-    get: (key: string, defaultValue?: unknown) => inner.get(`${key}${suffix()}`, defaultValue as never),
+    get: <V>(key: string, defaultValue?: V) => inner.get<V>(`${key}${suffix()}`, defaultValue),
     update: (key: string, value: unknown) => inner.update(`${key}${suffix()}`, value),
     keys: () => {
       const tail = suffix();

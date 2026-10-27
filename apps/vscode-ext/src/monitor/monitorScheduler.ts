@@ -203,10 +203,10 @@ export class MonitorScheduler {
     if (next.status === 'running' || next.status === 'error') this.schedule(id, false);
   }
 
-  async pause(id: string): Promise<void> {
+  async pause(id: string, reason: 'user' | 'accountSwitch' = 'user'): Promise<void> {
     this.assertOwner();
     this.unschedule(id);
-    await this.update(id, { status: 'paused', pausedReason: 'user' });
+    await this.update(id, { status: 'paused', pausedReason: reason });
   }
 
   async remove(id: string): Promise<void> {

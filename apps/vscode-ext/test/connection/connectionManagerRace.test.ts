@@ -104,6 +104,20 @@ describe('ConnectionManager dispose/connect race', () => {
     expect(manager.activeConnections).toBe(0);
   });
 
+  it('closeAllForAccountSwitch：清算在途建连并返回连接 id', async () => {
+    const manager = new ConnectionManager();
+    managers.push(manager);
+
+    const pending = manager.connectSql(conn());
+    await waitForConnect();
+    const closed = manager.closeAllForAccountSwitch();
+    expect(closed).toContain('c-1');
+
+    resolveConnect!();
+    await expect(pending).rejects.toThrow(/closed/i);
+    expect(manager.activeConnections).toBe(0);
+  });
+
   it('retain/release 引用计数：归零且非显式才关闭', async () => {
     const manager = new ConnectionManager();
     managers.push(manager);

@@ -108,13 +108,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // 连接/分组/保存的查询按账号隔离（第二期）：读写在当前账号作用域内切换。
-  const store = new ConnectionStore(scopedMemento(context.globalState), context.secrets);
+  const store = new ConnectionStore(scopedMemento(context.globalState), context.secrets, () => accountScope());
   context.subscriptions.push({ dispose: () => store.dispose() });
-  await store.init();
+  // 注意：store.init() 必须在作用域对齐之后（下方 auth.init 之后）：它同时负责
+  // 按当前账号把密码加载进缓存，提前跑会把 local 的密码当成账号的。
   const syncHasConnections = (): void => {
     void vscode.commands.executeCommand('setContext', 'devbelt.hasConnections', store.list().length > 0);
   };
-  syncHasConnections();
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   const history = new HistoryStore(
@@ -156,6 +156,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   ElasticsearchView.configureDslStore(new EsDslStore(context.globalState));
   const executor = new QueryExecutor(manager, history, auditLogger);
   const connCtx = new ConnectionContext(context, store);
+  /** 账号切换时暂停全部监控任务（registerMonitor 在下方，届时填充）。 */
+  let pauseMonitorTasks: (() => Promise<number>) | undefined;
 
   // SSH 主机密钥裁决：tofu（默认）对未知主机弹指纹确认并写入插件自管 known_hosts；
   // strict 只信任既有 known_hosts。密钥不匹配/revoked 由 gate 硬失败。
@@ -180,8 +182,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
 
   // 定时备份：从 globalState 恢复已保存的计划
   // 备份计划也按账号隔离：连接 id 在另一个账号里可能指向另一条连接。
+  // 启动放在作用域对齐之后：计划里的 connId 必须按当前账号解析。
   const backupScheduler = new BackupScheduler(manager, store, scopedMemento(context.globalState));
-  backupScheduler.start();
   context.subscriptions.push(backupScheduler);
 
   BaseWebView.init(context.extensionUri);
@@ -195,37 +197,52 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     TableQueryView.closeAll();
     RedisView.closeAll();
     ElasticsearchView.closeAll();
-    manager.closeAllForAccountSwitch();
-    treeProvider.refresh();
-    syncHasConnections();
+    // 关闭会话会通知各面板；连接树由返回的 id 逐个清掉「已打开」状态。
+    for (const id of manager.closeAllForAccountSwitch()) treeProvider.markClosed(id);
     const scope = accountScope();
-    if (scope === 'local') return;
-    const offer = migrationOffer(context.globalState, scope);
-    if (!offer.needed) return;
-    const copy = l10n('account.migrate.copy');
-    const skip = l10n('account.migrate.skip');
-    const picked = await vscode.window.showInformationMessage(
-      l10n('account.migrate.title'),
-      { modal: true, detail: l10n('account.migrate.detail', { n: offer.connections }) },
-      copy,
-      skip,
-    );
-    if (picked === copy) {
-      await migrateScope(context.globalState, scope);
-      await store.init();
-      syncHasConnections();
+    if (scope !== 'local') {
+      const offer = migrationOffer(context.globalState, scope);
+      if (offer.needed) {
+        const copy = l10n('account.migrate.copy');
+        const skip = l10n('account.migrate.skip');
+        const picked = await vscode.window.showInformationMessage(
+          l10n('account.migrate.title'),
+          { modal: true, detail: l10n('account.migrate.detail', { n: offer.connections }) },
+          copy,
+          skip,
+        );
+        if (picked === copy) await migrateScope(context.globalState, scope);
+        await markMigrationAsked(context.globalState, scope);
+      }
     }
-    await markMigrationAsked(context.globalState, scope);
+    // init 同时把当前账号的密码重新装进缓存（账号里连接 id 与 local 不一定相同）。
+    await store.init();
+    syncHasConnections();
     treeProvider.refresh();
+    // 备份计划按账号：先停掉旧账号的计时器，再按当前作用域重新加载。
+    backupScheduler.stop();
+    backupScheduler.start();
+    // 监控任务是本机全局的，但连接 id 属于上一个账号：切号后全部暂停，避免在错连接上执行。
+    if (pauseMonitorTasks) {
+      const paused = await pauseMonitorTasks();
+      if (paused > 0) void vscode.window.showInformationMessage(l10n('monitor.notify.accountSwitch', { n: paused }));
+    }
   };
 
   // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
   context.subscriptions.push(auth);
   await auth.init();
-  // 本地数据按账号隔离（方案 B1）：初始化时把作用域对齐当前登录用户。
+  // 本地数据按账号隔离（方案 B1）：初始化时把作用域对齐当前登录用户，
+  // 再加载连接（含密码缓存）与备份计划——顺序反了会把 local 的数据当成账号的。
   const scopeChangedAtStartup = await syncAccountScope(auth);
-  // 已登录启动：完成一次账号收尾（关旧会话是空操作，必要时询问迁移）。
-  if (scopeChangedAtStartup && accountScope() !== 'local') await onAccountSwitched();
+  if (scopeChangedAtStartup && accountScope() !== 'local') {
+    // 已登录启动：完成一次账号收尾（关旧会话是空操作，必要时询问迁移）。
+    await onAccountSwitched();
+  } else {
+    await store.init();
+    syncHasConnections();
+    backupScheduler.start();
+  }
   // package.json 的 commandPalette 用 devbelt.loggedIn 控制 login/logout/account/sessions
   // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
@@ -314,6 +331,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const aiContextStore = new AiContextStore(context.globalState);
   // 模型接入：Key 面与同步工厂共用同一实例（aiModelAccess 实体后端出站需读缓存 Key）。
   const aiKeyStore = new AiKeyStore(context.secrets);
+  context.subscriptions.push(aiKeyStore);
   const aiModelAccessStore = new AiModelAccessStore(context.globalState);
   const providerCatalog = new ProviderCatalog(context.globalState, serverUrl);
 
@@ -374,7 +392,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
       syncStatusBar.refresh();
       authStatusBar.refresh();
       void syncLoggedInContext(auth);
-    });
+    }).catch((err) => diagError('account switch failed', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)));
   });
   context.subscriptions.push(onAuthChange);
   // 同步可观测：本地用户改动（连接/分组/查询）后是否会自动排同步（取决于自动同步开关）。
@@ -482,6 +500,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
       void AiChatView.open(aiChatDeps).openMonitorSetup(node.conn, node.database, node.label);
     },
   });
+  pauseMonitorTasks = () => monitorService.pauseAllForAccountSwitch();
   const aiChatDeps: AiChatViewDeps = {
     service: aiService,
     sessions: aiSessions,

@@ -37,6 +37,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - Opening a task in Background Tasks shows its chart and history right away instead of waiting for a check.
 - Agent mode only falls back to plain chat when the tool definitions are really rejected; other request errors are shown as they are.
 - The server logs rejected AI Chat requests (validation code and field-level reason only, no message content), so 400 errors can be diagnosed.
+- Account isolation follow-ups: connection passwords are stored per account, so editing or deleting a copied connection in one account no longer changes another; switching accounts reloads the current account's passwords, closes in-flight sessions, and pauses Background Tasks (their connection ids belong to the previous account); clearing a BYOK key in an account no longer brings the local key back; the copy prompt now includes saved queries, query folders and backup schedules.
 
 #### Known limitations
 
@@ -78,6 +79,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - 在「后台任务」里打开任务，图表和检查记录会直接显示，不用等下一次检查。
 - Agent 模式只在工具定义确实被拒绝时才退回普通问答，其他请求错误按原因显示。
 - 服务端会记录被拒绝的 AI Chat 请求（只记校验代码和字段级原因，不记消息内容），方便排查 400 错误。
+- 账号隔离补漏：连接密码按账号分键存放，在一个账号里修改或删除复制来的连接不会再影响另一个账号；切换账号会重新加载当前账号的密码、关闭在途会话，并暂停后台任务（任务里的连接 id 属于上一个账号）；在账号里清除自带 Key 后不会再被本机 Key 复制回来；迁移提示复制的内容补上了保存的查询、查询文件夹和备份计划。
 
 #### 已知限制
 

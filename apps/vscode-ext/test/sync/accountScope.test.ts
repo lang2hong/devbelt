@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({}));
 
 import {
-  accountScope, onAccountScopeChange, readScoped, scopedKey, scopedPrefix,
+  accountScope, onAccountScopeChange, readScoped, scopedKey, scopedMemento, scopedPrefix,
   setAccountScope, writeScoped,
 } from '../../src/sync/accountScope';
 
@@ -69,5 +69,26 @@ describe('account scope', () => {
     expect(m.data['devbelt.esDslQueries']).toBeUndefined();
     setAccountScope(undefined);
     expect(readScoped(m, 'devbelt.esDslQueries')).toBeUndefined();
+  });
+});
+
+describe('scopedMemento（连接/历史/审计共用的固定键）', () => {
+  it('读写落在当前作用域；keys 不把别的账号的键暴露出来', async () => {
+    const m = memento();
+    setAccountScope('u1');
+    const scoped = scopedMemento(m);
+    await scoped.update('devbelt.connections', { a: 1 });
+    expect(m.data['devbelt.connections::u.u1']).toEqual({ a: 1 });
+
+    setAccountScope('u2');
+    expect(scoped.get('devbelt.connections')).toBeUndefined();
+    expect(scoped.keys()).not.toContain('devbelt.connections');
+
+    setAccountScope('u1');
+    expect(scoped.get('devbelt.connections')).toEqual({ a: 1 });
+    expect(scoped.keys()).toContain('devbelt.connections');
+
+    setAccountScope(undefined);
+    expect(scoped.keys()).not.toContain('devbelt.connections');
   });
 });

@@ -56,13 +56,14 @@ export class AiModelAccessStore {
   }
 
   /**
-   * B1：首次在某个账号下访问时，把旧（local）记录复制一份到该账号，原数据保留。
-   * 每个实例只做一次。
+   * B1：首次在某个作用域下访问时，把旧（local）记录复制一份到该账号，原数据保留。
+   * 每个作用域只做一次——同一次运行里 A→B 切换也要为 B 复制，不能只记「迁移过」。
    */
   private ensureMigrated(): void {
-    if (this.migrated) return;
-    this.migrated = true;
-    if (accountScope() === 'local') return;
+    const scope = accountScope();
+    if (this.migratedFor === scope) return;
+    this.migratedFor = scope;
+    if (scope === 'local') return;
     for (const key of this.memento.keys()) {
       if (!key.startsWith(MODEL_ACCESS_RECORD_PREFIX)) continue;
       const rest = key.slice(MODEL_ACCESS_RECORD_PREFIX.length);
@@ -72,14 +73,19 @@ export class AiModelAccessStore {
     }
   }
 
-  private migrated = false;
+  /** 已完成迁移的作用域（`local` 表示无需迁移）。 */
+  private migratedFor?: string;
 
   listRecords(): ModelAccessRecord[] {
     this.ensureMigrated();
     const out: ModelAccessRecord[] = [];
     const prefix = this.prefix();
+    // `local` 的前缀是通用的：`rec.u.<uid>.` 也以它开头，必须排除，
+    // 否则未登录时会读到某个账号的模型配置。
+    const skipScoped = accountScope() === 'local';
     for (const key of this.memento.keys()) {
       if (!key.startsWith(prefix)) continue;
+      if (skipScoped && key.slice(prefix.length).startsWith('u.')) continue;
       const rec = this.memento.get<ModelAccessRecord>(key);
       if (rec && typeof rec.id === 'string' && rec.fields) out.push(rec);
     }

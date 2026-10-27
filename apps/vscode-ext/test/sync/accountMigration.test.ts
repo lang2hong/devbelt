@@ -33,12 +33,18 @@ describe('account migration (B1)', () => {
   it('复制连接/历史/审计，原数据保留；不覆盖账号已有值', async () => {
     const m = memento({
       'devbelt.connections': [{ id: 'c1' }],
+      'devbelt.queries': [{ id: 'q1' }],
+      'devbelt.queryFolders': [{ id: 'f1' }],
+      'devbelt.backup.schedules': [{ id: 'b1' }],
       'devbelt.history': [{ sql: 'select 1' }],
       'devbelt.auditLog': [{ id: 'a1' }],
       'devbelt.history::u.u1': [{ sql: 'mine' }],
     });
     await migrateScope(m as never, 'u1');
     expect(m.data['devbelt.connections::u.u1']).toEqual([{ id: 'c1' }]);
+    expect(m.data['devbelt.queries::u.u1']).toEqual([{ id: 'q1' }]);
+    expect(m.data['devbelt.queryFolders::u.u1']).toEqual([{ id: 'f1' }]);
+    expect(m.data['devbelt.backup.schedules::u.u1']).toEqual([{ id: 'b1' }]);
     expect(m.data['devbelt.history::u.u1']).toEqual([{ sql: 'mine' }]);
     expect(m.data['devbelt.auditLog::u.u1']).toEqual([{ id: 'a1' }]);
     expect(m.data['devbelt.connections']).toEqual([{ id: 'c1' }]);

@@ -2102,4 +2102,6 @@ export const zh: MessageCatalog = {
   'account.migrate.detail': '本机有 {n} 个连接。复制后这个账号会看到一份副本（原数据保留，登出后仍可用）；选择不复制则账号从空开始，之后不会再询问。',
   'account.migrate.copy': '复制到该账号',
   'account.migrate.skip': '不复制',
+  'monitor.list.paused.accountSwitch': '切换账号，已暂停',
+  'monitor.notify.accountSwitch': '已切换账号，{n} 个后台任务已暂停（它们属于上一个账号的连接），可按需继续。',
 };

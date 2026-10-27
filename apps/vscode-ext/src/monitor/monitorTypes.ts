@@ -66,7 +66,7 @@ export interface MonitorTask {
    */
   connFingerprint?: string;
   /** 自动暂停的原因（失败过多 / 连接变更），用户继续后清空。 */
-  pausedReason?: 'failures' | 'connectionChanged' | 'startup' | 'user' | 'handover';
+  pausedReason?: 'failures' | 'connectionChanged' | 'startup' | 'user' | 'handover' | 'accountSwitch';
 }
 
 /** 历史数据点（jsonl 一行）。 */

@@ -151,6 +151,11 @@ export class ConnectionStore {
       update(key: string, value: any): ThenableLike<void>;
     },
     private readonly secrets: SecureStorageLike,
+    /**
+     * 当前本地数据作用域（登录用户 id；未登录返回 undefined/`local`）。
+     * 敏感字段按作用域分键：两个账号里同 id 的连接（B1 复制）不再共用同一份密码。
+     */
+    private readonly scopeId?: () => string | undefined,
   ) {
     // 跨窗口密钥变更：刷新缓存，避免本窗口用陈旧密码（并把它写回覆盖新值）。
     this.hostEvents = this.secrets.onDidChange?.((e) => {
@@ -171,6 +176,8 @@ export class ConnectionStore {
    * `createTime`/`updateTime`/`deleted` 默认值；同时迁移保存查询字段名。幂等。
    */
   async init(): Promise<void> {
+    // 作用域可能在上次调用后变过：缓存以当前作用域为准重新加载（init 是单一加载点）。
+    this.secretCache.clear();
     const data = this.getTreeData();
     let changed = false;
 
@@ -494,7 +501,7 @@ export class ConnectionStore {
         delete sanitized[field];
         changed = true;
       } else {
-        const stored = await this.secrets.get(key);
+        const stored = await this.readSecret(key, this.legacySecretKey(connection.id, field));
         if (stored !== undefined) this.secretCache.set(key, stored);
       }
     }
@@ -511,7 +518,37 @@ export class ConnectionStore {
   }
 
   private secretKey(id: string, field: typeof ConnectionStore.SENSITIVE_FIELDS[number]): string {
-    return `devbelt.connection.${id}.${field}`;
+    return this.scopedSecretKey(id, field, this.scope());
+  }
+
+  /** 旧版（未分账号）的密钥键：只读回退，永不写入、删除。 */
+  private legacySecretKey(id: string, field: typeof ConnectionStore.SENSITIVE_FIELDS[number]): string {
+    return this.scopedSecretKey(id, field, 'local');
+  }
+
+  private scope(): string {
+    const id = this.scopeId?.();
+    return typeof id === 'string' && id.trim() ? id.trim() : 'local';
+  }
+
+  private scopedSecretKey(id: string, field: typeof ConnectionStore.SENSITIVE_FIELDS[number], scope: string): string {
+    return scope === 'local'
+      ? `devbelt.connection.${id}.${field}`
+      : `devbelt.connection::u.${scope}.${id}.${field}`;
+  }
+
+  /**
+   * 读密钥：当前作用域的键为空时回退旧键并复制一份（B1：只复制，不移动）。
+   * 复制失败只影响本次读取（缓存仍返回已读到的值）。
+   */
+  private async readSecret(key: string, legacy: string): Promise<string | undefined> {
+    const value = await this.secrets.get(key);
+    if (value !== undefined || key === legacy) return value;
+    const fallback = await this.secrets.get(legacy);
+    if (fallback !== undefined) {
+      try { await this.secrets.store(key, fallback); } catch { /* 读时复制失败不阻断连接 */ }
+    }
+    return fallback;
   }
 
   private async clearSecrets(id: string): Promise<void> {

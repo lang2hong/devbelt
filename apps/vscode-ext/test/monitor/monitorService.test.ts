@@ -235,3 +235,25 @@ describe('propose_monitor tool', () => {
       .toEqual({ kind: 'metric', table: 't', sql: 'SELECT 1 AS a', condition: { type: 'above', value: 10 }, intervalMinutes: 5 });
   });
 });
+
+describe('MonitorService 账号切换', () => {
+  it('暂停本窗口全部未暂停任务；非拥有者不动', async () => {
+    const { service, scheduler, tasks } = setup();
+    tasks.push(
+      { id: 't1', status: 'running', intervalMs: 60_000 } as MonitorTask,
+      { id: 't2', status: 'paused', pausedReason: 'user', intervalMs: 60_000 } as MonitorTask,
+    );
+    const pause = vi.fn(async (id: string, reason: string) => {
+      const task = tasks.find((t) => t.id === id);
+      if (task) { task.status = 'paused'; task.pausedReason = reason as never; }
+    });
+    (scheduler as unknown as { pause: typeof pause }).pause = pause;
+
+    expect(await service.pauseAllForAccountSwitch()).toBe(1);
+    expect(pause).toHaveBeenCalledWith('t1', 'accountSwitch');
+    expect(tasks[0].pausedReason).toBe('accountSwitch');
+
+    const other = setup({ isOwner: () => false });
+    expect(await other.service.pauseAllForAccountSwitch()).toBe(0);
+  });
+});

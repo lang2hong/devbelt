@@ -8,7 +8,16 @@ import { scopedKey } from './accountScope';
  * - 每个账号问一次（标记位 `devbelt.scope.<id>.migrated`），之后不再提示；
  * - 只处理「属于账号」的数据：连接/分组/保存的查询、查询历史、审计日志。
  */
-export const MIGRATION_KEYS = ['devbelt.connections', 'devbelt.history', 'devbelt.auditLog'] as const;
+export const MIGRATION_KEYS = [
+  'devbelt.connections',
+  // 保存的查询与文件夹（ConnectionStore 内部的 QueryStore 用独立键）
+  'devbelt.queries',
+  'devbelt.queryFolders',
+  'devbelt.history',
+  'devbelt.auditLog',
+  // 定时备份计划：里面的 connId 也属于连接
+  'devbelt.backup.schedules',
+] as const;
 
 export function migrationMarker(scope: string): string {
   return `devbelt.scope.${scope}.migrated`;

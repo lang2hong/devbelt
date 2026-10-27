@@ -386,19 +386,23 @@ export class ConnectionManager {
   }
 
   /**
-   * 账号切换：关掉全部会话与独立会话。
-   * 连接 id 可能在新账号里指向另一条连接，必须丢弃旧对象；不发 ConnectionChangedEvent。
+   * 账号切换：关掉全部会话（含独立会话、在途建连与视图持有）。
+   *
+   * 必须走 `disposeConn`：它会递增代际并清掉 `connecting`，否则切换前发起的建连
+   * 完成后仍会把旧账号的会话加回池里；同时按正常关闭路径通知各面板。
+   * 不发 ConnectionChangedEvent（数据没有变，只是作用域换了）。
+   * @returns 实际关闭的连接 id（调用方用来清树的「已打开」状态）。
    */
-  closeAllForAccountSwitch(): void {
-    for (const [key, session] of [...this.sessions]) {
-      try { session.close(); } catch { /* 已断开 */ }
-      this.sessions.delete(key);
-      this.sessionEntries.delete(key);
+  closeAllForAccountSwitch(): string[] {
+    const ids = new Set<string>();
+    for (const key of [...this.sessions.keys(), ...this.connecting.keys(), ...this.retains.keys()]) {
+      ids.add(key.split(SESSION_KEY_SEP)[0]);
     }
-    for (const closer of [...this.isolatedClosers]) {
-      try { closer.close(); } catch { /* 已关闭 */ }
-    }
-    this.isolatedClosers.clear();
+    for (const entry of this.sessionEntries.values()) ids.add(entry.connId);
+    for (const id of this.explicit) ids.add(id);
+    for (const closer of this.isolatedClosers) ids.add(closer.connId);
+    for (const id of ids) this.disposeConn(id);
+    return [...ids];
   }
 
   /** 会话入池：写入 sessions/sessionEntries；期间管理器销毁则自毁；随后按上限淘汰。 */

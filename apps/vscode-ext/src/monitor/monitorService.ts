@@ -125,6 +125,23 @@ export class MonitorService {
   constructor(private readonly deps: MonitorServiceDeps) {}
 
   /**
+   * 账号切换：把本窗口负责的任务全部暂停。
+   *
+   * 任务按连接 id 执行，而连接属于上一个账号的作用域；不暂停就会在新账号的
+   * 同 id 连接（或缺失连接）上继续查询。返回暂停数量；非拥有者返回 0。
+   */
+  async pauseAllForAccountSwitch(): Promise<number> {
+    if (this.deps.isOwner && !this.deps.isOwner()) return 0;
+    let paused = 0;
+    for (const task of [...this.deps.scheduler.list()]) {
+      if (task.status === 'paused') continue;
+      await this.deps.scheduler.pause(task.id, 'accountSwitch');
+      paused += 1;
+    }
+    return paused;
+  }
+
+  /**
    * 校验并生成提案（不创建任务）。A2 会在只读会话上试执行一次；B 会读列与索引。
    * 目标连接 / 库 / schema 由调用方固定（Agent 会话的绑定），模型不能指定。
    */

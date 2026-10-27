@@ -2124,4 +2124,6 @@ export const en: MessageCatalog = {
   'account.migrate.detail': 'This machine has {n} connections. Copying gives this account its own copy (the original stays for signed-out use). Not copying starts the account empty; you will not be asked again.',
   'account.migrate.copy': 'Copy into this account',
   'account.migrate.skip': 'Do not copy',
+  'monitor.list.paused.accountSwitch': 'Paused: account switched',
+  'monitor.notify.accountSwitch': 'Account switched. {n} background tasks were paused because they belong to the previous account\'s connections; resume them when ready.',
 };
