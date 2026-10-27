@@ -4,6 +4,7 @@ import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { registerConsoleStatic, BASE_CSP } from '../../src/consoleStatic.js';
+import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 
 const ENV_KEYS = [
   'DEVBELT_DB_AUTH_DIST_DIR',
@@ -46,6 +47,7 @@ beforeAll(async () => {
   process.env.DEVBELT_SITE_DIST_DIR = site;
 
   app = Fastify();
+  registerErrorHandler(app);
   await registerConsoleStatic(app);
   await app.ready();
 });

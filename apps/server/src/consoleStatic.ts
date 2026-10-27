@@ -276,40 +276,49 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
   app.get('/db/', serveHtml(shellHtml, DB_CSP));
   app.get('/db/sync-reset', serveHtml(syncResetHtml, DB_CSP));
 
-  // db-ui SPA fallback 通过 setNotFoundHandler 统一处理，避免和根 site fallback 抢 `/*`。
-
   // ---------- 平台后台（admin-ui，`/admin` 前缀） ----------
   const adminShell = adminReady ? readHtml(adminDist, 'index.html') : null;
   app.get('/admin', async (_req, reply) => {
     reply.redirect('/admin/');
   });
   app.get('/admin/', serveHtml(adminShell));
-  // admin-ui SPA fallback 通过 setNotFoundHandler 统一处理。
 
-  // ---------- 统一 SPA / 资源 404 兜底 ----------
+  // ---------- SPA fallback：在各自 prefix 下用封装插件注册 wildcard，避免 fastify 5 禁止同级多 wildcard ----------
   //
-  // 优先级（fastify 静态路由已先匹配）：
-  //   1. `/db/**`（除已注册的 /db/、/db/docs、/db/sync-reset、/db/assets/*） → db-ui shell 或 404
-  //   2. `/admin/**`（除已注册的 /admin/、/admin/assets/*） → admin-ui shell 或 404
-  //   3. `/api/**` → 交由上层路由处理；到这里说明没有匹配，返回 404
-  //   4. 其他根路径：带扩展名 → 404；不带扩展名 → site SPA shell（客户端路由决定 404/渲染）
-  app.setNotFoundHandler(async (req, reply) => {
+  // fastify 5 不允许在同一 prefix 上重复声明 wildcard（例如同时 `GET /*` 和 `GET /db/*`），
+  // 这里用 fastify 的封装作用域 + prefix 分别注册。显式路由（`/db/`、`/db/sync-reset` 等）
+  // 已经在上面注册，不会被 wildcard 吞掉。
+  await app.register(
+    async (api) => {
+      api.get('/*', async (req, reply) => {
+        const url = (req.url ?? '').split('?')[0];
+        const rel = url.replace(/^\/db\/?/, '');
+        if (/\.[A-Za-z0-9]+$/.test(rel) || !shellHtml) return notFound(req, reply);
+        return serveHtml(shellHtml, DB_CSP)(req, reply);
+      });
+    },
+    { prefix: '/db' },
+  );
+  await app.register(
+    async (api) => {
+      api.get('/*', async (req, reply) => {
+        const url = (req.url ?? '').split('?')[0];
+        const rel = url.replace(/^\/admin\/?/, '');
+        if (/\.[A-Za-z0-9]+$/.test(rel) || !adminShell) return notFound(req, reply);
+        return serveHtml(adminShell)(req, reply);
+      });
+    },
+    { prefix: '/admin' },
+  );
+  // 注：根 site SPA fallback（`/`、`/en`、客户端路由等无扩展名路径）通过
+  // registerErrorHandler 的 setNotFoundHandler 挂载，该函数在 app 启动前已由 bootstrap 注册。
+  // 这里把 handler 挂到 app[symbol] 上供 errorHandler 读取；避免再注册一个根 `/*`
+  // 与 fastify 5 的 wildcard 限制冲突。
+  (app as unknown as { __devbeltSpaFallback__?: (req: FastifyRequest, reply: FastifyReply) => Promise<void> }).__devbeltSpaFallback__ = async (req, reply) => {
     const url = (req.url ?? '').split('?')[0];
+    if (url.startsWith('/api/')) return notFound(req, reply);
     const last = url.split('/').pop() ?? '';
-    const hasExt = last.includes('.') && !last.endsWith('/');
-
-    if (url.startsWith('/db/')) {
-      if (hasExt || !shellHtml) return notFound(req, reply);
-      return serveHtml(shellHtml, DB_CSP)(req, reply);
-    }
-    if (url.startsWith('/admin/')) {
-      if (hasExt || !adminShell) return notFound(req, reply);
-      return serveHtml(adminShell)(req, reply);
-    }
-    if (url.startsWith('/api/')) {
-      return notFound(req, reply);
-    }
-    if (hasExt || !siteShellRaw) return notFound(req, reply);
+    if (last.includes('.') && !last.endsWith('/')) return notFound(req, reply);
     return serveSiteShell(req, reply, false);
-  });
+  };
 }

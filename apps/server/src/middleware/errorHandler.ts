@@ -88,8 +88,20 @@ export function registerErrorHandler(app: FastifyInstance): void {
     reply.code(500).send({ message: 'Internal server error' });
   });
 
-  app.setNotFoundHandler((_req: FastifyRequest, reply: FastifyReply) => {
-    reply.code(404).send({ message: 'not found', code: 'NOT_FOUND' });
+  // SPA fallback：registerConsoleStatic 之后会在 app 上挂 `__devbeltSpaFallback__`，
+  // 对未匹配的非 API、非扩展名路径回落到官网 SPA shell；其他情况继续返回 JSON 404。
+  // 注意：此处 setNotFoundHandler 在 registerConsoleStatic 之前调用，fastify 允许通过
+  // preHandler 闭包读取 app 上的字段，所以我们延迟在 reply 时再读 fallback。
+  app.setNotFoundHandler(async (req: FastifyRequest, reply: FastifyReply) => {
+    const url = (req.url ?? '').split('?')[0];
+    const fb = (app as unknown as { __devbeltSpaFallback__?: (r: FastifyRequest, p: FastifyReply) => Promise<void> }).__devbeltSpaFallback__;
+    const last = url.split('/').pop() ?? '';
+    const hasExt = last.includes('.') && !last.endsWith('/');
+    // 只有当 url 不以 /api/ 开头、无扩展名、且 fallback 已挂好时才交给 SPA
+    if (fb && !url.startsWith('/api/') && !hasExt && req.method === 'GET') {
+      return fb(req, reply);
+    }
+    reply.code(404).type('application/json').send({ message: 'not found', code: 'NOT_FOUND' });
   });
 }
 

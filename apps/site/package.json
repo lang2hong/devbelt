@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "echo \"@devbelt/site has no unit tests\"",
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",

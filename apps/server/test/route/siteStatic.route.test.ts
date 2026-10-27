@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import { registerConsoleStatic } from '../../src/consoleStatic.js';
+import { registerErrorHandler } from '../../src/middleware/errorHandler.js';
 
 async function build(opts: { loggedIn?: boolean; cwd?: string } = {}) {
   const app = Fastify();
   // 指向真实 site dist（repo 根下 apps/site/dist）
   process.env.DEVBELT_SITE_DIST_DIR = opts.cwd ?? new URL('../../../../apps/site/dist', import.meta.url).pathname;
+  registerErrorHandler(app);
   // 其他 ui dist 不存在也不影响首页/英文页/套餐页的渲染
   await registerConsoleStatic(app, {
     isLoggedIn: async () => opts.loggedIn ?? false,
     getHomePlans: async () => [],
   });
+  await app.ready();
   return app;
 }
 
