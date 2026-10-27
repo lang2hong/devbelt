@@ -42,14 +42,12 @@ export interface Copy {
   htmlLang: string;
   meta: { title: string; description: string };
   nav: {
-    features: string;
-    new: string;
     install: string;
     docs: string;
-    plans: string;
     github: string;
+    features: string;
+    plans: string;
     login: string;
-    register: string;
     console: string;
     langSwitch: string;
   };
@@ -93,7 +91,7 @@ export interface Copy {
   footer: {
     tagline: string;
     productHead: string;
-    product: { features: string; new: string; plans: string };
+    product: { features: string; docs: string; plans: string };
     resourcesHead: string;
     resources: { docs: string; changelog: string; github: string };
     getHead: string;

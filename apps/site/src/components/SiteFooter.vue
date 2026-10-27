@@ -25,7 +25,7 @@ const emit = defineEmits<{ (e: 'switch-locale'): void }>();
             <router-link :to="(t.htmlLang === 'en' ? '/en' : '/') + '#features'">{{ t.footer.product.features }}</router-link>
           </li>
           <li>
-            <router-link :to="(t.htmlLang === 'en' ? '/en' : '/') + '#new'">{{ t.footer.product.new }}</router-link>
+            <a :href="URLS.docs">{{ t.footer.product.docs }}</a>
           </li>
           <li><a :href="URLS.plans">{{ t.footer.product.plans }}</a></li>
         </ul>

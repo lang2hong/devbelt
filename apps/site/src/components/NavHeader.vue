@@ -15,12 +15,11 @@ const emit = defineEmits<{ (e: 'switch-locale'): void }>();
       </router-link>
       <span class="spacer" />
       <nav>
-        <router-link :to="(t.htmlLang === 'en' ? '/en' : '/') + '#features'">{{ t.nav.features }}</router-link>
-        <router-link :to="(t.htmlLang === 'en' ? '/en' : '/') + '#new'">{{ t.nav.new }}</router-link>
-        <router-link :to="(t.htmlLang === 'en' ? '/en' : '/') + '#install'">{{ t.nav.install }}</router-link>
+        <router-link class="primary-link" :to="(t.htmlLang === 'en' ? '/en' : '/') + '#install'">{{ t.nav.install }}</router-link>
         <a :href="URLS.docs">{{ t.nav.docs }}</a>
-        <a :href="URLS.plans">{{ t.nav.plans }}</a>
         <a :href="URLS.github" target="_blank" rel="noopener noreferrer">{{ t.nav.github }}</a>
+        <router-link :to="(t.htmlLang === 'en' ? '/en' : '/') + '#features'">{{ t.nav.features }}</router-link>
+        <a :href="URLS.plans">{{ t.nav.plans }}</a>
         <span class="sep" />
         <button class="lang" type="button" @click="emit('switch-locale')">{{ t.nav.langSwitch }}</button>
         <span class="sep" />
@@ -29,7 +28,6 @@ const emit = defineEmits<{ (e: 'switch-locale'): void }>();
         </template>
         <template v-else>
           <a :href="URLS.login">{{ t.nav.login }}</a>
-          <a class="cta" :href="URLS.register">{{ t.nav.register }}</a>
         </template>
       </nav>
     </div>

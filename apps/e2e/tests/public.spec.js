@@ -50,10 +50,11 @@ test('公开文档中心 /db/docs 无需登录，且与官网同一导航/页脚
   await expect(page.locator('header.top')).toContainText('GitHub');
   await expect(page.locator('footer')).toContainText('VS Code Marketplace');
   // 分组齐全（限定正文，避免和左侧 TOC 的分组标题重复匹配）
-  await expect(page.locator('.group h2', { hasText: 'SQL 与数据' })).toBeVisible();
-  await expect(page.locator('.group h2', { hasText: 'Redis 与 Elasticsearch' })).toBeVisible();
-  await expect(page.locator('.group h2', { hasText: 'AI 与监控' })).toBeVisible();
-  await expect(page.locator('.group h2', { hasText: '账户与同步' })).toBeVisible();
+  for (const g of ['SQL 与数据', 'Redis 与 Elasticsearch', 'AI 与自动化', '安全与合规', '备份与账户', '参考']) {
+    await expect(page.locator('.group h2', { hasText: g })).toBeVisible();
+  }
+  // 索引页不再有左侧目录
+  await expect(page.locator('nav.toc')).toHaveCount(0);
 });
 
 test('文档用真实截图（不是内联 SVG）', async ({ page }) => {
@@ -66,13 +67,18 @@ test('文档用真实截图（不是内联 SVG）', async ({ page }) => {
   await expect(page.locator('svg.fig')).toHaveCount(0);
 });
 
-test('0.4.0 新增文档可访问：Redis / Elasticsearch / AI / 数据监控', async ({ page }) => {
+test('新增文档可访问：Redis / Elasticsearch / AI / 监控 / MCP / 安全 / 脱敏 / 备份 / 参考', async ({ page }) => {
   for (const [slug, heading] of [
     ['redis', 'Redis'],
     ['elasticsearch', 'Elasticsearch'],
     ['ai', 'AI 助手'],
     ['monitoring', '数据监控'],
     ['insight', '查询洞察'],
+    ['mcp', 'MCP Server'],
+    ['security', '安全与审计'],
+    ['masking', '脱敏导出'],
+    ['backup', '备份与恢复'],
+    ['reference', '快捷键与设置'],
   ]) {
     const res = await page.goto(`/db/docs/${slug}`);
     expect(res?.status()).toBe(200);
@@ -83,11 +89,15 @@ test('0.4.0 新增文档可访问：Redis / Elasticsearch / AI / 数据监控', 
   await expect(page.locator('figure.shot img')).toHaveCount(2);
 });
 
-test('公开套餐页 /plans 无需登录', async ({ page }) => {
+test('公开套餐页 /plans 无需登录，且与文档页共用外壳', async ({ page }) => {
   const res = await page.goto('/plans');
   expect(res?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: '同步套餐' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '套餐', exact: true })).toBeVisible();
   // 套餐卡来自 billing 目录（Free / Pro / ¥8；migration 013 已把 pro 从 ¥99 改为 ¥8）
   await expect(page.getByText('Pro', { exact: true })).toBeVisible();
   await expect(page.getByText('¥8')).toBeVisible();
+  // 与文档/首页同一套导航 + 四列页脚
+  await expect(page.locator('header.top')).toContainText('安装');
+  await expect(page.locator('header.top')).toContainText('GitHub');
+  await expect(page.locator('footer')).toContainText('VS Code Marketplace');
 });

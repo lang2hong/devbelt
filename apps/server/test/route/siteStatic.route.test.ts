@@ -58,7 +58,7 @@ describe('site SPA static hosting', () => {
     const app = await build();
     const res = await app.inject({ method: 'GET', url: '/plans' });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain('同步套餐');
+    expect(res.body).toContain('<h1>套餐</h1>');
   });
 
   it('screenshot static asset is served from site public/', async () => {
