@@ -4,6 +4,7 @@ import { l10n } from '../i18n';
 import { DEFAULT_SERVER_URL, type AuthService } from './authService';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import type { HubTab } from '../result/protocol';
+import { AuthEvent, eventBus } from '@devbelt/db-host/utils/event';
 
 /**
  * 账户中心（单面板 + 标签页：账户 / 设备 / 套餐）。
@@ -62,12 +63,18 @@ export class AccountHubView extends BaseWebView {
   private readonly factory: SyncSessionFactory;
   /** 首次 ready 时下发的初始标签；后续命令触发只发 selectTab。 */
   private readonly initialTab: HubTab;
+  private readonly authSub: { dispose(): void };
 
   private constructor(auth: AuthService, factory: SyncSessionFactory, tab: HubTab) {
     super('devbelt.account', l10n('account.title'));
     this.auth = auth;
     this.factory = factory;
     this.initialTab = tab;
+    // 换号/登出时本面板若开着，重新拉账号与设备列表，避免停留在上一个账号的数据。
+    this.authSub = eventBus.subscribe(AuthEvent, () => {
+      void this.sendAccount();
+      void this.sendSession();
+    });
   }
 
   static open(auth: AuthService, factory: SyncSessionFactory, tab: HubTab = 'account'): void {
@@ -186,6 +193,7 @@ export class AccountHubView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.authSub.dispose();
     if (AccountHubView.current === this) AccountHubView.current = undefined;
   }
 }

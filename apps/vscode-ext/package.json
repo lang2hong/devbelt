@@ -947,6 +947,11 @@
     "menus": {
       "editor/context": [
         {
+          "command": "devbelt.formatSql",
+          "when": "editorLangId == sql",
+          "group": "1_modification@1"
+        },
+        {
           "command": "devbelt.ai.nl2sqlGhost",
           "when": "editorLangId == sql",
           "group": "ai@1"
@@ -2160,6 +2165,26 @@
           "command": "devbelt.serverStatus",
           "when": "view == devbelt.explorer && viewItem =~ /^connectionOpen\\.(MYSQL|PG|SQLITE)$/",
           "group": "5_tools"
+        },
+        {
+          "command": "devbelt.slowQueries",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "6_insight@1"
+        },
+        {
+          "command": "devbelt.showHistory",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "6_insight@2"
+        },
+        {
+          "command": "devbelt.showAuditLog",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "6_insight@3"
+        },
+        {
+          "command": "devbelt.showPoolStatus",
+          "when": "view == devbelt.explorer && viewItem =~ /^connection(Open|Closed)\\./",
+          "group": "6_insight@4"
         },
         {
           "command": "devbelt.importData",

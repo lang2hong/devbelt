@@ -50,6 +50,7 @@ import { SlowQueryPanel } from './insights/slowQueryPanel';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
+import { setAccountScope } from './sync/accountScope';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
 import { setTreeSelectionProvider } from './commands/shared';
@@ -75,6 +76,19 @@ import { ProviderCatalog } from './ai/providerCatalog';
 import { applyModelAccessRuntime } from './ai/modelAccessRuntime';
 
 /** 自动同步开关（按机器）：默认关闭，仅显式开启后才自动同步。 */
+/**
+ * 把本地数据作用域对齐当前登录用户：登录用 userId，未登录用 local。
+ * 取 userId 失败（离线且无缓存）时退回 local，但下次登录事件会再对齐。
+ */
+async function syncAccountScope(auth: AuthService): Promise<boolean> {
+  try {
+    const userId = auth.isLoggedIn() ? await auth.getUserId() : undefined;
+    return setAccountScope(userId);
+  } catch {
+    return setAccountScope(undefined);
+  }
+}
+
 const SYNC_AUTO_SYNC_KEY = 'devbelt.sync.autoSync';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -172,6 +186,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
   context.subscriptions.push(auth);
   await auth.init();
+  // 本地 AI 数据按账号隔离（方案 B1）：初始化时把作用域对齐当前登录用户。
+  await syncAccountScope(auth);
   // package.json 的 commandPalette 用 devbelt.loggedIn 控制 login/logout/account/sessions
   // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
@@ -314,9 +330,12 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
   const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {
     if (e.kind === 'logout') syncFactory.invalidate();
-    syncStatusBar.refresh();
-    authStatusBar.refresh();
-    void syncLoggedInContext(auth);
+    // 换号：先切本地数据作用域，再刷新各面板（AI 会话/模型偏好按作用域读取）。
+    void syncAccountScope(auth).then(() => {
+      syncStatusBar.refresh();
+      authStatusBar.refresh();
+      void syncLoggedInContext(auth);
+    });
   });
   context.subscriptions.push(onAuthChange);
   // 同步可观测：本地用户改动（连接/分组/查询）后是否会自动排同步（取决于自动同步开关）。

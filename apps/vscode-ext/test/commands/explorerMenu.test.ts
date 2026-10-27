@@ -16,6 +16,10 @@ describe('explorerMenu builder', () => {
     expect(v).toContain('addGroup');
     expect(v).toContain('refresh');
     expect(v).toContain('searchConnections');
+    // 这些以前只能从命令面板调，现在在「⋯」菜单里可点
+    for (const value of ['showSlowQueries', 'showAuditLog', 'showPoolStatus', 'monitorTasks', 'authenticator']) {
+      expect(v).toContain(value);
+    }
     expect(v).toContain('login');
     expect(v).not.toContain('syncEntry');
     expect(v).not.toContain('syncNow');
@@ -45,6 +49,14 @@ describe('explorerMenu builder', () => {
     const separators = buildExplorerMenu({ loggedIn: true, unlocked: true, autoOn: false })
       .filter((i) => i.separator).map((i) => i.label);
     expect(separators).toHaveLength(3);
+  });
+
+  it('新入口都映射到真实命令', () => {
+    expect(EXPLORER_MENU_COMMANDS.showSlowQueries).toBe('devbelt.slowQueries');
+    expect(EXPLORER_MENU_COMMANDS.showAuditLog).toBe('devbelt.showAuditLog');
+    expect(EXPLORER_MENU_COMMANDS.showPoolStatus).toBe('devbelt.showPoolStatus');
+    expect(EXPLORER_MENU_COMMANDS.monitorTasks).toBe('devbelt.monitor.tasks');
+    expect(EXPLORER_MENU_COMMANDS.authenticator).toBe('devbelt.authenticator');
   });
 
   it('value→命令 id 映射正确（syncEntry/syncNow 不再共用）', () => {

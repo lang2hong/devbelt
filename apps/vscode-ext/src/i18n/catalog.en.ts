@@ -2115,4 +2115,9 @@ export const en: MessageCatalog = {
   'monitor.takeOver.done': 'Monitoring is now owned by this window; tasks are paused and can be resumed in Background Tasks.',
   'monitor.notify.ownerMoved': 'Another VS Code window took over monitoring; this window stopped running tasks and is read-only.',
   'monitor.proposal.otherWindowHint': 'Monitoring runs in another VS Code window. Take over here first, then create the task.',
+  'explorer.tool.slowQueries': 'Slow Queries',
+  'explorer.tool.auditLog': 'Audit Log',
+  'explorer.tool.poolStatus': 'Connection Pool Status',
+  'explorer.tool.monitorTasks': 'Background Tasks',
+  'explorer.tool.authenticator': 'Authenticator (2FA)',
 };

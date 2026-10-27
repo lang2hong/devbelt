@@ -1,5 +1,6 @@
 import type { AiModelAccessFields, AiModelAccessSelection, AiModelAccessCustom } from '@devbelt/db-host/sync/e2e/aiModelAccessTypes';
 import { DEFAULT_MODEL_ACCESS_PREFS, type ModelAccessSyncPrefs } from './modelAccess.js';
+import { accountScope, scopedKey, scopedPrefix } from '../sync/accountScope';
 
 /**
  * AI 模型接入配置的本地记录存储（同步实体 `aiModelAccess` 的本地真身）。
@@ -45,10 +46,40 @@ export class AiModelAccessStore {
     private readonly newId: () => string = () => `ma-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   ) {}
 
-  listRecords(): ModelAccessRecord[] {
-    const out: ModelAccessRecord[] = [];
+  /** 账号作用域下的记录键前缀；未登录沿用旧前缀。 */
+  private prefix(): string {
+    return scopedPrefix(MODEL_ACCESS_RECORD_PREFIX);
+  }
+
+  private keyFor(id: string): string {
+    return `${this.prefix()}${id}`;
+  }
+
+  /**
+   * B1：首次在某个账号下访问时，把旧（local）记录复制一份到该账号，原数据保留。
+   * 每个实例只做一次。
+   */
+  private ensureMigrated(): void {
+    if (this.migrated) return;
+    this.migrated = true;
+    if (accountScope() === 'local') return;
     for (const key of this.memento.keys()) {
       if (!key.startsWith(MODEL_ACCESS_RECORD_PREFIX)) continue;
+      const rest = key.slice(MODEL_ACCESS_RECORD_PREFIX.length);
+      if (!rest || rest.startsWith('u.')) continue;
+      const target = this.keyFor(rest);
+      if (this.memento.get(target) === undefined) void this.memento.update(target, this.memento.get(key));
+    }
+  }
+
+  private migrated = false;
+
+  listRecords(): ModelAccessRecord[] {
+    this.ensureMigrated();
+    const out: ModelAccessRecord[] = [];
+    const prefix = this.prefix();
+    for (const key of this.memento.keys()) {
+      if (!key.startsWith(prefix)) continue;
       const rec = this.memento.get<ModelAccessRecord>(key);
       if (rec && typeof rec.id === 'string' && rec.fields) out.push(rec);
     }
@@ -56,7 +87,8 @@ export class AiModelAccessStore {
   }
 
   getRecord(id: string): ModelAccessRecord | undefined {
-    return this.memento.get<ModelAccessRecord>(`${MODEL_ACCESS_RECORD_PREFIX}${id}`);
+    this.ensureMigrated();
+    return this.memento.get<ModelAccessRecord>(this.keyFor(id));
   }
 
   /** 有效配置记录：未删除中 updateTime 最大者。 */
@@ -76,7 +108,13 @@ export class AiModelAccessStore {
 
   /** 同步项勾选（本机；缺省全开）。 */
   getPrefs(): ModelAccessSyncPrefs {
-    const stored = this.memento.get<ModelAccessSyncPrefs>(PREFS_KEY);
+    const key = scopedKey(PREFS_KEY);
+    let stored = this.memento.get<ModelAccessSyncPrefs>(key);
+    // B1：账号作用域没有时回退旧键，并复制一份。
+    if (stored === undefined && key !== PREFS_KEY) {
+      const legacy = this.memento.get<ModelAccessSyncPrefs>(PREFS_KEY);
+      if (legacy !== undefined) { stored = legacy; void this.memento.update(key, legacy); }
+    }
     if (!stored || typeof stored !== 'object') return { ...DEFAULT_MODEL_ACCESS_PREFS };
     return {
       selection: stored.selection !== false,
@@ -86,7 +124,7 @@ export class AiModelAccessStore {
   }
 
   async setPrefs(prefs: ModelAccessSyncPrefs): Promise<void> {
-    await this.memento.update(PREFS_KEY, prefs);
+    await this.memento.update(scopedKey(PREFS_KEY), prefs);
   }
 
   /** 本地保存（用户显式操作）：更新有效记录，无则新建。 */
@@ -104,12 +142,12 @@ export class AiModelAccessStore {
   async removeRecord(id: string): Promise<void> {
     const rec = this.getRecord(id);
     if (!rec) return;
-    await this.memento.update(`${MODEL_ACCESS_RECORD_PREFIX}${id}`, { ...rec, deleted: true, updateTime: this.now() });
+    await this.memento.update(this.keyFor(id), { ...rec, deleted: true, updateTime: this.now() });
   }
 
   private async write(id: string, fields: StoredModelAccessFields): Promise<ModelAccessRecord> {
     const rec: ModelAccessRecord = { id, fields: stripKey(fields), updateTime: this.now() };
-    await this.memento.update(`${MODEL_ACCESS_RECORD_PREFIX}${id}`, rec);
+    await this.memento.update(this.keyFor(id), rec);
     return rec;
   }
 }

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('vscode', () => ({}));
 
 import { AiSessionStore } from '../../src/ai/aiSessionStore';
+import { setAccountScope } from '../../src/sync/accountScope';
 
 function makeStore(): { store: AiSessionStore; data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
@@ -99,5 +100,31 @@ describe('AiSessionStore（会话历史，本地 Memento）', () => {
     const list = store.list();
     expect(list).toHaveLength(1);
     expect(list[0].id).toBe('ok');
+  });
+});
+
+describe('AiSessionStore 按账号隔离', () => {
+  it('切换账号后看不到另一个账号的会话，切回来仍在', async () => {
+    const { store } = makeStore();
+    setAccountScope('u1');
+    const a = store.create();
+    a.title = 'u1 的会话';
+    store.save(a);
+
+    setAccountScope('u2');
+    expect(store.list().map((s) => s.title)).toEqual([]);
+
+    setAccountScope('u1');
+    expect(store.list().map((s) => s.title)).toEqual(['u1 的会话']);
+    setAccountScope(undefined);
+  });
+
+  it('未登录时沿用旧键（B1 不丢历史）', () => {
+    const { store } = makeStore();
+    setAccountScope(undefined);
+    const a = store.create();
+    a.title = '本地会话';
+    store.save(a);
+    expect(store.list().map((s) => s.title)).toEqual(['本地会话']);
   });
 });

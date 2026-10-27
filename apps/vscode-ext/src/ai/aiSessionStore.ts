@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type * as vscode from 'vscode';
+import { readScoped, writeScoped } from '../sync/accountScope';
 
 /** 单轮 AI 请求的展示/对账元数据（本地会话持久化；不含明文上下文）。 */
 export interface AiMessageUsage {
@@ -91,7 +92,7 @@ export class AiSessionStore {
 
   /** 按最近更新倒序列出全部会话。 */
   list(): AiChatSession[] {
-    const stored = this.memento.get<AiChatSession[]>(STORAGE_KEY, []);
+    const stored = readScoped<AiChatSession[]>(this.memento, STORAGE_KEY) ?? [];
     return stored
       .filter((s) => s && typeof s.id === 'string' && Array.isArray(s.messages))
       .map(normalizeSession)
@@ -140,6 +141,6 @@ export class AiSessionStore {
   }
 
   private persist(sessions: AiChatSession[]): void {
-    void this.memento.update(STORAGE_KEY, sessions.slice(0, MAX_SESSIONS).map(normalizeSession));
+    void writeScoped(this.memento, STORAGE_KEY, sessions.slice(0, MAX_SESSIONS).map(normalizeSession));
   }
 }

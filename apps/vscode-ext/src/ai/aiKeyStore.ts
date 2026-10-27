@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { accountScope, scopedKey } from '../sync/accountScope';
 
 /** SecretStorage 键：自带 Key 模式的 apiKey（后续多 provider 可扩为 `devbelt.ai.<providerId>.apiKey`）。 */
 export const AI_API_KEY_SECRET = 'devbelt.ai.openai.apiKey';
@@ -23,7 +24,8 @@ export class AiKeyStore {
   constructor(private readonly secrets: vscode.SecretStorage) {
     this.onDidChange = this.emitter.event;
     this.sub = secrets.onDidChange((e) => {
-      if (e.key === AI_API_KEY_SECRET) {
+      // 账号切换不会触发 SecretStorage 变更事件，因此作用域键前缀也要匹配。
+      if (e.key === AI_API_KEY_SECRET || e.key.startsWith(`${AI_API_KEY_SECRET}::`)) {
         this.loaded = false;
         this.cached = undefined;
         this.emitter.fire();
@@ -32,9 +34,20 @@ export class AiKeyStore {
   }
 
   /** 读取 apiKey（缓存优先；空串表示未配置）。 */
+  /** 当前账号下的 SecretStorage 键；未登录沿用旧键（B1：读时复制）。 */
+  private secretKey(): string {
+    return scopedKey(AI_API_KEY_SECRET);
+  }
+
   async getApiKey(): Promise<string | undefined> {
     if (this.loaded) return this.cached;
-    const stored = await this.secrets.get(AI_API_KEY_SECRET);
+    const key = this.secretKey();
+    let stored = await this.secrets.get(key);
+    if (stored === undefined && key !== AI_API_KEY_SECRET && accountScope() !== 'local') {
+      // B1：账号里还没有 Key 时，把本机原有的 Key 复制一份过去，原值保留。
+      stored = await this.secrets.get(AI_API_KEY_SECRET);
+      if (stored !== undefined) await this.secrets.store(key, stored);
+    }
     this.cached = stored && stored.trim() ? stored.trim() : undefined;
     this.loaded = true;
     return this.cached;
@@ -55,12 +68,13 @@ export class AiKeyStore {
       await this.clearApiKey();
       return;
     }
-    await this.secrets.store(AI_API_KEY_SECRET, trimmed);
+    await this.secrets.store(this.secretKey(), trimmed);
     this.invalidateCache();
   }
 
   async clearApiKey(): Promise<void> {
-    await this.secrets.delete(AI_API_KEY_SECRET);
+    // 只清当前账号的 Key，其他账号的保留。
+    await this.secrets.delete(this.secretKey());
     this.invalidateCache();
   }
 

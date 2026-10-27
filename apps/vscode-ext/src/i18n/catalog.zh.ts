@@ -2093,4 +2093,9 @@ export const zh: MessageCatalog = {
   'monitor.takeOver.done': '已接管监控任务；任务已暂停，可在「后台任务」里继续。',
   'monitor.notify.ownerMoved': '监控执行权已转移到另一个 VS Code 窗口，这里已停止执行（只读）。',
   'monitor.proposal.otherWindowHint': '监控任务由另一个 VS Code 窗口执行。你可以先接管，再创建。',
+  'explorer.tool.slowQueries': '慢查询分析',
+  'explorer.tool.auditLog': '审计日志',
+  'explorer.tool.poolStatus': '连接池状态',
+  'explorer.tool.monitorTasks': '后台任务',
+  'explorer.tool.authenticator': '验证器（2FA）',
 };

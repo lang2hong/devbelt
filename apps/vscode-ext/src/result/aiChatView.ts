@@ -19,6 +19,7 @@ import {
   type HistoryMessage,
 } from '../ai/historyCompression.js';
 import { wantsMonitorTask } from '../ai/monitorIntent.js';
+import { onAccountScopeChange } from '../sync/accountScope.js';
 import { AiSessionStore, type AiChatMessage, type AiChatSession, type AiMessageUsage } from '../ai/aiSessionStore.js';
 import { dropTrailingAssistant, replaceUserMessage } from '../ai/chatEdit.js';
 import { AiContextStore, findColumnNote, findTableNote } from '../ai/aiContextStore.js';
@@ -178,6 +179,8 @@ export class AiChatView extends BaseWebView {
    * 否则模型已经说了「请点卡片」，用户却看不到卡片。只在内存里，随面板销毁。
    */
   private readonly proposalCards = new Map<string, Array<{ proposal: MonitorProposalView; status: 'pending' | 'created'; reason?: string }>>();
+  /** 账号作用域变化订阅（面板销毁时释放）。 */
+  private scopeSub?: { dispose(): void };
   /** 最近一次发送时的历史压缩统计（上下文抽屉展示）。 */
   private lastHistoryStats?: { recent: number; summarized: number; chars: number };
 
@@ -194,8 +197,11 @@ export class AiChatView extends BaseWebView {
       AiChatView.current.reveal();
       return AiChatView.current;
     }
-    AiChatView.current = new AiChatView(deps);
-    return AiChatView.current;
+    const view = new AiChatView(deps);
+    // 换号：中止在途请求，清空上一个账号的会话/额度，重新按新作用域加载。
+    view.scopeSub = onAccountScopeChange(() => view.onAccountScopeChanged());
+    AiChatView.current = view;
+    return view;
   }
 
   /**
@@ -742,6 +748,8 @@ export class AiChatView extends BaseWebView {
 
   protected onDispose(): void {
     super.onDispose();
+    this.scopeSub?.dispose();
+    this.scopeSub = undefined;
     this.monitorSub?.dispose();
     this.monitorSub = undefined;
     this.cancelAllRuns();
@@ -1636,6 +1644,29 @@ export class AiChatView extends BaseWebView {
   }
 
   // ── 推送 ──
+
+  /**
+   * 本地数据切换到另一个账号：中止在途运行（否则结果会写进新账号的会话），
+   * 清掉上一个账号的额度与会话选择，再按新作用域重新下发。
+   */
+  private onAccountScopeChanged(): void {
+    this.abortStream();
+    this.abortAgent();
+    this.cancelAllRuns();
+    this.lastQuota = null;
+    this.activeSessionId = undefined;
+    this.proposalCards.clear();
+    if (!this.initSent) return;
+    this.pushSessionList();
+    this.pushActiveSession();
+    void this.pushContext();
+    void (async () => {
+      const quota = await this.fetchQuotaState();
+      if (!this.initSent) return;
+      this.lastQuota = quota;
+      this.post({ type: 'quotaUpdate', quota, ok: quota !== null } as never);
+    })();
+  }
 
   private async pushInit(): Promise<void> {
     const provider = await this.deps.service.describeProvider();

@@ -1,5 +1,6 @@
 import type { Memento } from 'vscode';
 import { uniqueId } from '@devbelt/db-host/utils/id';
+import { readScoped, writeScoped } from '../sync/accountScope';
 
 /** 已保存的 ES DSL 查询（Memento 持久化；per 连接）。 */
 export interface SavedEsQuery {
@@ -37,12 +38,12 @@ export class EsDslStore {
       existing.index = index;
       existing.body = body;
       existing.at = Date.now();
-      await this.memento.update(KEY, all);
+      await writeScoped(this.memento, KEY, all);
       return existing;
     }
     const entry: SavedEsQuery = { id: uniqueId('esq'), name: trimmed, connId, index, body, at: Date.now() };
     all.push(entry);
-    await this.memento.update(KEY, all);
+    await writeScoped(this.memento, KEY, all);
     return entry;
   }
 
@@ -52,12 +53,12 @@ export class EsDslStore {
     const idx = all.findIndex((q) => q.id === id);
     if (idx < 0) return false;
     all.splice(idx, 1);
-    await this.memento.update(KEY, all);
+    await writeScoped(this.memento, KEY, all);
     return true;
   }
 
   private all(): SavedEsQuery[] {
-    const raw = this.memento.get<SavedEsQuery[]>(KEY);
+    const raw = readScoped<SavedEsQuery[]>(this.memento, KEY);
     if (!Array.isArray(raw)) return [];
     return raw.filter((q) => q && typeof q.id === 'string' && typeof q.connId === 'string');
   }
