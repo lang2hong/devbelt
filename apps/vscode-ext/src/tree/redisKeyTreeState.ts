@@ -9,7 +9,7 @@
  *  - `refreshNode`：定向刷新树节点（provider 注入自身 `refreshNode`）。
  * 不 import `ConnectionManager`，便于单测并避免环依赖。
  */
-import { TreeItemCollapsibleState, window } from 'vscode';
+import { TreeItemCollapsibleState, window, workspace } from 'vscode';
 import type { CancellationToken } from 'vscode';
 import { redisScan, redisScanOnNode, redisSelect } from '@devbelt/db-core';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
@@ -19,8 +19,20 @@ import { groupRedisKeyChildren, redisPrefixPattern } from '../result/redisKeyFol
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
 
-/** D*：Redis 键树根层每页 SCAN 数量（文件夹展开不再单独 SCAN，客户端折叠）。 */
-const REDIS_TREE_PAGE = 500;
+/** D*：Redis 键树每页 SCAN 数量的默认值（可用 `devbelt.redis.keyPageSize` 调整）。 */
+const REDIS_TREE_PAGE_DEFAULT = 1000;
+const REDIS_TREE_PAGE_MIN = 200;
+const REDIS_TREE_PAGE_MAX = 5000;
+
+/**
+ * 每次「加载更多」扫描的键数。SCAN 的 COUNT 是桶数提示：值越大单次越慢，
+ * 但不至于像 500 那样点很多次。越界/非法值夹到 [200, 5000]。
+ */
+export function redisTreePageSize(): number {
+  const raw = workspace.getConfiguration('devbelt').get<number>('redis.keyPageSize', REDIS_TREE_PAGE_DEFAULT);
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.round(raw) : REDIS_TREE_PAGE_DEFAULT;
+  return Math.min(REDIS_TREE_PAGE_MAX, Math.max(REDIS_TREE_PAGE_MIN, n));
+}
 /** D*：软上限——「加载更多」累计到此即停并给出「载入全部」入口（防无界浏览卡死）。 */
 const REDIS_TREE_SOFT_CAP = 20000;
 /** D*：硬上限——仅「载入全部」可达（需二次确认），超出截断。 */
@@ -29,8 +41,8 @@ export const REDIS_TREE_HARD_CAP = 100000;
 const CLUSTER_MIN_PAGE = 10;
 
 /** cluster 单页目标：按 master 数均分总页大小（每 master 至少 CLUSTER_MIN_PAGE）。 */
-function clusterPageSize(masterCount: number): number {
-  return Math.max(CLUSTER_MIN_PAGE, Math.ceil(REDIS_TREE_PAGE / Math.max(1, masterCount)));
+function clusterPageSize(pageSize: number, masterCount: number): number {
+  return Math.max(CLUSTER_MIN_PAGE, Math.ceil(pageSize / Math.max(1, masterCount)));
 }
 
 /** 让出事件循环（长循环的每页之间调用，避免扩展宿主卡顿）。 */
@@ -159,6 +171,7 @@ export class RedisKeyTreeState {
     const conn = node.conn;
     if (!conn || node.redisDbIndex === undefined) return { added: 0, total: 0, done: true, error: false };
     const dbIndex = node.redisDbIndex;
+    const pageSize = redisTreePageSize();
     const stateKey = this.redisRootKey(conn.id, dbIndex);
     const before = this.redisKeys.get(stateKey)?.length ?? 0;
     if (before >= REDIS_TREE_SOFT_CAP) {
@@ -183,7 +196,7 @@ export class RedisKeyTreeState {
           const next = [...cursors];
           const batch: string[] = [];
           for (let i = 0; i < nodes.length; i++) {
-            const page = await redisScanOnNode(nodes[i], cursors[i] ?? '0', { match, count: clusterPageSize(nodes.length) });
+            const page = await redisScanOnNode(nodes[i], cursors[i] ?? '0', { match, count: clusterPageSize(pageSize, nodes.length) });
             next[i] = page.cursor;
             batch.push(...page.keys);
           }
@@ -197,7 +210,7 @@ export class RedisKeyTreeState {
           session.db = dbIndex;
         }
         const cursor = this.redisCursors.get(stateKey) ?? '0';
-        const page = await redisScan(client, cursor, { match, count: REDIS_TREE_PAGE });
+        const page = await redisScan(client, cursor, { match, count: pageSize });
         if (this.redisGenOf(conn.id, dbIndex) !== gen) return; // 搜索/连接已变：丢弃本页
         this.redisCursors.set(stateKey, page.cursor);
         this.mergeRedisKeys(stateKey, page.keys);
@@ -254,7 +267,8 @@ export class RedisKeyTreeState {
         const nodes = client.nodes();
         const cursors = nodes.map(() => '0');
         const doneFlags = nodes.map(() => false);
-        const count = clusterPageSize(nodes.length);
+        const pageSize = redisTreePageSize();
+        const count = clusterPageSize(pageSize, nodes.length);
         for (;;) {
           if (token?.isCancellationRequested) break;
           for (let i = 0; i < nodes.length; i++) {
@@ -270,6 +284,7 @@ export class RedisKeyTreeState {
           await yieldToEventLoop();
         }
       } else {
+        const pageSize = redisTreePageSize();
         let cursor = '0';
         for (;;) {
           if (token?.isCancellationRequested) break;
@@ -278,7 +293,7 @@ export class RedisKeyTreeState {
               await redisSelect(client, dbIndex);
               session.db = dbIndex;
             }
-            return redisScan(client, cursor, { match: pattern, count: REDIS_TREE_PAGE });
+            return redisScan(client, cursor, { match: pattern, count: pageSize });
           });
           cursor = page.cursor;
           acc.push(...page.keys);
@@ -344,7 +359,8 @@ export class RedisKeyTreeState {
         const existing = this.redisFolderClusterCursors.get(partKey);
         const cursors = [...(existing ?? nodes.map(() => '0'))];
         const doneFlags = existing ? cursors.map((c) => c === '0') : nodes.map(() => false);
-        const count = clusterPageSize(nodes.length);
+        const pageSize = redisTreePageSize();
+        const count = clusterPageSize(pageSize, nodes.length);
         outer: for (let round = 0; round < maxPages; round++) {
           for (let i = 0; i < nodes.length; i++) {
             if (doneFlags[i]) continue;
@@ -363,6 +379,7 @@ export class RedisKeyTreeState {
         }
         if (this.redisGenOf(conn.id, dbIndex) === gen) this.redisFolderClusterCursors.set(partKey, cursors);
       } else {
+        const pageSize = redisTreePageSize();
         let cursor = this.redisFolderCursors.get(partKey) ?? '0';
         for (let page = 0; page < maxPages; page++) {
           const scanned = await client.runExclusive(async () => {
@@ -370,7 +387,7 @@ export class RedisKeyTreeState {
               await redisSelect(client, dbIndex);
               session.db = dbIndex;
             }
-            return redisScan(client, cursor, { match: pattern, count: REDIS_TREE_PAGE });
+            return redisScan(client, cursor, { match: pattern, count: pageSize });
           });
           if (this.redisGenOf(conn.id, dbIndex) !== gen) break;
           cursor = scanned.cursor;
@@ -439,7 +456,7 @@ export class RedisKeyTreeState {
             const before = count();
             for (let i = 0; i < nodes.length; i++) {
               if (doneFlags[i]) continue;
-              const page = await redisScanOnNode(nodes[i], cursors[i], { match, count: clusterPageSize(nodes.length) });
+              const page = await redisScanOnNode(nodes[i], cursors[i], { match, count: clusterPageSize(redisTreePageSize(), nodes.length) });
               if (this.redisGenOf(conn.id, dbIndex) !== gen) break;
               cursors[i] = page.cursor;
               this.mergeRedisKeys(stateKey, page.keys);
@@ -461,6 +478,7 @@ export class RedisKeyTreeState {
         if (cursor === '0' && this.redisKeys.has(stateKey)) {
           done = true;
         } else {
+          const pageSize = redisTreePageSize();
           let cur = cursor;
           let idle = 0;
           for (;;) {
@@ -471,7 +489,7 @@ export class RedisKeyTreeState {
                 await redisSelect(client, dbIndex);
                 session.db = dbIndex;
               }
-              return redisScan(client, cur, { match, count: REDIS_TREE_PAGE });
+              return redisScan(client, cur, { match, count: pageSize });
             });
             if (this.redisGenOf(conn.id, dbIndex) !== gen) break;
             cur = page.cursor;

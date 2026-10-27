@@ -22,6 +22,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - Settings: `devbelt.ai.monitor.enabled`, `allowProduction`, `queryTimeoutSeconds`, `notifyCooldownMinutes`, `maxTasks`.
 - **Long conversations are compressed instead of truncated**: the last 8 messages stay verbatim and older ones become a rolling model-written summary (cached in the session, refreshed only when 4+ new old messages accumulate; a deterministic compact transcript is used if the model is unavailable). The context drawer shows how much was summarized and how many characters are injected.
 - **Monitoring requests switch on Agent mode automatically** (the toggle visibly turns on and a one-line notice explains why) so `propose_monitor` is available; nothing is created without confirming the card. The tables you mention in the message are now ranked first when the schema context has to be trimmed.
+- Redis key tree: `devbelt.redis.keyPageSize` controls how many keys one “Load more” click scans (default 1000, range 200–5000; previously a fixed 500).
 - Result grid: a sort icon on every column header (ascending → descending → clear) with `aria-sort`; the pagination bar stays visible while the result set scrolls; the AI side drawer can be dragged wider and remembers its width.
 
 #### Known limitations
@@ -49,6 +50,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - 设置：`devbelt.ai.monitor.enabled`、`allowProduction`、`queryTimeoutSeconds`、`notifyCooldownMinutes`、`maxTasks`。
 - **长对话改为压缩而不是截断**：最近 8 条保留原文，更早的消息由模型写成滚动摘要（存在会话里，攒够 4 条旧消息才更新；模型不可用时退回确定性压缩）。上下文抽屉会显示压缩了多少条、注入了多少字符。
 - **监控类请求会自动开启 Agent 模式**（开关会明显变为开启，并有一行说明），这样才有 `propose_monitor`；不确认卡片不会创建任何任务。你消息里提到的表在表结构超预算时会被排到最前面。
+- Redis 键树：新增 `devbelt.redis.keyPageSize`，控制点一次「加载更多」扫描多少键（默认 1000，范围 200–5000；原来是固定 500）。
 - 结果表格：每个列头都有排序图标（升序 → 降序 → 取消），并带 `aria-sort`；结果滚动时分页栏固定在底部可见；AI 侧抽屉可拖宽并记住宽度。
 
 #### 已知限制
