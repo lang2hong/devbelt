@@ -2085,4 +2085,5 @@ export const zh: MessageCatalog = {
   'wv.grid.sortNone': '点击取消排序',
   'wv.ai.context.historyMeta': '历史：最近 {recent} 条原文，更早的 {summarized} 条已摘要（注入约 {chars} 字符）',
   'wv.ai.agent.autoOn': '这次请求像是要创建监控任务，已自动开启 Agent 模式；提案仍需你确认后才会创建。',
+  'form.testTimeout': '测试连接超时（{seconds} 秒）：请检查网络、安全组、代理或 SSH 隧道',
 };

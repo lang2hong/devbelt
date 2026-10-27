@@ -9,10 +9,14 @@ import { parseRedisNodes } from './buildRedisSession';
 import { discoverSentinelMasterOverSsh, setupClusterOverSsh, type RedisAuth } from './redisTunnel';
 import { esAuthMissingMessage, esAuthOf, esProtocolOf, esTlsOf } from './esAuth';
 import { validateConnectionPaths } from './connectionPathValidator';
+import { diagInfo } from '../utils/diagnostics';
 import { l10n } from '../i18n';
 import { uniqueId } from '@devbelt/db-host/utils/id';
 import { flattenGroups } from '../utils/groupTree';
 import { BaseWebView } from '../result/baseWebView';
+
+/** 测试连接总超时：涵盖 DNS/TCP/SSH/代理，保证界面不会一直停在「测试中」。 */
+const TEST_TIMEOUT_MS = 45_000;
 
 /**
  * 测试连接的公共 Redis 选项与隧道探测认证（与运行时会话装配 buildRedisSession 同源语义）。
@@ -203,8 +207,31 @@ export class ConnectionForm extends BaseWebView {
 
   private static testIdCounter = 0;
 
-  /** 测试连接：用 db-core 工厂建连验证；SSH 配置时建临时隧道 */
+  /**
+   * 测试连接（带总超时）：任何分支（DNS、TCP、SSH、代理）卡住都必须在 45 秒内
+   * 给界面一个结果，不能一直停在「测试中」。
+   */
   private async testConnection(conn: SavedConnection): Promise<{ ok: boolean; message: string }> {
+    const target = `${conn.host ?? ''}:${conn.port ?? ''}`;
+    diagInfo(`connection test start: ${conn.dbType} ${target}${conn.sshHost ? ` via ssh ${conn.sshHost}` : ''}`);
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const watchdog = new Promise<{ ok: boolean; message: string }>((resolve) => {
+      timer = setTimeout(() => {
+        resolve({ ok: false, message: l10n('form.testTimeout', { seconds: TEST_TIMEOUT_MS / 1000 }) });
+      }, TEST_TIMEOUT_MS);
+    });
+    try {
+      const result = await Promise.race([this.runTestConnection(conn), watchdog]);
+      diagInfo(`connection test ${result.ok ? 'ok' : 'failed'} in ${Date.now() - started}ms: ${result.message}`);
+      return result;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** 测试连接的实际流程：用 db-core 工厂建连验证；SSH 配置时建临时时隧道。 */
+  private async runTestConnection(conn: SavedConnection): Promise<{ ok: boolean; message: string }> {
     const dbType = conn.dbType as DatabaseType;
     const start = Date.now();
     const testId = `test-${Date.now()}-${++ConnectionForm.testIdCounter}`;

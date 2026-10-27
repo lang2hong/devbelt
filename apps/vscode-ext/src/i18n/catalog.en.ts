@@ -2107,4 +2107,5 @@ export const en: MessageCatalog = {
   'wv.grid.sortNone': 'Clear sorting',
   'wv.ai.context.historyMeta': 'History: last {recent} messages verbatim; {summarized} older messages summarized (~{chars} chars injected)',
   'wv.ai.agent.autoOn': 'This looks like a monitoring request, so Agent mode was turned on; nothing is created until you confirm the card.',
+  'form.testTimeout': 'Connection test timed out after {seconds}s: check the network, firewall/security group, proxy or SSH tunnel',
 };

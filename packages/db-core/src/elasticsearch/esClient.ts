@@ -249,7 +249,8 @@ export class EsClient {
         });
       });
       const timer = setTimeout(() => {
-        req.destroy(new Error(`ES request timed out after ${this.timeoutMs}ms`));
+        // 带上方法与地址：区分「连不上」和「请求太重」，也方便对照 curl 结果。
+        req.destroy(new Error(`ES request timed out after ${this.timeoutMs}ms (${method} ${url})`));
       }, this.timeoutMs);
       const onAbort = (): void => { req.destroy(new Error('ES request aborted')); };
       const cleanup = (): void => {
