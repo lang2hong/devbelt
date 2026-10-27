@@ -2120,4 +2120,8 @@ export const en: MessageCatalog = {
   'explorer.tool.poolStatus': 'Connection Pool Status',
   'explorer.tool.monitorTasks': 'Background Tasks',
   'explorer.tool.authenticator': 'Authenticator (2FA)',
+  'account.migrate.title': 'Copy local data into this account?',
+  'account.migrate.detail': 'This machine has {n} connections. Copying gives this account its own copy (the original stays for signed-out use). Not copying starts the account empty; you will not be asked again.',
+  'account.migrate.copy': 'Copy into this account',
+  'account.migrate.skip': 'Do not copy',
 };

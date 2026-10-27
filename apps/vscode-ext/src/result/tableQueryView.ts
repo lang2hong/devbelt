@@ -101,6 +101,14 @@ export class TableQueryView extends BaseWebView {
     return this.runner.hasTable;
   }
 
+  /** 账号切换：关闭所有结果面板（它们持有的会话属于上一个账号）。 */
+  static closeAll(): void {
+    for (const view of [...TableQueryView.queryViews.values()]) {
+      try { view.dispose(); } catch { /* 已关闭 */ }
+    }
+    TableQueryView.queryViews.clear();
+  }
+
   static init(extensionUri: vscode.Uri): void {
     BaseWebView.init(extensionUri);
   }

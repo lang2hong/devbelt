@@ -385,6 +385,22 @@ export class ConnectionManager {
     };
   }
 
+  /**
+   * 账号切换：关掉全部会话与独立会话。
+   * 连接 id 可能在新账号里指向另一条连接，必须丢弃旧对象；不发 ConnectionChangedEvent。
+   */
+  closeAllForAccountSwitch(): void {
+    for (const [key, session] of [...this.sessions]) {
+      try { session.close(); } catch { /* 已断开 */ }
+      this.sessions.delete(key);
+      this.sessionEntries.delete(key);
+    }
+    for (const closer of [...this.isolatedClosers]) {
+      try { closer.close(); } catch { /* 已关闭 */ }
+    }
+    this.isolatedClosers.clear();
+  }
+
   /** 会话入池：写入 sessions/sessionEntries；期间管理器销毁则自毁；随后按上限淘汰。 */
   private registerSession(key: string, session: ConnectionSession, entry: SessionEntry): void {
     this.sessions.set(key, session);

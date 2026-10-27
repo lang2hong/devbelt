@@ -63,3 +63,24 @@ export function readScoped<T>(memento: Memento, base: string, scope: string = ac
 export function writeScoped(memento: Memento, base: string, value: unknown, scope: string = accountScope()): Thenable<void> {
   return memento.update(scopedKey(base, scope), value);
 }
+
+/**
+ * 只作用于「属于账号」的 Memento 键的包装器：get/update 自动加当前作用域后缀。
+ * 未登录时行为与原始 Memento 完全一致。
+ */
+export function scopedMemento<T extends Memento>(inner: T): T {
+  const suffix = (): string => {
+    const scope = accountScope();
+    return scope === 'local' ? '' : `::u.${scope}`;
+  };
+  return {
+    get: (key: string, defaultValue?: unknown) => inner.get(`${key}${suffix()}`, defaultValue as never),
+    update: (key: string, value: unknown) => inner.update(`${key}${suffix()}`, value),
+    keys: () => {
+      const tail = suffix();
+      const keys = inner.keys();
+      if (!tail) return keys.filter((k) => !k.includes('::u.'));
+      return keys.filter((k) => k.endsWith(tail)).map((k) => k.slice(0, -tail.length));
+    },
+  } as unknown as T;
+}

@@ -12,6 +12,7 @@ import { BaseWebView } from './result/baseWebView';
 import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { ElasticsearchView } from './result/elasticsearchView';
+import { RedisView } from './result/redisView';
 import { clearEsRequestLog } from './result/esRequestLogStore';
 import { EsDslStore } from './result/esDslStore';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
@@ -50,7 +51,8 @@ import { SlowQueryPanel } from './insights/slowQueryPanel';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
-import { setAccountScope } from './sync/accountScope';
+import { accountScope, scopedMemento, setAccountScope } from './sync/accountScope';
+import { markMigrationAsked, migrateScope, migrationOffer } from './sync/accountMigration';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
 import { setTreeSelectionProvider } from './commands/shared';
@@ -105,7 +107,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
-  const store = new ConnectionStore(context.globalState, context.secrets);
+  // 连接/分组/保存的查询按账号隔离（第二期）：读写在当前账号作用域内切换。
+  const store = new ConnectionStore(scopedMemento(context.globalState), context.secrets);
   context.subscriptions.push({ dispose: () => store.dispose() });
   await store.init();
   const syncHasConnections = (): void => {
@@ -115,7 +118,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const serverUrl = DEFAULT_SERVER_URL;
   const auth = new AuthService(context.secrets, serverUrl, context.globalState);
   const history = new HistoryStore(
-    context.globalState,
+    scopedMemento(context.globalState),
     () => clampHistoryLimit(vscode.workspace.getConfiguration().get<number>('devbelt.insights.historyLimit')),
   );
   // 本机路径覆盖（B3）：仅存本机 globalState、不回传、不产生 mutation/同步事件。
@@ -148,7 +151,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // 连接节点装饰（环境/自定义色徽标）：图标已改用数据库类型 logo，颜色信号改由此承载。
   const connDecoration = new ConnectionDecorationProvider(store);
   context.subscriptions.push(connDecoration, vscode.window.registerFileDecorationProvider(connDecoration));
-  const auditLogger = AuditLogger.init(context.globalState);
+  const auditLogger = AuditLogger.init(scopedMemento(context.globalState));
   // P8 S4：ES DSL 保存查询（Memento；不进同步数据）。
   ElasticsearchView.configureDslStore(new EsDslStore(context.globalState));
   const executor = new QueryExecutor(manager, history, auditLogger);
@@ -176,18 +179,53 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   });
 
   // 定时备份：从 globalState 恢复已保存的计划
-  const backupScheduler = new BackupScheduler(manager, store, context.globalState);
+  // 备份计划也按账号隔离：连接 id 在另一个账号里可能指向另一条连接。
+  const backupScheduler = new BackupScheduler(manager, store, scopedMemento(context.globalState));
   backupScheduler.start();
   context.subscriptions.push(backupScheduler);
 
   BaseWebView.init(context.extensionUri);
   TableQueryView.init(context.extensionUri);
 
+  /**
+   * 账号切换的收尾：旧账号的会话与结果面板必须立即失效（连接 id 可能在新账号里
+   * 指向另一条连接），然后刷新树，并在首次进入该账号时询问是否复制本机数据。
+   */
+  const onAccountSwitched = async (): Promise<void> => {
+    TableQueryView.closeAll();
+    RedisView.closeAll();
+    ElasticsearchView.closeAll();
+    manager.closeAllForAccountSwitch();
+    treeProvider.refresh();
+    syncHasConnections();
+    const scope = accountScope();
+    if (scope === 'local') return;
+    const offer = migrationOffer(context.globalState, scope);
+    if (!offer.needed) return;
+    const copy = l10n('account.migrate.copy');
+    const skip = l10n('account.migrate.skip');
+    const picked = await vscode.window.showInformationMessage(
+      l10n('account.migrate.title'),
+      { modal: true, detail: l10n('account.migrate.detail', { n: offer.connections }) },
+      copy,
+      skip,
+    );
+    if (picked === copy) {
+      await migrateScope(context.globalState, scope);
+      await store.init();
+      syncHasConnections();
+    }
+    await markMigrationAsked(context.globalState, scope);
+    treeProvider.refresh();
+  };
+
   // AuthService 订阅了 SecretStorage 变更（多窗口 token 同步），必须随扩展一起释放
   context.subscriptions.push(auth);
   await auth.init();
-  // 本地 AI 数据按账号隔离（方案 B1）：初始化时把作用域对齐当前登录用户。
-  await syncAccountScope(auth);
+  // 本地数据按账号隔离（方案 B1）：初始化时把作用域对齐当前登录用户。
+  const scopeChangedAtStartup = await syncAccountScope(auth);
+  // 已登录启动：完成一次账号收尾（关旧会话是空操作，必要时询问迁移）。
+  if (scopeChangedAtStartup && accountScope() !== 'local') await onAccountSwitched();
   // package.json 的 commandPalette 用 devbelt.loggedIn 控制 login/logout/account/sessions
   // 的可见性。此前从未及时 setContext，导致 logout/account/sessions 永久不可见、login 永久可见；
   // AuthEvent 订阅（下方）在登录/登出后刷新此上下文保持同步。
@@ -330,8 +368,9 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push({ dispose: () => syncFactory.dispose() });
   const onAuthChange = eventBus.subscribe(AuthEvent, (e) => {
     if (e.kind === 'logout') syncFactory.invalidate();
-    // 换号：先切本地数据作用域，再刷新各面板（AI 会话/模型偏好按作用域读取）。
-    void syncAccountScope(auth).then(() => {
+    // 换号：先切本地数据作用域，再关掉上一个账号的会话/面板并刷新。
+    void syncAccountScope(auth).then(async (changed) => {
+      if (changed) await onAccountSwitched();
       syncStatusBar.refresh();
       authStatusBar.refresh();
       void syncLoggedInContext(auth);
