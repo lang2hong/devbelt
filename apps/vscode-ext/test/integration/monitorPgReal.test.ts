@@ -175,8 +175,8 @@ describe.skipIf(!PG_URL)('monitoring on real PostgreSQL', () => {
       expect(await h.service.propose(h.conn, 'verify', SCHEMA, { kind: 'newRows', table: 'events', cursorColumn: 'kind' }))
         .toMatchObject({ ok: false, issues: [{ code: 'cursorType' }] });
 
-      const byTime = await h.service.propose(h.conn, 'verify', SCHEMA, { kind: 'newRows', table: 'events', cursorColumn: 'at' });
-      const byId = await h.service.propose(h.conn, 'verify', SCHEMA, { kind: 'newRows', table: 'orders', cursorColumn: 'id' });
+      const byTime = await h.service.propose(h.conn, 'verify', SCHEMA, { kind: 'newRows', table: 'events', cursorColumn: 'at', condition: { type: 'anyChange' } });
+      const byId = await h.service.propose(h.conn, 'verify', SCHEMA, { kind: 'newRows', table: 'orders', cursorColumn: 'id', condition: { type: 'anyChange' } });
       expect(byTime.ok && byId.ok).toBe(true);
       if (!byTime.ok || !byId.ok) return;
       expect(byTime.proposal.cursorKind).toBe('temporal');
