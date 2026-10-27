@@ -49,11 +49,11 @@ test('公开文档中心 /db/docs 无需登录，且与官网同一导航/页脚
   await expect(page.locator('header.top')).toContainText('安装');
   await expect(page.locator('header.top')).toContainText('GitHub');
   await expect(page.locator('footer')).toContainText('VS Code Marketplace');
-  // 分组齐全
-  await expect(page.getByRole('heading', { name: 'SQL 与数据' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Redis 与 Elasticsearch' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'AI 与监控' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '账户与同步' })).toBeVisible();
+  // 分组齐全（限定正文，避免和左侧 TOC 的分组标题重复匹配）
+  await expect(page.locator('.group h2', { hasText: 'SQL 与数据' })).toBeVisible();
+  await expect(page.locator('.group h2', { hasText: 'Redis 与 Elasticsearch' })).toBeVisible();
+  await expect(page.locator('.group h2', { hasText: 'AI 与监控' })).toBeVisible();
+  await expect(page.locator('.group h2', { hasText: '账户与同步' })).toBeVisible();
 });
 
 test('文档用真实截图（不是内联 SVG）', async ({ page }) => {
