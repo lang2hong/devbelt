@@ -7,8 +7,8 @@ defineProps<{ t: Copy; loggedIn: boolean }>();
 </script>
 
 <template>
-  <div class="wrap">
-    <section class="hero">
+  <section class="hero">
+    <div class="wrap">
       <div class="eyebrow">
         <span class="v">{{ t.hero.eyebrowLabel }}</span>
         <span>· {{ t.hero.eyebrowDesc }}</span>
@@ -25,22 +25,23 @@ defineProps<{ t: Copy; loggedIn: boolean }>();
           <a class="btn ghost" :href="URLS.docs">{{ t.hero.secondary }}</a>
         </template>
       </div>
-      <div class="hero-shot">
-        <img
-          src="/screenshots/01-sql-workbench.png"
-          :alt="t.hero.alt"
-          loading="eager"
-          width="1600"
-          height="937"
-        />
-      </div>
+    </div>
+    <figure class="hero-shot">
+      <img
+        src="/screenshots/01-sql-workbench-focus.png"
+        :alt="t.hero.alt"
+        loading="eager"
+        width="1600"
+        height="360"
+      />
+    </figure>
+    <div class="wrap">
       <p class="hero-caption">{{ t.hero.caption }}</p>
-
       <p class="cmd">
         <code>{{ INSTALL_CMD }}</code>
       </p>
-    </section>
-  </div>
+    </div>
+  </section>
 </template>
 
 <style scoped>
@@ -117,11 +118,18 @@ defineProps<{ t: Copy; loggedIn: boolean }>();
   border-color: var(--accent);
 }
 .hero-shot {
+  width: min(1400px, calc(100% - 48px));
+  margin: 8px auto 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow: var(--shadow-hero);
   background: var(--panel);
+}
+.hero-shot img {
+  width: 100%;
+  height: auto;
+  display: block;
 }
 .hero-caption {
   color: var(--dim);

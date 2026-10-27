@@ -56,17 +56,18 @@ describe('公开文档中心渲染', () => {
     expect(html).toContain('<figure class="shot">');
     expect(html).toContain('loading="lazy"');
     // 宽高必须写出，避免布局跳动
-    expect(html).toMatch(/width="1600" height="9\d\d"/);
+    expect(html).toMatch(/width="1600" height="\d{3}"/);
     expect(html).not.toContain('<svg class="fig"');
 
     const all = DOCS.map((d) => renderDocPage(d.slug) ?? '').join('\n');
     expect(all).not.toContain('<svg class="fig"');
     expect(all).toContain('/screenshots/03-redis.png');
     expect(all).toContain('/screenshots/04-elasticsearch.png');
-    expect(all).toContain('/screenshots/05-ai-chat.png');
+    expect(all).toContain('/screenshots/05-ai-chat-focus.png');
     expect(all).toContain('/screenshots/06-monitor-proposal.png');
-    expect(all).toContain('/screenshots/07-monitor-tasks.png');
-    expect(all).toContain('/screenshots/08-explain.png');
+    expect(all).toContain('/screenshots/07-monitor-tasks-focus.png');
+    expect(all).toContain('/screenshots/08-explain-focus.png');
+    expect(all).toContain('/screenshots/02-er-diagram-focus.png');
   });
 
   it('文档覆盖官网展示的全部产品能力', () => {

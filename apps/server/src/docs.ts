@@ -148,7 +148,7 @@ export const DOCS: readonly DocPage[] = [
     summary: '表设计器、DDL、ER 图、Schema 对比与数据字典。',
     icon: 'ER',
     group: 'sql',
-    shots: [shot('02-er-diagram.png', 'ER 图', 'ER 图按外键关系自动布局，支持拖拽调整与导出 PNG。', 1600, 929)],
+    shots: [shot('02-er-diagram-focus.png', 'ER 图', 'ER 图按外键关系自动布局，支持拖拽调整与导出 PNG。', 1600, 800)],
     sections: [
       {
         heading: '表设计器',
@@ -170,7 +170,7 @@ export const DOCS: readonly DocPage[] = [
     summary: '可视化 EXPLAIN、AI 解释计划、索引建议、慢查询与 SQL 诊断。',
     icon: 'EX',
     group: 'sql',
-    shots: [shot('08-explain.png', 'SQL EXPLAIN 与 AI 解读', 'EXPLAIN 计划树、告警高亮，以及「AI 解释计划」。', 1600, 927)],
+    shots: [shot('08-explain-focus.png', 'SQL EXPLAIN 与 AI 解读', 'EXPLAIN 计划树、告警高亮，以及「AI 解释计划」。', 1600, 360)],
     sections: [
       {
         heading: '可视化 EXPLAIN',
@@ -254,7 +254,7 @@ export const DOCS: readonly DocPage[] = [
     summary: 'AI Chat、Schema 上下文、Agent 模式与写操作审批。',
     icon: 'AI',
     group: 'ai',
-    shots: [shot('05-ai-chat.png', 'AI Chat 与结果图表', 'AI Chat 支持流式回答、图表与用量明细。', 1600, 800)],
+    shots: [shot('05-ai-chat-focus.png', 'AI Chat 与结果图表', 'AI Chat 支持流式回答、图表与用量明细。', 1342, 800)],
     sections: [
       {
         heading: 'AI Chat',
@@ -283,7 +283,7 @@ export const DOCS: readonly DocPage[] = [
     group: 'ai',
     shots: [
       shot('06-monitor-proposal.png', 'AI 提出监控任务', 'AI 只能以卡片形式提出任务；间隔与条件由你选择。', 1600, 914),
-      shot('07-monitor-tasks.png', '后台任务抽屉', '图表、检查历史、下次检查时间与失败次数。', 1600, 922),
+      shot('07-monitor-tasks-focus.png', '后台任务抽屉', '图表、检查历史、下次检查时间与失败次数。', 1220, 880),
     ],
     sections: [
       {

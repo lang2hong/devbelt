@@ -27,6 +27,9 @@ export interface Showcase {
   bullets: string[];
   img: string;
   alt: string;
+  /** 原图像素宽高，用于预留版面避免布局跳动。 */
+  w: number;
+  h: number;
   reverse?: boolean;
 }
 
