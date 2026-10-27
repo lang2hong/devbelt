@@ -19,7 +19,7 @@
   --shadow-card: 0 12px 40px -18px rgba(0, 0, 0, 0.6);
   --shadow-hero: 0 30px 80px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-    "Helvetica Neue", Arial, sans-serif;
+    "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 

@@ -226,19 +226,85 @@ export async function registerConsoleStatic(app: FastifyInstance, opts: ConsoleS
   //   - SPA fallback：其他合法客户端路径（带扩展名则视为静态资源走 404）
   const siteShellRaw = siteReady ? readHtml(siteDist, 'index.html') : null;
 
+  const SITE_SEO = {
+    zh: {
+      lang: 'zh-CN',
+      title: 'DevBelt — 在 VS Code 内完成数据库开发',
+      description:
+        'DevBelt 是一款 VS Code 扩展，把 MySQL、PostgreSQL、SQLite、Redis、Elasticsearch、AI 助手和数据监控整合在同一个编辑器内。',
+      locale: 'zh_CN',
+    },
+    en: {
+      lang: 'en',
+      title: 'DevBelt — Database development inside VS Code',
+      description:
+        'DevBelt is a VS Code extension that brings MySQL, PostgreSQL, SQLite, Redis, Elasticsearch, an AI assistant, and data monitoring into one editor.',
+      locale: 'en_US',
+    },
+  } as const;
+
+  function escAttr(input: string): string {
+    return input
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * 首屏绝对 URL：优先反向代理转发头（生产 nginx），否则回落到请求自身。
+   * OG / Twitter 卡片要求绝对地址，不能写相对路径。
+   */
+  function originOf(req: FastifyRequest): string {
+    const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'http').split(',')[0].trim();
+    const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? 'localhost');
+    return `${proto}://${host}`;
+  }
+
+  /** 生成 title/description/OG/Twitter 卡片（替换 index.html 的 `<!--SEO_META-->`）。 */
+  function seoMeta(lang: 'zh' | 'en', req: FastifyRequest, path: string): string {
+    const seo = SITE_SEO[lang];
+    const origin = originOf(req);
+    const url = `${origin}${path}`;
+    const image = `${origin}/screenshots/01-sql-workbench.png`;
+    const t = escAttr(seo.title);
+    const d = escAttr(seo.description);
+    return `<title>${t}</title>
+    <meta name="description" content="${d}" />
+    <meta name="theme-color" content="#0b1020" />
+    <link rel="canonical" href="${escAttr(url)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="DevBelt" />
+    <meta property="og:title" content="${t}" />
+    <meta property="og:description" content="${d}" />
+    <meta property="og:url" content="${escAttr(url)}" />
+    <meta property="og:image" content="${escAttr(image)}" />
+    <meta property="og:locale" content="${seo.locale}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${t}" />
+    <meta name="twitter:description" content="${d}" />
+    <meta name="twitter:image" content="${escAttr(image)}" />`;
+  }
+
+  /** 按访问路径决定语言（`/en` 前缀为英文，其余中文）。 */
+  function langOf(url: string): 'zh' | 'en' {
+    return url === '/en' || url.startsWith('/en/') || url.startsWith('/en?') ? 'en' : 'zh';
+  }
+
   async function serveSiteShell(req: FastifyRequest, reply: FastifyReply, injectState = true): Promise<void> {
     if (siteShellRaw == null) return notFound(req, reply);
-    if (!injectState) return serveHtml(siteShellRaw)(req, reply);
+    const url = (req.url ?? '/').split('?')[0];
+    const lang = langOf(req.url ?? '/');
+    const seo = SITE_SEO[lang];
+    // 服务端补 SEO meta + lang，避免首屏英文标题/无分享卡片；客户端挂载后仍会按路由校正。
+    const shell = siteShellRaw
+      .replace('<!--SEO_META-->', seoMeta(lang, req, url))
+      .replace('<html lang="zh-CN">', `<html lang="${seo.lang}">`);
+    if (!injectState) return serveHtml(shell)(req, reply);
     const loggedIn = await loadLoggedIn(req);
     const nonce = newNonce();
-    const html = injectInitialState(
-      siteShellRaw
-        // index.html 默认 lang="zh-CN"；/en 路径下客户端 vue-router 会切到英文并改 documentElement.lang，
-        // 这里额外服务端替换 lang 属性，避免首屏 flash。
-        .replace('<html lang="zh-CN">', req.url === '/en' ? '<html lang="en">' : '<html lang="zh-CN">'),
-      { loggedIn },
-      nonce,
-    );
+    const html = injectInitialState(shell, { loggedIn }, nonce);
     reply
       .header('Cache-Control', 'no-store')
       .header('Content-Security-Policy', applyCspNonce(BASE_CSP, nonce))

@@ -28,6 +28,11 @@ describe('site SPA static hosting', () => {
     expect(body).toContain('/assets/site/');
     expect(body).toContain('window.__INITIAL_STATE__={"loggedIn":false}');
     expect(body).toContain('<html lang="zh-CN"');
+    // 中文首屏 SEO：中文 title + OG 卡片
+    expect(body).toContain('<title>DevBelt — 在 VS Code 内完成数据库开发</title>');
+    expect(body).toContain('property="og:title"');
+    expect(body).toContain('name="twitter:card"');
+    expect(body).toContain('og:image');
     // CSP nonce 应存在且匹配 bootstrap script 的 nonce
     const csp = String(res.headers['content-security-policy'] ?? '');
     expect(csp).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/=]+'/);
@@ -35,14 +40,18 @@ describe('site SPA static hosting', () => {
     expect(nonce).toBeTruthy();
     expect(body).toContain(`<script nonce="${nonce}">`);
     expect(body).not.toContain('%NONCE%');
+    // 占位符必须都被替换掉
+    expect(body).not.toContain('<!--SEO_META-->');
   });
 
-  it('GET /en returns shell with lang=en and loggedIn=true state', async () => {
+  it('GET /en returns shell with lang=en, English SEO and loggedIn=true state', async () => {
     const app = await build({ loggedIn: true });
     const res = await app.inject({ method: 'GET', url: '/en' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('<html lang="en"');
     expect(res.body).toContain('window.__INITIAL_STATE__={"loggedIn":true}');
+    expect(res.body).toContain('<title>DevBelt — Database development inside VS Code</title>');
+    expect(res.body).toContain('og:locale" content="en_US"');
   });
 
   it('GET /plans renders the SSR plans page', async () => {

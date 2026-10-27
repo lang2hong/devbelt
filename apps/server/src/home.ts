@@ -51,7 +51,7 @@ function planCard(plan: HomePlan): string {
 const CSS = `
   :root { color-scheme: dark; --bg:#0b1020; --bg2:#0e152a; --panel:#131a30; --panel2:#182040; --line:#232a44; --fg:#e6e9f2; --muted:#9aa4bf; --dim:#6b7596; --accent:#3d6bff; --accent2:#6b8bff; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: radial-gradient(1200px 600px at 80% -10%, rgba(61,107,255,.18), transparent 60%), var(--bg); color: var(--fg); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height:1.6; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 80% -10%, rgba(61,107,255,.18), transparent 60%), var(--bg); color: var(--fg); font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans SC","Source Han Sans SC","WenQuanYi Micro Hei",sans-serif; line-height:1.6; }
   a { color: inherit; text-decoration: none; }
   .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
   header.top { position: sticky; top: 0; display: flex; align-items: center; gap:16px; padding:16px 0; background: rgba(11,16,32,.75); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
