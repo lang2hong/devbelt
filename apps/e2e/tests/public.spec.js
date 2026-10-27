@@ -15,18 +15,17 @@ test('官网首页：hero/features/showcase/new/install 五段，带安装入口
   // hero 主标题包含 VS Code
   await expect(page.locator('h1')).toContainText(/VS Code/);
   await expect(page.locator('section')).not.toHaveCount(0);
-  // 三个安装渠道
+  // 三个安装渠道：header/footer 都有链接，用 first() 锁定首屏的那一个
   await expect(page.getByRole('link', { name: /Marketplace/ }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: /Open VSX/ })).toBeVisible();
-  // 英文切换
-  await expect(page.getByRole('button', { name: 'English' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open VSX/ }).first()).toBeVisible();
+  // 英文切换：导航里的语言按钮
+  await expect(page.getByRole('navigation').getByRole('button', { name: 'English' })).toBeVisible();
 });
 
 test('English homepage renders at /en', async ({ page }) => {
   await page.goto('/en');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await expect(page.getByRole('button', { name: '中文' })).toBeVisible();
-  // 主标题包含 VS Code
+  await expect(page.getByRole('navigation').getByRole('button', { name: '中文' })).toBeVisible();
   await expect(page.locator('h1')).toContainText(/VS Code/);
 });
 
