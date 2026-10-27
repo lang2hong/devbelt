@@ -20,7 +20,7 @@ import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
 
 /** D*：Redis 键树每页 SCAN 数量的默认值（可用 `devbelt.redis.keyPageSize` 调整）。 */
-const REDIS_TREE_PAGE_DEFAULT = 1000;
+const REDIS_TREE_PAGE_DEFAULT = 2000;
 const REDIS_TREE_PAGE_MIN = 200;
 const REDIS_TREE_PAGE_MAX = 5000;
 

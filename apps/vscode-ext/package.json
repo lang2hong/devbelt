@@ -2479,11 +2479,11 @@
         },
         "devbelt.redis.keyPageSize": {
           "type": "number",
-          "default": 1000,
+          "default": 2000,
           "minimum": 200,
           "maximum": 5000,
-          "description": "How many keys one \"Load more\" click scans in the Redis key tree (SCAN COUNT). Larger values mean fewer clicks but a longer single scan. Default 1000, range 200–5000.",
-          "markdownDescription": "Redis 键树点一次「加载更多」扫描的键数（SCAN 的 COUNT）。越大点得越少，但单次扫描更慢。默认 1000，范围 200–5000。"
+          "description": "How many keys one \"Load more\" click scans in the Redis key tree (SCAN COUNT). Larger values mean fewer clicks but a longer single scan. Default 2000, range 200–5000.",
+          "markdownDescription": "Redis 键树点一次「加载更多」扫描的键数（SCAN 的 COUNT）。越大点得越少，但单次扫描更慢。默认 2000，范围 200–5000。"
         },
         "devbelt.pg.syncEnabled": {
           "type": "boolean",

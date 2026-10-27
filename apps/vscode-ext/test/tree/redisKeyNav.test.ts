@@ -357,7 +357,7 @@ describe('D* 键树（根扁平 SCAN + 客户端折叠）', () => {
     const n = dbNode(clusterConn);
     const kids = await provider.getChildren(n);
     expect(kids.filter((k) => k.kind === NodeKind.RedisKey).map((k) => k.label).sort()).toEqual(['k1', 'k2', 'k3']);
-    expect(counts).toEqual([334, 334, 334]); // ceil(1000 / 3)
+    expect(counts).toEqual([667, 667, 667]); // ceil(2000 / 3)
   });
 
   it('cluster：游标未归零 → 仍有「加载更多」', async () => {
@@ -581,8 +581,8 @@ describe('S5-2 文件夹前缀增量「加载更多」（每前缀游标 + glob 
 describe('Redis 键树每页数量设置', () => {
   beforeEach(() => { settings.keyPageSize = undefined; });
 
-  it('默认 1000，越界或非法值夹到 [200, 5000]', () => {
-    expect(redisTreePageSize()).toBe(1000);
+  it('默认 2000，越界或非法值夹到 [200, 5000]', () => {
+    expect(redisTreePageSize()).toBe(2000);
     settings.keyPageSize = 5000;
     expect(redisTreePageSize()).toBe(5000);
     settings.keyPageSize = 99999;
@@ -590,6 +590,6 @@ describe('Redis 键树每页数量设置', () => {
     settings.keyPageSize = 1;
     expect(redisTreePageSize()).toBe(200);
     settings.keyPageSize = Number.NaN;
-    expect(redisTreePageSize()).toBe(1000);
+    expect(redisTreePageSize()).toBe(2000);
   });
 });
