@@ -10,89 +10,35 @@ DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS C
 
 DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Code 工作区。浏览连接、编写并执行查询、编辑结果、查看结构、诊断问题，无需在多个数据库工具间切换。
 
-## Screenshots
+## What's new / 新功能
 
-> The screenshot slots below are reserved for the final Marketplace assets. Replace the referenced files with real captures before publishing.
->
-> 以下截图位为 Marketplace 最终素材预留位置，发布前请替换为真实截图。
+### 0.4.0 — Data monitoring / 数据监控
 
-### SQL workbench / SQL 工作台
+- **Scheduled read-only checks** on a table's row count, a numeric metric query, or new rows on an existing integer / date-time column, with a VS Code notification when your condition is met.
+- **Create a task** by right-clicking a table → More… → *Monitor Row Count…*, or just tell AI Chat what to watch: monitoring requests turn Agent mode on automatically, and the assistant can only **propose** a task as a card in the chat.
+- **You decide the alert condition.** The card has a condition picker and an interval picker (presets from 5 seconds to 1 hour, or any custom value up to 24 hours). A condition the assistant suggests is shown as a suggestion and only applies after you adopt it; nothing is created until you click *Create and start*.
+- **Background Tasks** (AI Chat's More menu, the status bar or a command), newest first: charts, check history, latest new rows, next check time, failure count, pause / resume / check now / remove, **edit the interval and condition**, and *Ask AI to explain*.
+- **Safety:** checks use an isolated session that is read-only at the database level, production connections are refused by default, tasks are paused whenever VS Code starts, and only one VS Code window runs them (other windows are view-only).
+- **Longer AI conversations:** the last 8 messages stay verbatim and older ones are kept as a rolling summary instead of being dropped; tables you mention are ranked first in the schema context.
+- Redis key tree loads 2000 keys per *Load more* by default (`devbelt.redis.keyPageSize`, 200–5000).
 
-![SQL editor and result grid](resources/screenshots/01-sql-workbench.png)
+- **定时只读检查**：表的行数、一条数值指标查询，或基于已有整数 / 时间列的新增行；命中你设定的条件时弹 VS Code 通知。
+- **创建任务**：表右键 → 更多… →「监控行数变化…」，或者直接在 AI Chat 里说要监控什么——监控类请求会自动开启 Agent 模式，助手只能以卡片形式**提出**任务。
+- **提醒条件由你决定**：卡片上有条件选择和间隔选择（预设 5 秒到 1 小时，也可自定义，最长 24 小时）。助手给出的条件只作为建议，你点「采用」才生效；点「创建并开始」之前不会创建任何任务。
+- **后台任务**（AI Chat「⋯」菜单、状态栏或命令），按创建时间倒序：图表、检查记录、最近新增的行、下次检查时间、连续失败次数，暂停 / 继续 / 立即检查 / 删除、**修改间隔和条件**，以及「让 AI 解读」。
+- **安全**：检查在数据库层只读的独立会话上执行，生产连接默认拒绝，每次启动 VS Code 任务都会先暂停，只有一个 VS Code 窗口执行任务（其他窗口只能查看）。
+- **更长的 AI 对话**：最近 8 条保留原文，更早的内容压缩成滚动摘要而不是直接丢弃；你提到的表会优先放进表结构上下文。
+- Redis 键树每次「加载更多」默认 2000 个键（`devbelt.redis.keyPageSize`，200–5000）。
 
-Write, run, inspect and export from one editor. / 在一个编辑器里完成编写、执行、检查与导出。
+### 0.3.0 — Agent, MCP and masked export / Agent、MCP 与脱敏导出
 
-### Schema design / 结构设计
-
-![Table designer and ER diagram](resources/screenshots/02-schema-design.png)
-
-Design tables, inspect DDL, compare schemas and export ER diagrams. / 设计表、查看 DDL、对比 Schema、导出 ER 图。
-
-### Redis / Redis 工作台
-
-![Redis key browser and value editor](resources/screenshots/03-redis.png)
-
-Browse keys, edit native types, inspect Streams and use the CLI console. / 浏览键、编辑原生类型、查看 Stream、使用命令行控制台。
-
-### Elasticsearch / Elasticsearch 工作台
-
-![Elasticsearch documents and DSL console](resources/screenshots/04-elasticsearch.png)
-
-Explore indices, query with DSL and work with documents and REST requests. / 浏览索引、使用 DSL 查询、处理文档与 REST 请求。
-
-### AI assistant / AI 助手
-
-![AI Chat with charts and usage details](resources/screenshots/05-ai-chat.png)
-
-Ask in natural language, explain or optimize SQL, and turn results into charts. / 用自然语言提问、解释或优化 SQL，并把结果转成图表。
-
-### Sync and security / 同步与安全
-
-![Encrypted sync and SSH security](resources/screenshots/06-sync-security.png)
-
-E2EE personal sync, SSH host-key verification, read-only protection and audit logs. / 端到端加密个人同步、SSH 主机密钥校验、只读保护与审计日志。
-
-### Agent, MCP and masked export (0.3.0) / Agent、MCP 与脱敏导出
-
-- **Agent mode** (off by default): inspect schema, run read-only SQL and plain `EXPLAIN` step by step, with limits, cancellation and a plain-chat fallback when the model has no tool calling. Writes are proposals only: each DML/DDL needs approval in a native modal, MySQL/PostgreSQL DML is dry-run inside a rolled-back transaction, and every decision goes to a local JSONL execution ledger.
+- **Agent mode** (off by default, toggle under the chat input): inspect schema, run read-only SQL and plain `EXPLAIN` step by step, with limits, cancellation and a plain-chat fallback when the model has no tool calling. Writes are proposals only: each DML/DDL needs approval in a native modal, MySQL/PostgreSQL DML is dry-run inside a rolled-back transaction, and every decision goes to a local JSONL execution ledger.
 - **MCP server** (off by default): loopback-only Streamable HTTP for one configured connection, with per-client bearer tokens, rate limits, Host/Origin checks and audit. It exposes five read-only tools and never registers writes.
 - **Masked export**: deterministic per-column masking with explicit PII rules, preview, CSV/SQL output, plus a bounded foreign-key subset export that keeps masked keys aligned.
 
-- **Agent 模式**（默认关闭）：逐步查 Schema、跑只读 SQL 与普通 `EXPLAIN`，带步数上限、取消，模型不支持工具调用时退回普通问答。写操作只能提出：每条 DML/DDL 在原生弹窗中审批，MySQL/PostgreSQL 的 DML 在事务内试执行后回滚，全部决策写入本地 JSONL 执行账本。
+- **Agent 模式**（默认关闭，开关在对话输入框下方）：逐步查 Schema、跑只读 SQL 与普通 `EXPLAIN`，带步数上限、取消，模型不支持工具调用时退回普通问答。写操作只能提出：每条 DML/DDL 在原生弹窗中审批，MySQL/PostgreSQL 的 DML 在事务内试执行后回滚，全部决策写入本地 JSONL 执行账本。
 - **MCP Server**（默认关闭）：仅监听本机的 Streamable HTTP，只服务一个指定连接；逐客户端令牌、限流、Host/Origin 校验与审计；只暴露 5 个只读工具，不注册写操作。
 - **脱敏导出**：按列确定性脱敏，PII 列必须显式配置规则，先预览再导出 CSV/SQL；支持有界外键子集导出，父子键脱敏后仍可关联。
-
-### Data monitoring (0.4.0) / 数据监控
-
-- **Scheduled read-only checks** on a table's row count, a numeric metric query, or new rows on an existing integer / date-time column, with a VS Code notification when your condition is met. Right-click a table → More… → *Monitor Row Count…*, or ask the Agent; the Agent can only propose, and you create the task from a card in the chat.
-- **Background Tasks** in AI Chat's More menu: charts, check history, latest new rows, pause / resume / check now, and *Ask AI to explain*. Checks use an isolated read-only session, production connections are refused by default, and tasks are paused whenever VS Code starts.
-
-- **定时只读检查**：表的行数、一条数值指标查询，或基于已有整数 / 时间列的新增行；命中你设定的条件时弹 VS Code 通知。表右键 → 更多… →「监控行数变化…」，或让 Agent 帮你设置——Agent 只能提出，任务由你在对话卡片上确认创建。
-- **后台任务**（AI Chat「⋯」菜单）：图表、检查记录、最近新增的行，暂停 / 继续 / 立即检查，以及「让 AI 解读」。检查使用独立只读会话，生产连接默认拒绝，每次启动 VS Code 任务都会先暂停。
-
-### Visual EXPLAIN / 可视化执行计划
-
-![Execution plan tree with warnings and node details](resources/screenshots/07-explain.png)
-
-Plan tree, node details, warning highlights and AI explanation for MySQL, PostgreSQL and SQLite. / MySQL、PostgreSQL、SQLite 的计划树、节点详情、告警高亮与 AI 解释。
-
-### Slow queries / 慢查询分析
-
-![Slow queries aggregated from local history](resources/screenshots/08-slow-queries.png)
-
-Group local query history by SQL template and jump to the SQL or its plan. / 按 SQL 模板聚合本地查询历史，一键打开 SQL 或执行计划。
-
-### Index suggestions / 索引建议
-
-![Index suggestions with confidence, reasons and risks](resources/screenshots/09-index-suggestions.png)
-
-Copyable index DDL with confidence, reasons and risks — suggestions only, never executed. / 带置信度、理由与风险的可复制索引 DDL——仅为建议，从不执行。
-
-### Data dictionary / 数据字典
-
-![Data dictionary exported as HTML](resources/screenshots/10-dictionary.png)
-
-Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表、列、索引与外键导出为 Markdown 或 HTML。
 
 ## English
 
@@ -134,7 +80,7 @@ Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表�
 ### Redis
 
 - Standalone, Cluster and Sentinel connections, including SSH tunnels and TLS.
-- Key browser with separators, SCAN paging and binary-safe keys.
+- Key browser with separators, SCAN paging (2000 keys per *Load more* by default, `devbelt.redis.keyPageSize`) and binary-safe keys.
 - Native editors for all core data types: strings, hashes, lists, sets, sorted sets and Streams.
 - Stream consumer-group details, pending entries, `XACK` and `XCLAIM`.
 - CLI console, command log, slow log and server status.
@@ -152,7 +98,7 @@ Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表�
 
 ### AI assistant
 
-- AI Chat with streaming responses, conversation history and schema context.
+- AI Chat with streaming responses, conversation history (older messages are summarized, not dropped) and schema context.
 - Natural-language to SQL, SQL explanation and optimization, and error diagnosis.
 - Data Q&A with sample sending explicitly opt-in.
 - Table design generation and review.
@@ -161,7 +107,7 @@ Export tables, columns, indexes and foreign keys as Markdown or HTML. / 将表�
 - Inline SQL completion (off by default, trigger with `Alt+/`).
 - Server proxy or bring-your-own API key.
 - AI preferences and custom rules sync across devices with end-to-end encryption.
-- **Agent mode** (off by default via `devbelt.ai.agent.enabled`): open AI Chat, pick a connection and switch **Agent** on. The assistant inspects the schema, runs read-only SQL and plain `EXPLAIN` step by step (`list_schemas`, `list_tables`, `describe_table`, `explain_query`, `run_read_only_query`), within a step / tool-call / time budget (12 / 24 / 120 s, configurable).
+- **Agent mode** (off by default): open AI Chat, pick a connection and turn on the **Agent** switch under the input box (monitoring requests turn it on for you). The assistant inspects the schema, runs read-only SQL and plain `EXPLAIN` step by step, within a step / tool-call / time budget (12 / 24 / 120 s, configurable with `devbelt.ai.agent.*`).
 - **Write proposals only**: DML and DDL are proposed, dry-run where possible, and executed only after you approve them in a native dialog. `devbelt.ai.agent.allowWrites`, `devbelt.ai.agent.allowDdl` and `devbelt.ai.agent.allowProduction` control what may be proposed. Every decision is appended to a local JSONL ledger.
 - **Where to open AI Chat**: the DevBelt sidebar title, the status bar, or the `✦ AI` button in a query result panel (that one prefills the current SQL and does not send it).
 - **EXPLAIN panel "Execute"**: runs `EXPLAIN ANALYZE` on a separate read-only session for real row counts and timings (MySQL/PostgreSQL; production connections require `devbelt.explain.allowAnalyzeProduction`).
@@ -208,9 +154,9 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### Documentation
 
-- [Product overview](https://github.com/lang2hong/vscode-db-client)
-- [Documentation center](https://github.com/lang2hong/vscode-db-client/tree/main/docs)
-- [Issues](https://github.com/lang2hong/vscode-db-client/issues)
+- [Product overview](https://github.com/lang2hong/devbelt)
+- [Documentation center](https://github.com/lang2hong/devbelt/tree/main/docs)
+- [Issues](https://github.com/lang2hong/devbelt/issues)
 
 ## 中文
 
@@ -252,7 +198,7 @@ code --install-extension lang2hong.devbelt-db-client
 ### Redis
 
 - 单机、Cluster、Sentinel 连接，支持 SSH 隧道与 TLS。
-- 键浏览器、分隔符折叠、SCAN 分页与二进制安全键。
+- 键浏览器、分隔符折叠、SCAN 分页（每次「加载更多」默认 2000 个键，`devbelt.redis.keyPageSize`）与二进制安全键。
 - 全部核心数据类型原生编辑：string、hash、list、set、zset、Stream。
 - Stream 消费组、pending 明细、`XACK` 与 `XCLAIM`。
 - CLI 控制台、命令日志、慢日志与服务器状态。
@@ -270,7 +216,7 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### AI 助手
 
-- AI Chat 流式回复、会话历史与 Schema 上下文。
+- AI Chat 流式回复、会话历史（较早的消息压缩成摘要，不直接丢弃）与 Schema 上下文。
 - 自然语言生成 SQL、SQL 解释与优化、错误诊断。
 - 数据问答，样本发送需显式确认。
 - 表设计生成与审阅。
@@ -279,7 +225,7 @@ code --install-extension lang2hong.devbelt-db-client
 - SQL 行内补全（默认关闭，按 `Alt+/` 触发）。
 - 支持服务端代理或自带 API Key。
 - AI 偏好与自定义规则端到端加密跨设备同步。
-- **Agent 模式**（`devbelt.ai.agent.enabled` 默认关闭）：在 AI Chat 选好连接，把顶栏「Agent：关」切换为开。助手会逐步查结构、跑只读 SQL 与普通 `EXPLAIN`（`list_schemas`、`list_tables`、`describe_table`、`explain_query`、`run_read_only_query`），并受步数 / 工具次数 / 时间预算限制（默认 12 次 / 24 次 / 120 秒，可调）。
+- **Agent 模式**（默认关闭）：在 AI Chat 选好连接，打开输入框下方的「Agent」开关（监控类请求会自动打开）。助手会逐步查结构、跑只读 SQL 与普通 `EXPLAIN`，并受步数 / 工具次数 / 时间预算限制（默认 12 次 / 24 次 / 120 秒，可用 `devbelt.ai.agent.*` 调整）。
 - **写操作只能提出**：DML / DDL 先给出方案，能试执行的先试执行并回滚，只有你在原生弹窗中批准后才会真正执行。`devbelt.ai.agent.allowWrites`、`devbelt.ai.agent.allowDdl`、`devbelt.ai.agent.allowProduction` 控制允许提出哪些；每次决策写入本地 JSONL 执行账本。
 - **AI 对话入口**：DevBelt 侧栏标题、状态栏，以及查询结果面板的 `✦ AI` 按钮（只预填当前 SQL，不会自动发送）。
 - **EXPLAIN 面板「实际执行」**：在独立只读会话上执行 `EXPLAIN ANALYZE`，获得真实行数与耗时（MySQL / PostgreSQL；生产连接需开启 `devbelt.explain.allowAnalyzeProduction`）。
@@ -326,9 +272,9 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### 文档
 
-- [产品介绍](https://github.com/lang2hong/vscode-db-client)
-- [文档中心](https://github.com/lang2hong/vscode-db-client/tree/main/docs)
-- [问题反馈](https://github.com/lang2hong/vscode-db-client/issues)
+- [产品介绍](https://github.com/lang2hong/devbelt)
+- [文档中心](https://github.com/lang2hong/devbelt/tree/main/docs)
+- [问题反馈](https://github.com/lang2hong/devbelt/issues)
 
 ## License / 许可
 

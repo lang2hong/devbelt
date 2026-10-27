@@ -4,7 +4,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
-## [0.4.0] - 2026-10-25
+## [0.4.0] - 2026-10-27
 
 ### English
 
@@ -19,11 +19,21 @@ All notable changes to DevBelt DB Client are documented in this file.
   - **Background Tasks** (More menu in AI Chat, status bar, or command), newest first: list, line or bar chart, check history, latest new rows, next check time and failure count, pause / resume / check now / remove, **edit the interval and alert condition**, and *Ask AI to explain*, which sends only the numeric history unless you tick *include the latest new rows* (sensitive columns redacted).
   - Intervals: 1 minute to 24 hours in the picker, plus custom values from 5 seconds (5 s is the floor, to protect the database); the interval can be changed later without recreating the task.
   - Safety: checks run on an isolated session made read-only at the database level, with a 30 s timeout, no query history and one check at a time per connection + database + schema; production connections are refused unless `devbelt.ai.monitor.allowProduction` is on; at most 5 tasks per connection and 20 in total; tasks are paused every time VS Code starts, after three failures in a row, or when their connection is removed or changed; only one VS Code window runs and edits them (other windows are view-only; when that window closes, another takes over with the tasks paused). Task definitions and up to 500 history points per task stay under the extension's global storage, including the cursor value and up to 1000 primary-key values of rows already seen for new-rows tasks; new-row contents are kept in memory only.
-- Settings: `devbelt.ai.monitor.enabled`, `allowProduction`, `queryTimeoutSeconds`, `notifyCooldownMinutes`, `maxTasks`.
+- Settings: `devbelt.ai.monitor.enabled`, `allowProduction`, `queryTimeoutSeconds`, `notifyCooldownMinutes`, `maxTasks`; `devbelt.redis.keyPageSize`.
 - **Long conversations are compressed instead of truncated**: the last 8 messages stay verbatim and older ones become a rolling model-written summary (cached in the session, refreshed only when 4+ new old messages accumulate; a deterministic compact transcript is used if the model is unavailable). The context drawer shows how much was summarized and how many characters are injected.
 - **Monitoring requests switch on Agent mode automatically** (the toggle visibly turns on and a one-line notice explains why) so `propose_monitor` is available; nothing is created without confirming the card. The tables you mention in the message are now ranked first when the schema context has to be trimmed.
 - Redis key tree: `devbelt.redis.keyPageSize` controls how many keys one “Load more” click scans (default 2000, range 200–5000; previously a fixed 500).
 - Result grid: a sort icon on every column header (ascending → descending → clear) with `aria-sort`; the pagination bar stays visible while the result set scrolls; the AI side drawer can be dragged wider and remembers its width.
+
+#### Fixed
+
+- Pressing Enter to pick a candidate in a Chinese/Japanese IME no longer sends the AI Chat message or runs the Redis console command.
+- The connection test can no longer stay on "Testing…": it always returns within 45 seconds, and Elasticsearch timeouts now include the method and URL.
+- PostgreSQL Agent runs used the selected database name as the schema and kept querying the connection's default database; they now use the selected database with the connection's schema.
+- Discarding a monitoring proposal removes the card, and it no longer comes back when the conversation is reopened.
+- Opening a task in Background Tasks shows its chart and history right away instead of waiting for a check.
+- Agent mode only falls back to plain chat when the tool definitions are really rejected; other request errors are shown as they are.
+- The server logs rejected AI Chat requests (validation code and field-level reason only, no message content), so 400 errors can be diagnosed.
 
 #### Known limitations
 
@@ -47,11 +57,21 @@ All notable changes to DevBelt DB Client are documented in this file.
   - **后台任务**（AI Chat「⋯」菜单、状态栏或命令），按创建时间倒序：任务列表、折线图或柱状图、检查记录、最近新增的行、下次检查时间与连续失败次数，暂停 / 继续 / 立即检查 / 删除、**修改间隔和提醒条件**，以及「让 AI 解读」——默认只发送数值历史，勾选「附带最近的新增行」才会发送行内容（敏感列遮蔽）。
   - 间隔：预设 1 分钟到 24 小时，也可以自定义，最短 5 秒（保护数据库）；创建后还能直接改间隔，不用重建任务。
   - 安全：在独立会话上执行并在数据库层设为只读；单次超时 30 秒，不写查询历史，同一「连接 + 库 + schema」一次只跑一个检查；生产连接默认拒绝，需开启 `devbelt.ai.monitor.allowProduction`；每个连接最多 5 个、总共最多 20 个任务；每次启动 VS Code、连续失败 3 次、连接被删除或修改时任务自动暂停；只有一个 VS Code 窗口执行和修改任务（其他窗口只能查看；该窗口关闭后由其他窗口接手，任务先暂停）。任务定义和每个任务最多 500 个历史点保存在扩展的全局存储里，新增行任务还会保存游标值和最多 1000 个已见行的主键值；新增行内容只保存在内存中。
-- 设置：`devbelt.ai.monitor.enabled`、`allowProduction`、`queryTimeoutSeconds`、`notifyCooldownMinutes`、`maxTasks`。
+- 设置：`devbelt.ai.monitor.enabled`、`allowProduction`、`queryTimeoutSeconds`、`notifyCooldownMinutes`、`maxTasks`；`devbelt.redis.keyPageSize`。
 - **长对话改为压缩而不是截断**：最近 8 条保留原文，更早的消息由模型写成滚动摘要（存在会话里，攒够 4 条旧消息才更新；模型不可用时退回确定性压缩）。上下文抽屉会显示压缩了多少条、注入了多少字符。
 - **监控类请求会自动开启 Agent 模式**（开关会明显变为开启，并有一行说明），这样才有 `propose_monitor`；不确认卡片不会创建任何任务。你消息里提到的表在表结构超预算时会被排到最前面。
 - Redis 键树：新增 `devbelt.redis.keyPageSize`，控制点一次「加载更多」扫描多少键（默认 2000，范围 200–5000；原来是固定 500）。
 - 结果表格：每个列头都有排序图标（升序 → 降序 → 取消），并带 `aria-sort`；结果滚动时分页栏固定在底部可见；AI 侧抽屉可拖宽并记住宽度。
+
+#### 修复
+
+- 中文 / 日文输入法按回车选词时，AI Chat 不再误发送，Redis 命令行也不再误执行。
+- 测试连接不会再一直停在「测试中」：45 秒内一定返回结果；Elasticsearch 超时信息会带上请求方法和地址。
+- PostgreSQL 上 Agent 把选中的库名当成了 schema，并且一直查询连接的默认库；现在使用选中的库和连接配置的 schema。
+- 放弃监控提案后卡片直接移除，重新打开会话也不会再出现。
+- 在「后台任务」里打开任务，图表和检查记录会直接显示，不用等下一次检查。
+- Agent 模式只在工具定义确实被拒绝时才退回普通问答，其他请求错误按原因显示。
+- 服务端会记录被拒绝的 AI Chat 请求（只记校验代码和字段级原因，不记消息内容），方便排查 400 错误。
 
 #### 已知限制
 
@@ -75,7 +95,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - **Masked export**: deterministic column masking (email/phone/name/address/idCard/bankCard/redact/null/fixed/regex/hash), PII columns require an explicit rule, preview before export, CSV/SQL output, atomic writes.
 - **Foreign-key subset export**: bounded `referenced`/`referencing` closure with depth and row limits, single-column keys only, dependency-ordered SQL, and shared masking domains so masked keys still match.
 - **EXPLAIN ANALYZE** ("Execute" in the plan panel; MySQL 8 and PostgreSQL): really executes one read-only `SELECT`/`WITH`/`VALUES` after a confirmation, on a separate read-only session that can be cancelled and honours `devbelt.sql.queryTimeoutSeconds`. Production connections are refused unless `devbelt.explain.allowAnalyzeProduction` is on. MySQL TREE output is parsed into the plan tree; refusals and failures keep the current plan on screen.
-- Settings: `devbelt.agent.*`, `devbelt.mcp.*`, `devbelt.masking.configPath`, `devbelt.explain.allowAnalyzeProduction`.
+- Settings: `devbelt.ai.agent.*`, `devbelt.mcp.*`, `devbelt.masking.configPath`, `devbelt.explain.allowAnalyzeProduction`.
 
 #### Changed
 
@@ -103,7 +123,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - **脱敏导出**：确定性列脱敏（email/phone/name/address/idCard/bankCard/redact/null/fixed/regex/hash），PII 列必须显式配置规则，导出前预览，支持 CSV / SQL，原子写入。
 - **外键子集导出**：受限的 `referenced` / `referencing` 闭包，带深度与行数上限；只支持单列键，按依赖顺序生成 SQL，父子键共享脱敏域。
 - **EXPLAIN ANALYZE**（计划面板「实际执行」；MySQL 8 / PostgreSQL）：在计划面板确认后真实执行一条只读 `SELECT` / `WITH` / `VALUES`；使用独立的只读会话，可取消，超时沿用 `devbelt.sql.queryTimeoutSeconds`。生产连接默认拒绝，需开启 `devbelt.explain.allowAnalyzeProduction`。MySQL 的 TREE 文本解析为计划树；被拒绝或失败时保留当前计划。
-- 设置：`devbelt.agent.*`、`devbelt.mcp.*`、`devbelt.masking.configPath`、`devbelt.explain.allowAnalyzeProduction`。
+- 设置：`devbelt.ai.agent.*`、`devbelt.mcp.*`、`devbelt.masking.configPath`、`devbelt.explain.allowAnalyzeProduction`。
 
 #### 变更
 
