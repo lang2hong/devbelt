@@ -41,12 +41,46 @@ test('DB 控制台壳可达', async ({ page }) => {
   await expect(page.locator('body')).not.toHaveText(/not found/i);
 });
 
-test('公开文档中心 /db/docs 无需登录', async ({ page }) => {
+test('公开文档中心 /db/docs 无需登录，且与官网同一导航/页脚', async ({ page }) => {
   const res = await page.goto('/db/docs');
   expect(res?.status()).toBe(200);
   await expect(page.getByRole('heading', { name: '使用文档' })).toBeVisible();
+  // 与官网一致：完整导航 + 四列页脚
+  await expect(page.locator('header.top')).toContainText('安装');
+  await expect(page.locator('header.top')).toContainText('GitHub');
+  await expect(page.locator('footer')).toContainText('VS Code Marketplace');
+  // 分组齐全
+  await expect(page.getByRole('heading', { name: 'SQL 与数据' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Redis 与 Elasticsearch' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AI 与监控' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '账户与同步' })).toBeVisible();
+});
+
+test('文档用真实截图（不是内联 SVG）', async ({ page }) => {
   await page.goto('/db/docs/getting-started');
   await expect(page.getByRole('heading', { name: '快速开始' })).toBeVisible();
+  const img = page.locator('figure.shot img');
+  await expect(img).toHaveCount(1);
+  await expect(img).toHaveAttribute('src', /\/screenshots\/01-sql-workbench\.png$/);
+  await expect(img).toBeVisible();
+  await expect(page.locator('svg.fig')).toHaveCount(0);
+});
+
+test('0.4.0 新增文档可访问：Redis / Elasticsearch / AI / 数据监控', async ({ page }) => {
+  for (const [slug, heading] of [
+    ['redis', 'Redis'],
+    ['elasticsearch', 'Elasticsearch'],
+    ['ai', 'AI 助手'],
+    ['monitoring', '数据监控'],
+    ['insight', '查询洞察'],
+  ]) {
+    const res = await page.goto(`/db/docs/${slug}`);
+    expect(res?.status()).toBe(200);
+    await expect(page.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible();
+  }
+  // 监控文档带两张截图
+  await page.goto('/db/docs/monitoring');
+  await expect(page.locator('figure.shot img')).toHaveCount(2);
 });
 
 test('公开套餐页 /plans 无需登录', async ({ page }) => {
