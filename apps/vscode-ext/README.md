@@ -53,6 +53,8 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 
 ### SQL workspace
 
+![SQL editor and result grid](resources/screenshots/01-sql-workbench.png)
+
 - Connection groups, connection testing and SSH tunnels.
 - SQL editing, context-aware completion, formatting, execution and cancellation.
 - `EXPLAIN` from the editor.
@@ -69,7 +71,19 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - **SQL diagnostics** in `.sql` editors: `UPDATE`/`DELETE` without `WHERE`, `DROP`/`TRUNCATE`/`ALTER`, `NOT IN (subquery)`, `SELECT *` and dialect mismatches. Toggle with `devbelt.diagnostics.enabled`, tune per rule with `devbelt.diagnostics.rules`.
 - **Data dictionary**: database node → Data → Generate Data Dictionary, as Markdown or HTML, without any connection details.
 
+### Monitoring
+
+![AI proposing a monitoring task](resources/screenshots/06-monitor-proposal.png)
+
+- **Scheduled read-only checks**: row count, one numeric metric, or new rows on an existing column; VS Code notification when your condition is met.
+- **Propose, not create**: in Agent mode the assistant can only propose a task as a card; you pick the interval and alert condition and confirm before anything runs.
+- **Background Tasks**: charts, check history, next check, failure count, and editable interval / condition.
+
+![Background Tasks drawer](resources/screenshots/07-monitor-tasks.png)
+
 ### Schema and data
+
+![ER diagram](resources/screenshots/02-er-diagram.png)
 
 - Table designer and DDL generation.
 - ER diagrams and schema comparison with synchronization SQL.
@@ -79,6 +93,8 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 
 ### Redis
 
+![Redis key browser and value editor](resources/screenshots/03-redis.png)
+
 - Standalone, Cluster and Sentinel connections, including SSH tunnels and TLS.
 - Key browser with separators, SCAN paging (2000 keys per *Load more* by default, `devbelt.redis.keyPageSize`) and binary-safe keys.
 - Native editors for all core data types: strings, hashes, lists, sets, sorted sets and Streams.
@@ -87,6 +103,8 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - Read-only mode and dangerous-command confirmation.
 
 ### Elasticsearch
+
+![Elasticsearch documents and DSL console](resources/screenshots/04-elasticsearch.png)
 
 - HTTP/HTTPS, Basic/API-key authentication, TLS and SSH tunnels.
 - Cluster overview, node list and index browser.
@@ -98,11 +116,15 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 
 ### AI assistant
 
+![AI Chat with charts and usage details](resources/screenshots/05-ai-chat.png)
+
 - AI Chat with streaming responses, conversation history (older messages are summarized, not dropped) and schema context.
 - Natural-language to SQL, SQL explanation and optimization, and error diagnosis.
 - Data Q&A with sample sending explicitly opt-in.
 - Table design generation and review.
 - Result charts: bar, line, area, pie, stacked bar and horizontal bar.
+
+![SQL EXPLAIN with AI](resources/screenshots/08-explain.png)
 - Per-response credits used, duration and trigger time.
 - Inline SQL completion (off by default, trigger with `Alt+/`).
 - Server proxy or bring-your-own API key.
@@ -171,6 +193,8 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### SQL 工作台
 
+![SQL 编辑器与结果表格](resources/screenshots/01-sql-workbench.png)
+
 - 连接分组、连接测试与 SSH 隧道。
 - SQL 编辑、上下文补全、格式化、执行与取消。
 - 编辑器内 `EXPLAIN`。
@@ -187,7 +211,19 @@ code --install-extension lang2hong.devbelt-db-client
 - **SQL 诊断**：`.sql` 编辑器内提示缺少 `WHERE` 的 `UPDATE`/`DELETE`、`DROP`/`TRUNCATE`/`ALTER`、`NOT IN (子查询)`、`SELECT *` 与方言不符的写法；`devbelt.diagnostics.enabled` 总开关，`devbelt.diagnostics.rules` 按规则调整级别。
 - **数据字典**：库节点 → 数据 → 生成数据字典，导出 Markdown 或 HTML，不包含任何连接信息。
 
+### 监控
+
+![AI 提出监控任务](resources/screenshots/06-monitor-proposal.png)
+
+- **定时只读检查**：行数、一个数值指标、或基于已有列的新增行；命中条件时弹 VS Code 通知。
+- **只提出、不创建**：Agent 模式下助手只能以卡片形式**提出**任务；你选间隔和提醒条件、确认后才会执行。
+- **后台任务**：图表、检查记录、下次检查、失败次数，间隔和条件可编辑。
+
+![后台任务抽屉](resources/screenshots/07-monitor-tasks.png)
+
 ### 结构与数据
+
+![ER 图](resources/screenshots/02-er-diagram.png)
 
 - 表设计器与 DDL 生成。
 - ER 图、Schema 对比与同步 SQL。
@@ -197,6 +233,8 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### Redis
 
+![Redis 键浏览器与值编辑器](resources/screenshots/03-redis.png)
+
 - 单机、Cluster、Sentinel 连接，支持 SSH 隧道与 TLS。
 - 键浏览器、分隔符折叠、SCAN 分页（每次「加载更多」默认 2000 个键，`devbelt.redis.keyPageSize`）与二进制安全键。
 - 全部核心数据类型原生编辑：string、hash、list、set、zset、Stream。
@@ -205,6 +243,8 @@ code --install-extension lang2hong.devbelt-db-client
 - 只读模式与危险命令确认。
 
 ### Elasticsearch
+
+![Elasticsearch 文档浏览与 DSL 控制台](resources/screenshots/04-elasticsearch.png)
 
 - HTTP/HTTPS、Basic/API Key、TLS 与 SSH 隧道。
 - 集群总览、节点列表与索引浏览。
@@ -216,11 +256,15 @@ code --install-extension lang2hong.devbelt-db-client
 
 ### AI 助手
 
+![AI Chat（图表与用量详情）](resources/screenshots/05-ai-chat.png)
+
 - AI Chat 流式回复、会话历史（较早的消息压缩成摘要，不直接丢弃）与 Schema 上下文。
 - 自然语言生成 SQL、SQL 解释与优化、错误诊断。
 - 数据问答，样本发送需显式确认。
 - 表设计生成与审阅。
 - 结果图表：柱状图、折线图、面积图、饼图、堆叠柱状图、横向条形图。
+
+![SQL EXPLAIN 与 AI 解读](resources/screenshots/08-explain.png)
 - 每条回复显示积分消耗、耗时与触发时间。
 - SQL 行内补全（默认关闭，按 `Alt+/` 触发）。
 - 支持服务端代理或自带 API Key。

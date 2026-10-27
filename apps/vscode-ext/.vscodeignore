@@ -18,3 +18,4 @@ out/mainThreadFixture.js
 .env
 .env.example
 .env.production
+resources/screenshots/**
