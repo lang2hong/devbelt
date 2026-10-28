@@ -51,6 +51,10 @@ export const planEnginesDevicesMigration: Migration = {
     );
 
     // 2) 设备数：free 2 台 / pro 5 台（仅把「不限 = 0」收敛为目标值，避免覆盖运营已改值）。
+    //
+    // 注意：`value_json` 是 JSON 列，`v.value_json = '0'` 走 JSON 比较，JSON 数字 0
+    // 与 JSON 字符串 "0" 不相等（实测返回 false），此前写法会静默跳过、一条都不更新。
+    // 用 CAST(... AS UNSIGNED) 归一成数值比较；JSON null 单独判类型。
     await db.query(
       `UPDATE plan_feature_values v
          JOIN plans p ON p.id = v.plan_id
@@ -58,7 +62,7 @@ export const planEnginesDevicesMigration: Migration = {
           SET v.value_json = '2'
         WHERE d.feature_key = 'maxDevices'
           AND p.code = 'free'
-          AND (v.value_json = '0' OR v.value_json = 'null')`,
+          AND (CAST(v.value_json AS UNSIGNED) = 0 OR JSON_TYPE(v.value_json) = 'NULL')`,
     );
     await db.query(
       `UPDATE plan_feature_values v
@@ -67,7 +71,7 @@ export const planEnginesDevicesMigration: Migration = {
           SET v.value_json = '5'
         WHERE d.feature_key = 'maxDevices'
           AND p.code = 'pro'
-          AND (v.value_json = '0' OR v.value_json = 'null')`,
+          AND (CAST(v.value_json AS UNSIGNED) = 0 OR JSON_TYPE(v.value_json) = 'NULL')`,
     );
   },
 };
