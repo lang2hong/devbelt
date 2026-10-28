@@ -18,6 +18,14 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 type Result<T = undefined> = { kind: 'ok'; value: T } | { kind: 'invalid-credentials' } | { kind: 'rate-limited' } | { kind: 'failure' };
 
+/** 登录结果：比通用 Result 多一个「设备数超限」（403 PERSONAL_FEATURE_REQUIRED）。 */
+export type LoginResult =
+  | { kind: 'ok'; value: ConsoleUser }
+  | { kind: 'invalid-credentials' }
+  | { kind: 'rate-limited' }
+  | { kind: 'device-limit' }
+  | { kind: 'failure' };
+
 const DEVICE_KEY_STORAGE = 'devbelt.web.deviceKey';
 
 export function getOrCreateDeviceKey(storage: Pick<Storage, 'getItem' | 'setItem'> = localStorage): string {
@@ -99,7 +107,7 @@ export async function login(
   deviceKey: string,
   csrfToken: string,
   fetchImpl: FetchLike = fetch,
-): Promise<Result<ConsoleUser>> {
+): Promise<LoginResult> {
   try {
     const res = await fetchImpl('/api/console/auth/login', {
       method: 'POST',
@@ -113,6 +121,12 @@ export async function login(
     }
     if (res.status === 401) return { kind: 'invalid-credentials' };
     if (res.status === 429) return { kind: 'rate-limited' };
+    if (res.status === 403) {
+      // 设备数超过套餐上限：只有这个业务码需要差异化为「去注销设备/升级」，
+      // 其余 403（如账号被禁用）仍走通用失败。
+      const body = (await res.json().catch(() => ({}))) as { code?: string };
+      if (body.code === 'PERSONAL_FEATURE_REQUIRED') return { kind: 'device-limit' };
+    }
     return { kind: 'failure' };
   } catch {
     return { kind: 'failure' };

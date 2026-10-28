@@ -39,6 +39,7 @@ async function submit() {
     }
     if (result.kind === 'invalid-credentials') error.value = '邮箱或密码错误，或邮箱尚未验证。';
     else if (result.kind === 'rate-limited') error.value = '尝试过于频繁，请稍后再试。';
+    else if (result.kind === 'device-limit') error.value = `当前套餐的设备数量已达上限，无法在这台设备登录。请在已登录设备的「账户 → 设备」中注销一台不再使用的设备，或升级套餐后重试。`;
     else error.value = '登录失败，请检查网络后重试。';
   } finally {
     submitting.value = false;

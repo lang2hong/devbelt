@@ -75,6 +75,7 @@ function makeStore(overrides?: Record<string, any>): AuthenticatorStore {
     addTag: vi.fn(async () => ({ ok: true, tag: { id: 't', name: 'x', color: 'blue' } })),
     deleteTag: vi.fn(async () => ({ ok: true })),
     checkQuota: vi.fn(() => ({ ok: true })),
+    ensureQuota: vi.fn(async () => ({ ok: true })),
     ...overrides,
   } as unknown as AuthenticatorStore;
 }
@@ -145,7 +146,7 @@ describe('AuthenticatorView (panel)', () => {
 
   it('requestAddForm at cap → upgrade prompt, no openAddForm', async () => {
     const p = makePanel();
-    AuthenticatorView.open(makeStore({ checkQuota: vi.fn(() => ({ ok: false, limit: 5 })) }));
+    AuthenticatorView.open(makeStore({ ensureQuota: vi.fn(async () => ({ ok: false, limit: 5 })) }));
     p.send({ type: 'ready', __load: 'L1' });
     await flush();
     p.send({ type: 'requestAddForm' });

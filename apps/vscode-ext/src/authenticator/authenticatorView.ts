@@ -44,9 +44,9 @@ export class AuthenticatorView extends BaseWebView {
   }
 
   /** 命令/「＋」入口：先配额预检，达上限弹升级、不展开表单；否则打开面板并请求表单。 */
-  static openAddForm(store: AuthenticatorStore): void {
+  static async openAddForm(store: AuthenticatorStore): Promise<void> {
     const view = AuthenticatorView.ensure(store);
-    view.requestAddForm();
+    await view.requestAddForm();
   }
 
   /** EventBus 订阅入口：条目/分组/标签变更后重发快照。 */
@@ -64,8 +64,8 @@ export class AuthenticatorView extends BaseWebView {
     return AuthenticatorView.current;
   }
 
-  private requestAddForm(): void {
-    const q = this.store.checkQuota();
+  private async requestAddForm(): Promise<void> {
+    const q = await this.store.ensureQuota();
     if (!q.ok) { void promptAuthenticatorUpgrade(q.limit); return; }
     if (this.initSent) this.post({ type: 'openAddForm' });
     else this.pendingAction = 'openAddForm';
@@ -96,7 +96,7 @@ export class AuthenticatorView extends BaseWebView {
         return;
       case 'copy': await this.onCopy(msg); return;
       case 'toggleGroup': this.onToggleGroup(msg); return;
-      case 'requestAddForm': this.requestAddForm(); return;
+      case 'requestAddForm': await this.requestAddForm(); return;
       case 'addUri': this.onAddUri(msg); return;
       case 'addImage': await this.onAddImage(msg); return;
       case 'cancelPrefill': this.pendingPrefill = undefined; return;

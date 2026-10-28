@@ -118,6 +118,14 @@ export interface PlanDto {
   features: PlanFeatureDto[];
 }
 
+/** 带 HTTP 状态与业务码的错误：调用方无需解析 message 字符串。 */
+export function httpError(message: string, status: number, code?: string): Error & { status: number; code?: string } {
+  const err = new Error(message) as Error & { status: number; code?: string };
+  err.status = status;
+  if (code) err.code = code;
+  return err;
+}
+
 export interface PlanCatalog {
   personal: PlanDto[];
 }
@@ -297,8 +305,10 @@ export class SyncClient {
   private async postForm(path: string, body: object): Promise<AuthResult> {
     const res = await this.request('POST', path, body, false);
     if (!res.ok) {
-      const errBody = (await res.json().catch(() => ({}))) as { message?: string };
-      throw new Error(errBody.message || `Request failed: ${res.status}`);
+      const errBody = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
+      // 附带 code/status：登录框要按 PERSONAL_FEATURE_REQUIRED 等业务码本地化，
+      // 只给 message 会让调用方退回字符串匹配（脆弱且会漏）。
+      throw httpError(errBody.message || `Request failed: ${res.status}`, res.status, errBody.code);
     }
     return res.json() as Promise<AuthResult>;
   }
@@ -324,7 +334,7 @@ export class SyncClient {
     if (!res.ok) {
       const errBody = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
       const code = errBody.code ? ` [${errBody.code}]` : '';
-      throw new Error(errBody.message ? `${errBody.message}${code}` : `Request failed: ${res.status}`);
+      throw httpError(errBody.message ? `${errBody.message}${code}` : `Request failed: ${res.status}`, res.status, errBody.code);
     }
     return res.json().catch(() => ({}));
   }

@@ -469,6 +469,24 @@ describe('AuthService.refreshEntitlement', () => {
     expect(secrets.values.get('devbelt.sync.cachedEntitlement.gen')).toBe(before);
   });
 
+  it('哨兵变化会连 memento 缓存一起清（离线时不回退到旧套餐）', async () => {
+    const secrets = makeSharedSecrets();
+    const memento = makeMemento();
+    await secrets.store(ACCESS_KEY, 'A1');
+    await secrets.store(REFRESH_KEY, 'R1');
+    installFetch(() => ({ status: 200, body: meResponse(proSub) }));
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    await auth.init();
+    await auth.refreshEntitlement();
+    expect(memento.values.get('devbelt.sync.cachedEntitlement')).toBeTruthy();
+
+    // 刷新失败（离线）：哨兵必须让本窗口 fail-closed，而不是回退到旧套餐缓存。
+    installFetch(() => ({ status: 500, body: { message: 'offline' } }));
+    await secrets.store('devbelt.sync.cachedEntitlement.gen', 'pro|mysql,postgresql,sqlite,elasticsearch');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(memento.values.get('devbelt.sync.cachedEntitlement')).toBeUndefined();
+  });
+
   it('另一窗口哨兵变化 → 本窗口丢弃内存缓存并重拉', async () => {
     const secrets = makeSharedSecrets();
     const memento = makeMemento();

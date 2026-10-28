@@ -466,6 +466,27 @@ describe('注册和验证流程（register 不回 token）', () => {
   });
 });
 
+describe('登录错误携带业务码', () => {
+  it('设备超限的 403 抛出的错误带 code=PERSONAL_FEATURE_REQUIRED 与 status', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(403, {
+      code: 'PERSONAL_FEATURE_REQUIRED',
+      message: 'maxDevices exceeds the personal Free entitlement',
+    }));
+    const deviceInfo = {
+      deviceName: 'test-host · linux/x64', deviceId: 'abcdef0123456789abcdef0123456789',
+      machineId: 'fedcba9876543210fedcba9876543210', hostname: 'test-host', os: 'linux',
+      arch: 'x64', osVersion: '6.0', appName: 'VSCode', appVersion: '1.90.0',
+      language: 'en', timezone: 'UTC',
+    };
+    const client = new SyncClient('http://x', () => 'a', () => 'r', () => {}, deviceInfo as any, fetchMock as any);
+
+    await expect(client.login('a@b.c', 'password-1234')).rejects.toMatchObject({
+      status: 403,
+      code: 'PERSONAL_FEATURE_REQUIRED',
+    });
+  });
+});
+
 describe('change-password / confirm 单次消费契约', () => {
   it('changePassword 发送 { currentPassword, newPassword }', async () => {
     const bodies: unknown[] = [];

@@ -78,6 +78,8 @@ const consoleLogger: StoreLogger = {
 export interface AuthenticatorStoreDeps {
   isLoggedIn(): boolean;
   getCachedEntitlement(): CachedEntitlement | undefined;
+  /** 可选：配额预检前刷新权益（降级后避免用旧缓存放行）。 */
+  refreshEntitlement?(): Promise<void>;
 }
 
 export type AddResult =
@@ -287,6 +289,21 @@ export class AuthenticatorStore implements VscodeDisposable {
     const count = this.entries.filter((e) => !e.deleted).length;
     if (limit > 0 && count >= limit) return { ok: false, limit };
     return { ok: true };
+  }
+
+  /**
+   * 配额预检（先刷新权益）。
+   *
+   * `checkQuota` 读的是缓存；降级后缓存可能仍是 Pro（最高 1000 条），直接放行会让用户
+   * 继续新增，直到服务端在同步时才以硬配额拒绝。命令/面板入口改走这里。
+   */
+  async ensureQuota(): Promise<{ ok: true } | { ok: false; limit: number }> {
+    this.assertInit();
+    if (!this.auth.isLoggedIn()) return { ok: true };
+    try {
+      await this.auth.refreshEntitlement?.();
+    } catch { /* 网络失败沿用缓存，不阻断添加流程 */ }
+    return this.checkQuota();
   }
 
   // memento 写入封装：所有写操作最终走这些函数，便于将来加 diff/审计。

@@ -40,6 +40,24 @@ describe('login', () => {
     expect(getAccessToken()).toBeNull();
   });
 
+  it('maps a device-limit 403 to device-limit', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify({
+      code: 'PERSONAL_FEATURE_REQUIRED',
+      message: 'maxDevices exceeds the personal Free entitlement',
+    }), { status: 403, headers: { 'content-type': 'application/json' } });
+    const r = await login('a@b.c', 'pw', 'dk', 'csrf', fetchImpl as any);
+    expect(r).toEqual({ kind: 'device-limit' });
+  });
+
+  it('keeps other 403s as failure', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify({ code: 'USER_DISABLED' }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+    const r = await login('a@b.c', 'pw', 'dk', 'csrf', fetchImpl as any);
+    expect(r).toEqual({ kind: 'failure' });
+  });
+
   it('maps 429 to rate-limited', async () => {
     const r = await login('a@b.com', 'p', 'dk', 'csrf', async () => jsonResponse(429, { error: { code: 'TOO_MANY_REQUESTS' } }));
     expect(r).toEqual({ kind: 'rate-limited' });

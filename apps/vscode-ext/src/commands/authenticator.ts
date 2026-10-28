@@ -18,12 +18,12 @@ export function registerAuthenticatorCommands(deps: Deps, sub: Sub): void {
   });
 
   sub('devbelt.authenticator.add', async () => {
-    const quota = deps.authStore.checkQuota();
+    const quota = await deps.authStore.ensureQuota();
     if (!quota.ok) {
       await promptAuthenticatorUpgrade(quota.limit);
       return;
     }
-    AuthenticatorView.openAddForm(deps.authStore);
+    await AuthenticatorView.openAddForm(deps.authStore);
   });
 
   sub('devbelt.authenticator.export', async () => {

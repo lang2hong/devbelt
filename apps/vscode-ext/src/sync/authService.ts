@@ -268,10 +268,20 @@ export class AuthService {
       // 另一窗口刷新到的套餐已变化（升级/降级）：本窗口丢弃过期内存缓存并重拉，
       // 否则医生面板/引擎门限会继续按旧套餐判断。
       if (e.key === AuthService.ENTITLEMENT_GEN_KEY) {
-        this.cachedEntitlement = undefined;
+        // 连持久化缓存一起清掉：否则 getCachedEntitlement() 会回退到 memento 里的旧套餐，
+        // 刷新失败（离线）时本窗口仍按已知过期的权益放行。
+        this.invalidateEntitlementCache();
         if (this.accessToken) void this.refreshEntitlement();
       }
     });
+  }
+
+  /** 只清权益缓存（内存 + memento），保留 userId/token；下次读取 fail-closed 到 Free。 */
+  private invalidateEntitlementCache(): void {
+    this.cachedEntitlement = undefined;
+    try {
+      this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, undefined);
+    } catch { /* 忽略 */ }
   }
 
   /** 使认证身份缓存失效：任何飞行中 /api/db/me 结果作废，已缓存的 userId/权益清空。 */
