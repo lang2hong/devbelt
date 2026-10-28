@@ -2326,6 +2326,12 @@
           "description": "Extension language. auto follows VS Code display language.",
           "markdownDescription": "扩展语言。`auto` 跟随 VS Code 显示语言。"
         },
+        "devbelt.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send one anonymous install/active heartbeat per day. Only sent when VS Code telemetry is enabled. No email, account, connection data or IP address is sent.",
+          "markdownDescription": "每天发送一次匿名安装/活跃心跳；仅在 VS Code 遥测开启时发送。不包含邮箱、账号、连接信息或 IP 地址。"
+        },
         "devbelt.format.indent": {
           "type": "number",
           "default": 2,

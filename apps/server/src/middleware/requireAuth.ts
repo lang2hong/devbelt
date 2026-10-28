@@ -103,6 +103,37 @@ export async function authScope(app: FastifyInstance, opts: AuthScopeOptions): P
   await opts.routes(app);
 }
 
+export interface OptionalAuthOptions {
+  tokenService: TokenService;
+  getUser: GetAuthUser;
+  getSessionActive?: (sessionId: string) => Promise<boolean>;
+  /** 允许的 audience；缺省 extension。 */
+  aud?: TokenAudience | TokenAudience[];
+}
+
+/**
+ * 可选登录：公开端点上识别「已登录调用者」，但**从不拒绝请求**。
+ *
+ * 与 authScope 走同一套核验（验签、aud、用户状态、sessionVersion、session 存活）；
+ * 无 token / 任一校验失败一律返回 null，调用方按匿名处理。
+ */
+export async function resolveOptionalAuthUserId(req: FastifyRequest, opts: OptionalAuthOptions): Promise<number | null> {
+  const header = req.headers.authorization;
+  if (typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+  const result = await evaluate(
+    opts.tokenService,
+    {
+      tokenService: opts.tokenService,
+      getUser: opts.getUser,
+      getSessionActive: opts.getSessionActive,
+      aud: opts.aud,
+      routes: () => undefined,
+    },
+    req,
+  ).catch(() => null);
+  return result && result.kind === 'ok' ? result.userId : null;
+}
+
 export function setAuthContext(req: FastifyRequest, result: Extract<EvalResult, { kind: 'ok' }>): void {
   (req as unknown as { authUserId: number }).authUserId = result.userId;
   (req as unknown as { authSessionId?: string }).authSessionId = result.sessionId;

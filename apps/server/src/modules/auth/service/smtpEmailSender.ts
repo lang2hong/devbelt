@@ -124,6 +124,31 @@ export class SmtpEmailSender implements EmailSender {
     });
   }
 
+  async sendFeedbackReplyEmail(input: { to: string; reply: string; originalContent: string }): Promise<void> {
+    // 回复与原反馈都是不可信文本：纯文本原样，HTML 一律转义并保留换行。
+    const original = input.originalContent.length > 500
+      ? `${input.originalContent.slice(0, 500)}…`
+      : input.originalContent;
+    await this.transporter.sendMail({
+      from: this.from,
+      to: input.to,
+      subject: 'DevBelt 回复了你的反馈',
+      text:
+        'DevBelt 回复了你的反馈\n\n' +
+        `${input.reply}\n\n` +
+        '——\n你的反馈：\n' +
+        `${original}\n\n` +
+        '你也可以在 VS Code 的 DevBelt「反馈」面板中查看全部回复。',
+      html: this.wrap(
+        this.heading('DevBelt 回复了你的反馈') +
+        `<div style="margin:14px 0 0;color:#1f2328;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word;">${this.escapeHtml(input.reply)}</div>` +
+        '<div style="margin:18px 0 6px;color:#8b949e;font-size:12px;">你的反馈</div>' +
+        `<div style="padding:10px 12px;background:#f6f8fa;border:1px solid #eaeef2;border-radius:6px;color:#57606a;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;">${this.escapeHtml(original)}</div>` +
+        '<p style="margin:14px 0 0;color:#57606a;font-size:13px;">你也可以在 VS Code 的 DevBelt「反馈」面板中查看全部回复。</p>',
+      ),
+    });
+  }
+
   // ── URL 构造 ──
 
   private verificationUrl(token: string): string {

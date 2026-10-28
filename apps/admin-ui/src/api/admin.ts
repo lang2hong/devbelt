@@ -1057,6 +1057,7 @@ export interface AdminFeedback {
   id: string;
   userId: string | null;
   installId: string | null;
+  hasReplyKey: boolean;
   category: 'bug' | 'feature' | 'other';
   content: string;
   contact: string | null;
@@ -1067,6 +1068,25 @@ export interface AdminFeedback {
   sourceIp: string | null;
   createTime: string;
   updateTime: string;
+}
+
+export type FeedbackEmailTarget = 'none' | 'account' | 'contact';
+
+export interface AdminFeedbackReply {
+  id: string;
+  adminUserId: string | null;
+  body: string;
+  emailStatus: 'skipped' | 'pending' | 'sent' | 'failed';
+  emailTo: string | null;
+  emailError: string | null;
+  createTime: string;
+}
+
+export interface AdminFeedbackDetail {
+  feedback: AdminFeedback;
+  userEmail: string | null;
+  inAppDeliverable: boolean;
+  replies: AdminFeedbackReply[];
 }
 
 export interface FeedbackFilters {
@@ -1084,10 +1104,27 @@ export interface AdminOverview {
     platforms: Array<{ platform: string; count: number }>;
     versions: Array<{ version: string; count: number }>;
   };
-  sync: { connectionMetas: number; storageBytes: number };
+  sync: { connectionMetas: number; storageBytes: number; syncedUsers: number };
   ai: { monthTokens: number; monthRequests: number };
-  billing: { paidOrders30d: number; revenueCents30d: number };
-  feedback: { newCount: number; byStatus: Array<{ status: string; count: number }> };
+  billing: {
+    paidOrders30d: number;
+    revenueCents30d: number;
+    topupOrders30d: number;
+    topupRevenueCents30d: number;
+  };
+  feedback: {
+    newCount: number;
+    byStatus: Array<{ status: string; count: number }>;
+    byCategory: Array<{ category: string; count: number }>;
+  };
+  telemetry: {
+    totalInstalls: number;
+    newInstalls7d: number;
+    newInstalls30d: number;
+    active24h: number;
+    active7d: number;
+    active30d: number;
+  };
 }
 
 export async function getOverview(
@@ -1113,6 +1150,43 @@ export async function queryFeedback(
   try {
     const res = await authedFetch(`/api/admin/feedback${qs(filters)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: await toPage<AdminFeedback>(res) };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function getFeedbackDetail(
+  id: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminFeedbackDetail>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/feedback/${encodeURIComponent(id)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as AdminFeedbackDetail };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function replyFeedback(
+  id: string,
+  input: { body: string; emailTarget: FeedbackEmailTarget },
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ id: string; emailStatus: AdminFeedbackReply['emailStatus'] }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/feedback/${encodeURIComponent(id)}/replies`,
+      { method: 'POST', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as { id: string; emailStatus: AdminFeedbackReply['emailStatus'] } };
     return failure(res);
   } catch {
     return { kind: 'failure' };

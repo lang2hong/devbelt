@@ -2,7 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { rejectConsole } from '../../../middleware/consoleError.js';
 import { consoleWriteGuard } from '../../../middleware/consoleWrite.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
-import type { FeedbackRow, FeedbackStatus } from '../../../repository/interfaces/feedback.js';
+import type {
+  FeedbackEmailTarget,
+  FeedbackReply,
+  FeedbackRow,
+  FeedbackStatus,
+} from '../../../repository/interfaces/feedback.js';
 import {
   ADMIN_RETENTION_MS,
   adminWriteKey,
@@ -32,11 +37,34 @@ const feedbackPatchBody = {
   },
 } as const;
 
+const feedbackReplyBody = {
+  type: 'object',
+  required: ['body', 'emailTarget'],
+  additionalProperties: false,
+  properties: {
+    body: { type: 'string', minLength: 1, maxLength: 4000 },
+    emailTarget: { type: 'string', enum: ['none', 'account', 'contact'] },
+  },
+} as const;
+
+function replyDto(r: FeedbackReply) {
+  return {
+    id: String(r.id),
+    adminUserId: r.adminUserId === null ? null : String(r.adminUserId),
+    body: r.body,
+    emailStatus: r.emailStatus,
+    emailTo: r.emailTo,
+    emailError: r.emailError,
+    createTime: r.createTime.toISOString(),
+  };
+}
+
 function dto(r: FeedbackRow) {
   return {
     id: String(r.id),
     userId: r.userId === null ? null : String(r.userId),
     installId: r.installId,
+    hasReplyKey: r.hasReplyKey,
     category: r.category,
     content: r.content,
     contact: r.contact,
@@ -87,6 +115,57 @@ export function registerFeedbackAdminRoutes(child: FastifyInstance, ctx: AdminCt
       total: page.total,
     });
   });
+
+  child.get('/api/admin/feedback/:feedbackId', { schema: { params: feedbackParams } }, async (req, reply) => {
+    await readLimit(req);
+    const id = Number((req.params as Record<string, unknown>).feedbackId);
+    const d = await svc.getFeedbackDetail(userIdOf(req), id);
+    reply.send({
+      feedback: dto(d.feedback),
+      userEmail: d.userEmail,
+      // 站内可达：已关联账号（以该账号登录可见），或带 replyKey 哈希（原安装可见）。
+      inAppDeliverable: d.feedback.userId !== null || d.feedback.hasReplyKey,
+      replies: d.replies.map(replyDto),
+    });
+  });
+
+  child.post(
+    '/api/admin/feedback/:feedbackId/replies',
+    { schema: { params: feedbackParams, body: feedbackReplyBody } },
+    async (req, reply) => {
+      if (!consoleWriteGuard(req, opts.csrfService, opts.consoleOrigin)) {
+        return rejectConsole(reply, 403, 'FORBIDDEN', 'forbidden');
+      }
+      const actor = userIdOf(req);
+      const id = Number((req.params as Record<string, unknown>).feedbackId);
+      const body = req.body as { body: string; emailTarget: FeedbackEmailTarget };
+      // 邮件参数只在本请求首次执行时由 business 填入；重放不会进入 business，故不会重发。
+      let pendingEmail: { replyId: number; to: string; originalContent: string } | null = null;
+      const result = await opts.idempotencyService.run({
+        actorUserId: actor,
+        sessionId: sessionIdOf(req),
+        method: 'POST',
+        normalizedPath: `/api/admin/feedback/${id}/replies`,
+        idempotencyKey: adminWriteKey(req),
+        requestBody: req.body,
+        retentionMs: ADMIN_RETENTION_MS,
+        beforeWrite: (tx: Queryable) => writeLimitInTx(tx, req),
+        business: async (tx: Queryable) => {
+          const r = await svc.replyFeedbackInTx(tx, actor, id, body.body, body.emailTarget);
+          if (r.email) pendingEmail = { replyId: r.replyId, ...r.email };
+          return { status: 201, body: { id: String(r.replyId), emailStatus: r.emailStatus } };
+        },
+      });
+
+      let responseBody = result.body;
+      const toSend = pendingEmail as { replyId: number; to: string; originalContent: string } | null;
+      if (!result.replayed && toSend) {
+        const status = await svc.sendFeedbackReplyEmail(toSend.replyId, toSend.to, body.body, toSend.originalContent);
+        responseBody = { ...(result.body as Record<string, unknown>), emailStatus: status };
+      }
+      reply.code(result.status).send(responseBody);
+    },
+  );
 
   child.patch(
     '/api/admin/feedback/:feedbackId',

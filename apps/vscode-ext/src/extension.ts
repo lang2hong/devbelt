@@ -21,6 +21,7 @@ import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connect
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { ToolsViewProvider } from './tools/toolsView';
 import { FeedbackViewProvider } from './feedback/feedbackView';
+import { maybeSendInstallHeartbeat } from './telemetry/heartbeat';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
 import { AiKeyStore } from './ai/aiKeyStore';
@@ -310,7 +311,20 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push(ToolsViewProvider.register());
 
   // 侧边栏「反馈」视图：Bug 反馈、功能建议、文档、评价入口。
-  context.subscriptions.push(FeedbackViewProvider.register(serverUrl, context.globalState, String(context.extension.packageJSON.version ?? '')));
+  context.subscriptions.push(FeedbackViewProvider.register({
+    serverUrl,
+    globalState: context.globalState,
+    secrets: context.secrets,
+    extensionVersion: String(context.extension.packageJSON.version ?? ''),
+    getAccessToken: () => auth.getAccessToken(),
+  }));
+
+  // 匿名安装/活跃心跳：每天最多一次；尊重 VS Code 遥测与 devbelt.telemetry.enabled。
+  void maybeSendInstallHeartbeat({
+    serverUrl,
+    globalState: context.globalState,
+    extensionVersion: String(context.extension.packageJSON.version ?? ''),
+  });
 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。

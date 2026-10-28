@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { navigate } from '../lib/router';
-import { queryFeedback, setFeedbackStatus, type AdminFeedback } from '../api/admin';
+import {
+  getFeedbackDetail,
+  queryFeedback,
+  replyFeedback,
+  setFeedbackStatus,
+  type AdminFeedback,
+  type AdminFeedbackDetail,
+  type FeedbackEmailTarget,
+} from '../api/admin';
 import { ensureCsrf, setAccessToken } from '@devbelt/auth-client';
 import { useIdempotencyKey, isRetryableFailure } from '../lib/idempotentWrite';
 import { formatDateTime } from '../lib/formatTime';
@@ -78,16 +86,84 @@ function goNext(): void { if (nextPage()) void load(); }
 function goPrev(): void { if (prevPage()) void load(); }
 function changePageSize(n: number): void { setPageSize(n); resetPager(); void load(); }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_STATUS_LABEL: Record<string, string> = { skipped: '未发邮件', pending: '发送中', sent: '邮件已发送', failed: '邮件发送失败' };
+
+const replyWrite = useIdempotencyKey();
+const extra = ref<AdminFeedbackDetail | null>(null);
+const extraState = ref<'loading' | 'ready' | 'error'>('loading');
+const replyBody = ref('');
+const replyTarget = ref<FeedbackEmailTarget>('none');
+const replyError = ref('');
+const replyOk = ref('');
+const replying = ref(false);
+
+const contactIsEmail = computed(() => EMAIL_RE.test((detail.value?.contact ?? '').trim()));
+
+async function loadExtra(id: string): Promise<void> {
+  extraState.value = 'loading';
+  const r = await getFeedbackDetail(id);
+  if (detail.value?.id !== id) return;
+  if (r.kind === 'ok') {
+    extra.value = r.value;
+    extraState.value = 'ready';
+    return;
+  }
+  if (r.kind === 'unauthorized') { relogin(); return; }
+  extraState.value = 'error';
+}
+
 function openDetail(f: AdminFeedback): void {
   detail.value = f;
   editStatus.value = f.status;
   editNote.value = f.adminNote ?? '';
   error.value = '';
+  extra.value = null;
+  replyBody.value = '';
+  replyTarget.value = 'none';
+  replyError.value = '';
+  replyOk.value = '';
+  void loadExtra(f.id);
 }
 
 function closeDetail(): void {
-  if (busy.value) return;
+  if (busy.value || replying.value) return;
   detail.value = null;
+}
+
+async function sendReply(): Promise<void> {
+  if (!detail.value || replying.value) return;
+  const f = detail.value;
+  const text = replyBody.value.trim();
+  if (!text) { replyError.value = '请填写回复内容。'; return; }
+  const tag = `reply:${f.id}:${replyTarget.value}:${text}`;
+  replying.value = true;
+  replyError.value = '';
+  replyOk.value = '';
+  try {
+    const csrf = await ensureCsrf();
+    const r = await replyFeedback(f.id, { body: text, emailTarget: replyTarget.value }, replyWrite.ensure(tag), csrf);
+    if (r.kind === 'ok') {
+      replyWrite.reset(tag);
+      replyBody.value = '';
+      replyOk.value = r.value.emailStatus === 'failed'
+        ? '回复已保存，但邮件发送失败。'
+        : r.value.emailStatus === 'sent' ? '回复已保存，邮件已发送。' : '回复已保存。';
+      replyTarget.value = 'none';
+      await loadExtra(f.id);
+      await load();
+    } else if (r.kind === 'unauthorized') {
+      replyWrite.reset(tag);
+      relogin();
+    } else if (isRetryableFailure(r.kind)) {
+      replyError.value = '发送失败，请重试。';
+    } else {
+      replyWrite.reset(tag);
+      replyError.value = r.message ? `发送失败：${r.message}` : '发送失败。';
+    }
+  } finally {
+    replying.value = false;
+  }
 }
 
 async function save(): Promise<void> {
@@ -186,7 +262,14 @@ onMounted(load);
       <table class="kv">
         <tbody>
           <tr><th>分类</th><td>{{ CATEGORY_LABEL[detail.category] ?? detail.category }}</td></tr>
-          <tr><th>用户</th><td class="mono">{{ detail.userId ?? '匿名' }}</td></tr>
+          <tr>
+            <th>用户</th>
+            <td class="mono">
+              <a v-if="detail.userId" class="user-link" href="#" @click.prevent="goUser(detail.userId)">{{ detail.userId }}</a>
+              <span v-else>匿名</span>
+              <span v-if="extra?.userEmail" class="small muted"> · {{ extra.userEmail }}</span>
+            </td>
+          </tr>
           <tr><th>安装 ID</th><td class="mono small">{{ detail.installId ?? '—' }}</td></tr>
           <tr><th>联系方式</th><td class="mono">{{ detail.contact ?? '—' }}</td></tr>
           <tr><th>版本 / OS</th><td class="mono">{{ detail.appVersion ?? '—' }} / {{ detail.os ?? '—' }}</td></tr>
@@ -196,6 +279,55 @@ onMounted(load);
       </table>
       <label>内容</label>
       <pre class="content-box">{{ detail.content }}</pre>
+
+      <section class="replies" aria-labelledby="replies-title">
+        <div class="replies-head">
+          <h3 id="replies-title">回复</h3>
+          <span v-if="extra" class="small" :class="extra.inAppDeliverable ? 'ok' : 'warn'">
+            {{ extra.inAppDeliverable ? '插件内可见' : '插件内不可见（旧反馈无回复凭证），仅可邮件送达' }}
+          </span>
+        </div>
+        <p v-if="extraState === 'loading'" class="muted">加载中…</p>
+        <p v-else-if="extraState === 'error'" class="error">回复历史加载失败。</p>
+        <template v-else-if="extra">
+          <p v-if="extra.replies.length === 0" class="muted">还没有回复。</p>
+          <ul v-else class="reply-list">
+            <li v-for="r in extra.replies" :key="r.id">
+              <div class="reply-meta small muted">
+                <span>{{ formatDateTime(r.createTime) }}</span>
+                <span :class="['email-status', r.emailStatus]">
+                  {{ EMAIL_STATUS_LABEL[r.emailStatus] ?? r.emailStatus }}<template v-if="r.emailTo"> · {{ r.emailTo }}</template>
+                </span>
+              </div>
+              <pre class="content-box reply-body">{{ r.body }}</pre>
+              <p v-if="r.emailError" class="small error">{{ r.emailError }}</p>
+            </li>
+          </ul>
+        </template>
+
+        <label for="reply-body">回复内容（用户可见）</label>
+        <textarea id="reply-body" v-model="replyBody" rows="4" maxlength="4000" :disabled="replying"></textarea>
+        <fieldset class="email-target" :disabled="replying">
+          <legend>同时发送邮件</legend>
+          <label class="radio"><input v-model="replyTarget" type="radio" value="none" /> 不发送</label>
+          <label class="radio" :class="{ disabled: !extra?.userEmail }">
+            <input v-model="replyTarget" type="radio" value="account" :disabled="!extra?.userEmail" />
+            账号邮箱<span v-if="extra?.userEmail" class="mono small"> {{ extra.userEmail }}</span><span v-else class="small muted">（未关联账号）</span>
+          </label>
+          <label class="radio" :class="{ disabled: !contactIsEmail }">
+            <input v-model="replyTarget" type="radio" value="contact" :disabled="!contactIsEmail" />
+            联系邮箱<span v-if="contactIsEmail" class="mono small"> {{ detail.contact }}</span>
+            <span v-if="contactIsEmail" class="small warn">（用户自填，未验证）</span>
+            <span v-else class="small muted">（未填写邮箱）</span>
+          </label>
+        </fieldset>
+        <p v-if="replyError" class="error" role="alert">{{ replyError }}</p>
+        <p v-if="replyOk" class="ok small" role="status">{{ replyOk }}</p>
+        <div class="modal-actions">
+          <button class="btn" :disabled="replying || !replyBody.trim()" @click="sendReply">{{ replying ? '发送中…' : '发送回复' }}</button>
+        </div>
+      </section>
+
       <label>状态</label>
       <select v-model="editStatus">
         <option v-for="s in STATUS_OPTIONS" :key="s" :value="s">{{ STATUS_LABEL[s] }}</option>
@@ -242,4 +374,18 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .content-box { margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--c-border-strong); border-radius: 6px; background: var(--c-surface); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; font-size: 13px; }
 label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--c-text-muted); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.replies { margin: 6px 0 14px; padding-top: 10px; border-top: 1px solid var(--c-border-strong); }
+.replies-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.replies-head h3 { margin: 0; font-size: 14px; }
+.reply-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.reply-meta { display: flex; justify-content: space-between; gap: 8px; }
+.reply-body { margin: 4px 0 0; max-height: 160px; }
+.email-target { border: 1px solid var(--c-border-strong); border-radius: 6px; margin: 10px 0 0; padding: 8px 10px; }
+.email-target legend { padding: 0 4px; font-size: 12px; color: var(--c-text-muted); }
+.radio { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: 13px; color: var(--c-text); }
+.radio.disabled { color: var(--c-text-muted); }
+.ok { color: #3aa675; }
+.warn { color: var(--c-warn-text, #9a6700); }
+.email-status.failed { color: var(--c-danger); }
+.email-status.sent { color: #3aa675; }
 </style>

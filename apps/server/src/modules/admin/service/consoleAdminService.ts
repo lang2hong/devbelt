@@ -29,7 +29,16 @@ import { validateFeatureValue, FREE_PLAN_CODES } from '../../billing/service/pla
 import type { RateLimitService } from '../../../service/rateLimitService.js';
 import type { SyncRecordService } from '../../db/service/syncRecordService.js';
 import type { SyncRecordMetadataRow } from '../../../repository/interfaces.js';
-import type { AdminOverview, FeedbackFilter, IFeedbackRepo } from '../../../repository/interfaces/feedback.js';
+import type {
+  AdminOverview,
+  FeedbackDetail,
+  FeedbackEmailStatus,
+  FeedbackEmailTarget,
+  FeedbackFilter,
+  IFeedbackRepo,
+} from '../../../repository/interfaces/feedback.js';
+import type { ITelemetryRepo } from '../../../repository/interfaces/telemetry.js';
+import type { EmailSender } from '../../auth/service/emailSender.js';
 
 /** 平台审计导出单次上限（§6）。 */
 const MAX_EXPORT_ROWS = 10_000;
@@ -76,7 +85,16 @@ export interface ConsoleAdminDeps {
   rateLimiter?: RateLimitService;
   /** 用户反馈（015）。 */
   feedbackRepo: IFeedbackRepo;
+  /** 扩展安装/活跃心跳（016）。 */
+  telemetryRepo: ITelemetryRepo;
+  /** 反馈回复邮件（017）；缺省时选择发邮件会记为 failed。 */
+  emailSender?: EmailSender;
 }
+
+/** 管理员回复正文上限（与 feedback_replies.body 列宽一致）。 */
+export const MAX_FEEDBACK_REPLY = 4000;
+/** 粗校验：只用于判断 contact 能否作为收件地址，不做完整 RFC 校验。 */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** P6：后台按明文类型展示的密文元数据行（不含明文）。 */
 export interface SyncKindOverviewRow {
@@ -112,6 +130,8 @@ export class ConsoleAdminService {
   private readonly syncRecordService: SyncRecordService;
   private readonly rateLimiter?: RateLimitService;
   private readonly feedbackRepo: IFeedbackRepo;
+  private readonly telemetryRepo: ITelemetryRepo;
+  private readonly emailSender?: EmailSender;
 
   constructor(deps: ConsoleAdminDeps) {
     this.userRepo = deps.userRepo;
@@ -127,6 +147,8 @@ export class ConsoleAdminService {
     this.syncRecordService = deps.syncRecordService;
     this.rateLimiter = deps.rateLimiter;
     this.feedbackRepo = deps.feedbackRepo;
+    this.telemetryRepo = deps.telemetryRepo;
+    this.emailSender = deps.emailSender;
   }
 
   // ── 用户 ──
@@ -592,9 +614,88 @@ export class ConsoleAdminService {
     return ok;
   }
 
+  async getFeedbackDetail(actorUserId: number, id: number): Promise<FeedbackDetail> {
+    const detail = await this.feedbackRepo.findDetail(id);
+    if (!detail) throw new EntityNotFoundError('feedback', id);
+    await this.auditRestrictedRead(actorUserId, 'admin.feedback.read');
+    return detail;
+  }
+
+  /**
+   * 事务内写回复（幂等回执同事务）：锁反馈行 → 解析邮件目标 → 写回复 → new→triaged → 审计。
+   * 邮件**不在此发送**：返回 `email` 交由路由在提交后、且非重放时发送。
+   */
+  async replyFeedbackInTx(
+    tx: Queryable,
+    actorUserId: number,
+    id: number,
+    body: string,
+    emailTarget: FeedbackEmailTarget,
+  ): Promise<{ replyId: number; emailStatus: FeedbackEmailStatus; email: { to: string; originalContent: string } | null }> {
+    const text = body.trim();
+    if (text.length === 0) throw new ValidationError('reply body is required');
+    if (text.length > MAX_FEEDBACK_REPLY) throw new ValidationError(`reply body exceeds ${MAX_FEEDBACK_REPLY} characters`);
+
+    const fb = await this.feedbackRepo.findForReplyInTx(tx, id);
+    if (!fb) throw new EntityNotFoundError('feedback', id);
+
+    let emailTo: string | null = null;
+    if (emailTarget === 'account') {
+      if (!fb.userEmail) throw new ValidationError('feedback is not linked to an account');
+      emailTo = fb.userEmail;
+    } else if (emailTarget === 'contact') {
+      const contact = (fb.contact ?? '').trim();
+      if (!EMAIL_PATTERN.test(contact)) throw new ValidationError('contact is not an email address');
+      emailTo = contact;
+    }
+    const emailStatus: FeedbackEmailStatus = emailTo ? 'pending' : 'skipped';
+
+    const replyId = await this.feedbackRepo.createReplyInTx(tx, {
+      feedbackId: id,
+      adminUserId: actorUserId,
+      body: text,
+      emailStatus,
+      emailTo,
+    });
+    await this.feedbackRepo.markTriagedIfNewInTx(tx, id);
+    await this.auditWriter.writeInTx(tx, {
+      eventType: 'admin.feedback.replied',
+      result: 'success',
+      actorUserId,
+      actorRole: 'platform_admin',
+      targetType: 'feedback',
+      targetId: String(id),
+      // 审计不落回复正文与收件地址，只记投递方式。
+      reason: `email:${emailTarget}`,
+    });
+    return { replyId, emailStatus, email: emailTo ? { to: emailTo, originalContent: fb.content } : null };
+  }
+
+  /** 提交后投递回复邮件；失败只记状态，不影响已提交的站内回复。 */
+  async sendFeedbackReplyEmail(replyId: number, to: string, reply: string, originalContent: string): Promise<'sent' | 'failed'> {
+    if (!this.emailSender) {
+      await this.feedbackRepo.updateReplyEmail(replyId, 'failed', 'email sender not configured');
+      return 'failed';
+    }
+    try {
+      await this.emailSender.sendFeedbackReplyEmail({ to, reply: reply.trim(), originalContent });
+      await this.feedbackRepo.updateReplyEmail(replyId, 'sent', null);
+      return 'sent';
+    } catch (err) {
+      // 只记录错误类别，不落 SMTP 响应全文（可能含服务器细节）。
+      const message = err instanceof Error ? err.name || 'Error' : 'Error';
+      await this.feedbackRepo.updateReplyEmail(replyId, 'failed', `send failed: ${message}`).catch(() => undefined);
+      return 'failed';
+    }
+  }
+
   async getOverview(actorUserId: number): Promise<AdminOverview> {
     await this.auditRestrictedRead(actorUserId, 'admin.overview.read');
-    return this.feedbackRepo.overview();
+    const [base, telemetry] = await Promise.all([
+      this.feedbackRepo.overview(),
+      this.telemetryRepo.overview(),
+    ]);
+    return { ...base, telemetry };
   }
 
   async queryAudit(actorUserId: number, input: AuditFilter): Promise<Page<AuditEvent>> {

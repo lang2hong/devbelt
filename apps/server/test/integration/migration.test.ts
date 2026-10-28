@@ -25,7 +25,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
         'users', 'plans', 'plan_feature_defs', 'plan_feature_values',
         'personal_subscriptions',
         'orders', 'payments', 'invoices', 'audit_events', 'personal_sync_state',
-        'ai_token_usage',
+        'ai_token_usage', 'extension_installs', 'feedback_replies',
       ]) {
         expect(names).toContain(t);
       }
@@ -159,9 +159,10 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       const tableNames = names.map((r) => Object.values(r)[0] as string);
       expect(tableNames).toContain('plans');
       expect(tableNames).toContain('user_feedback');
+      expect(tableNames).toContain('extension_installs');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies']);
     } finally {
       await pool.end();
     }

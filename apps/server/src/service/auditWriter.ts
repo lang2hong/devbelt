@@ -32,6 +32,7 @@ const ALLOWED_EVENT_TYPES = [
   'admin.plans.read',
   'admin.feedback.read',
   'admin.feedback.updated',
+  'admin.feedback.replied',
   'admin.overview.read',
   'admin.plan.updated',
   'admin.plan_feature_def.updated',

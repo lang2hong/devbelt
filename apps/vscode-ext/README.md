@@ -141,6 +141,18 @@ code --install-extension lang2hong.devbelt-db-client
 - Redis, Elasticsearch and AI features are available and continue to receive real-world hardening.
 - Personal sync is E2EE and opt-in; dual-device installed-build validation is pending.
 
+### Telemetry
+
+DevBelt sends at most one anonymous heartbeat per installation per day to count installs and active installations. The payload contains a random installation ID stored locally, the extension version, OS/architecture, and whether the window is remote. It never contains your email, account, connection details, queries, or IP address.
+
+Heartbeats are sent only when VS Code telemetry is enabled and `devbelt.telemetry.enabled` is on (default). Set `devbelt.telemetry.enabled` to `false` to opt out. Uninstall statistics are not collected; an installation is counted when it first activates. Remote/Codespaces windows use a separate extension host and may be counted as separate installations.
+
+### Feedback
+
+The **Feedback** sidebar sends feedback straight to the DevBelt team; no sign-in required. Each submission includes the random installation ID, the extension version and OS. When you are signed in, the feedback is linked to your account.
+
+Replies from the DevBelt team appear under **My feedback & replies** in the same panel. They are fetched when you open the panel, click **Refresh**, or submit feedback; they are not pushed in real time. Anonymous replies are tied to this installation through a random reply key kept in VS Code's secret storage, so they are lost if that storage is cleared; replies to signed-in feedback follow your account. If you leave an email address, the team may also send the reply by email.
+
 ### Documentation
 
 - [Product overview](https://github.com/lang2hong/devbelt)

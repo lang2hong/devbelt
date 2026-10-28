@@ -30,15 +30,25 @@ export interface EmailSender {
     to: string;
     displayName?: string;
   }): Promise<void>;
+  /**
+   * 发送反馈回复通知（管理员手动触发）。`reply` / `originalContent` 为用户或管理员
+   * 输入的纯文本，实现必须转义后再放入 HTML。
+   */
+  sendFeedbackReplyEmail(input: {
+    to: string;
+    reply: string;
+    originalContent: string;
+  }): Promise<void>;
 }
 
 /** 收件箱捕获（测试替身用）：记录发送出去的邮件，供断言。 */
 export interface SentEmail {
-  kind: 'verification' | 'already_registered' | 'reset_challenge' | 'account_recovery_activity';
+  kind: 'verification' | 'already_registered' | 'reset_challenge' | 'account_recovery_activity' | 'feedback_reply';
   to: string;
   token?: string;
   displayName?: string;
   expiresTime?: Date;
+  reply?: string;
 }
 
 /**
@@ -62,6 +72,10 @@ export class MemoryEmailSender implements EmailSender {
   async sendAccountRecoveryActivityEmail(input: { to: string; displayName?: string }): Promise<void> {
     this.sent.push({ kind: 'account_recovery_activity', to: input.to, displayName: input.displayName });
   }
+
+  async sendFeedbackReplyEmail(input: { to: string; reply: string; originalContent: string }): Promise<void> {
+    this.sent.push({ kind: 'feedback_reply', to: input.to, reply: input.reply });
+  }
 }
 
 /**
@@ -84,5 +98,10 @@ export class LogEmailSender implements EmailSender {
 
   async sendAccountRecoveryActivityEmail(input: { to: string; displayName?: string }): Promise<void> {
     console.info(`[email:stub] account recovery activity email would be sent to ${input.to}`);
+  }
+
+  async sendFeedbackReplyEmail(input: { to: string; reply: string; originalContent: string }): Promise<void> {
+    // 不打印正文：回复/原反馈可能含用户信息。
+    console.info(`[email:stub] feedback reply email would be sent to ${input.to}`);
   }
 }
