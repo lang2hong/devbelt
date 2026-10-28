@@ -119,6 +119,20 @@ async function build(rateLimit = false) {
   const rateLimiter = new RateLimitService(new FakeRateLimitRepo(), rateLimit);
 
   const adminService = new ConsoleAdminService({
+    feedbackRepo: {
+      create: async () => 0,
+      list: async () => ({ items: [], nextId: null, total: 0 }),
+      updateStatusInTx: async () => false,
+      overview: async () => ({
+        users: { total: 0, new7d: 0, active7d: 0 },
+        devices: { active: 0, platforms: [], versions: [] },
+        sync: { connectionMetas: 0, storageBytes: 0 },
+        ai: { monthTokens: 0, monthRequests: 0 },
+        billing: { paidOrders30d: 0, revenueCents30d: 0 },
+        feedback: { newCount: 0, byStatus: [] },
+      }),
+    } as never,
+
     userRepo,
     refreshTokenRepo,
     planRepo,

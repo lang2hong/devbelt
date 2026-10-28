@@ -29,6 +29,7 @@ import { validateFeatureValue, FREE_PLAN_CODES } from '../../billing/service/pla
 import type { RateLimitService } from '../../../service/rateLimitService.js';
 import type { SyncRecordService } from '../../db/service/syncRecordService.js';
 import type { SyncRecordMetadataRow } from '../../../repository/interfaces.js';
+import type { AdminOverview, FeedbackFilter, IFeedbackRepo } from '../../../repository/interfaces/feedback.js';
 
 /** 平台审计导出单次上限（§6）。 */
 const MAX_EXPORT_ROWS = 10_000;
@@ -73,6 +74,8 @@ export interface ConsoleAdminDeps {
   syncRecordService: SyncRecordService;
   /** 可选：用于受限读审计按 5min 窗口聚合（防高频读刷爆审计表）。 */
   rateLimiter?: RateLimitService;
+  /** 用户反馈（015）。 */
+  feedbackRepo: IFeedbackRepo;
 }
 
 /** P6：后台按明文类型展示的密文元数据行（不含明文）。 */
@@ -108,6 +111,7 @@ export class ConsoleAdminService {
   private readonly syncStateRepo: ISyncStateRepo;
   private readonly syncRecordService: SyncRecordService;
   private readonly rateLimiter?: RateLimitService;
+  private readonly feedbackRepo: IFeedbackRepo;
 
   constructor(deps: ConsoleAdminDeps) {
     this.userRepo = deps.userRepo;
@@ -122,6 +126,7 @@ export class ConsoleAdminService {
     this.syncStateRepo = deps.syncStateRepo;
     this.syncRecordService = deps.syncRecordService;
     this.rateLimiter = deps.rateLimiter;
+    this.feedbackRepo = deps.feedbackRepo;
   }
 
   // ── 用户 ──
@@ -132,7 +137,7 @@ export class ConsoleAdminService {
    */
   private async auditRestrictedRead(
     actorUserId: number,
-    eventType: 'admin.users.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read' | 'admin.plans.read',
+    eventType: 'admin.users.read' | 'admin.audit.read' | 'admin.orders.read' | 'admin.invoices.read' | 'admin.plans.read' | 'admin.feedback.read' | 'admin.overview.read',
   ): Promise<void> {
     if (!this.rateLimiter) {
       this.auditWriter.write({ eventType, result: 'success', actorUserId, actorRole: 'platform_admin' });
@@ -556,6 +561,40 @@ export class ConsoleAdminService {
     if (from.getTime() > to.getTime()) throw new ValidationError('invalid audit time range');
     if (to.getTime() - from.getTime() > MAX_AUDIT_SPAN_MS) throw new ValidationError('audit time span exceeds 31 days');
     return { fromTime: from, toTime: to };
+  }
+
+  // ── 反馈 / 概览 ──
+
+  async listFeedback(actorUserId: number, input: Omit<FeedbackFilter, 'limit'> & { limit: number }) {
+    await this.auditRestrictedRead(actorUserId, 'admin.feedback.read');
+    return this.feedbackRepo.list(input);
+  }
+
+  async updateFeedbackInTx(
+    tx: Queryable,
+    actorUserId: number,
+    id: number,
+    status: 'new' | 'triaged' | 'done' | 'rejected',
+    adminNote: string | null,
+  ): Promise<boolean> {
+    const ok = await this.feedbackRepo.updateStatusInTx(tx, id, status, adminNote);
+    if (ok) {
+      this.auditWriter.writeInTx(tx, {
+        eventType: 'admin.feedback.updated',
+        result: 'success',
+        actorUserId,
+        actorRole: 'platform_admin',
+        targetType: 'feedback',
+        targetId: String(id),
+        reason: adminNote ?? status,
+      });
+    }
+    return ok;
+  }
+
+  async getOverview(actorUserId: number): Promise<AdminOverview> {
+    await this.auditRestrictedRead(actorUserId, 'admin.overview.read');
+    return this.feedbackRepo.overview();
   }
 
   async queryAudit(actorUserId: number, input: AuditFilter): Promise<Page<AuditEvent>> {

@@ -310,7 +310,7 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   context.subscriptions.push(ToolsViewProvider.register());
 
   // 侧边栏「反馈」视图：Bug 反馈、功能建议、文档、评价入口。
-  context.subscriptions.push(FeedbackViewProvider.register());
+  context.subscriptions.push(FeedbackViewProvider.register(serverUrl, context.globalState, String(context.extension.packageJSON.version ?? '')));
 
   // 受控同步 session 工厂（阶段 A 无 UI）：activation/locked 态零请求，仅经工厂懒建。
   // 阶段 B 才接入初始化/解锁命令；此处只挂生命周期：logout → 丢弃 session，dispose → 清理。

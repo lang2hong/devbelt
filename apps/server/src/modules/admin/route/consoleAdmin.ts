@@ -17,6 +17,7 @@ import { registerBillingAdminRoutes } from './consoleAdminBilling.js';
 import { registerAuditAdminRoutes } from './consoleAdminAudit.js';
 import { registerPlanAdminRoutes } from './consoleAdminPlans.js';
 import { registerVersionAdminRoutes } from './consoleAdminVersion.js';
+import { registerFeedbackAdminRoutes } from './consoleAdminFeedback.js';
 
 export type { ConsoleAdminRouteOptions } from './consoleAdminContext.js';
 
@@ -51,6 +52,7 @@ export async function consoleAdminRoutes(app: FastifyInstance, opts: ConsoleAdmi
       registerBillingAdminRoutes(child, ctx);
       registerAuditAdminRoutes(child, ctx);
       registerPlanAdminRoutes(child, ctx);
+      registerFeedbackAdminRoutes(child, ctx);
     },
   });
 

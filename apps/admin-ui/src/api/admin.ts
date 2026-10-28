@@ -1050,3 +1050,93 @@ export async function setUserRole(
   }
 }
 
+
+// ── 反馈 / 概览（015） ──
+
+export interface AdminFeedback {
+  id: string;
+  userId: string | null;
+  installId: string | null;
+  category: 'bug' | 'feature' | 'other';
+  content: string;
+  contact: string | null;
+  appVersion: string | null;
+  os: string | null;
+  status: 'new' | 'triaged' | 'done' | 'rejected';
+  adminNote: string | null;
+  sourceIp: string | null;
+  createTime: string;
+  updateTime: string;
+}
+
+export interface FeedbackFilters {
+  status?: string;
+  category?: string;
+  userId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface AdminOverview {
+  users: { total: number; new7d: number; active7d: number };
+  devices: {
+    active: number;
+    platforms: Array<{ platform: string; count: number }>;
+    versions: Array<{ version: string; count: number }>;
+  };
+  sync: { connectionMetas: number; storageBytes: number };
+  ai: { monthTokens: number; monthRequests: number };
+  billing: { paidOrders30d: number; revenueCents30d: number };
+  feedback: { newCount: number; byStatus: Array<{ status: string; count: number }> };
+}
+
+export async function getOverview(
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<AdminOverview>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch('/api/admin/overview', { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as AdminOverview };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function queryFeedback(
+  filters: FeedbackFilters = {},
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<Page<AdminFeedback>>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(`/api/admin/feedback${qs(filters)}`, { headers: auth(token) }, fetchImpl);
+    if (res.ok) return { kind: 'ok', value: await toPage<AdminFeedback>(res) };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function setFeedbackStatus(
+  id: string,
+  input: { status: 'new' | 'triaged' | 'done' | 'rejected'; adminNote: string | null },
+  idempotencyKey: string,
+  csrfToken: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<{ id: string; status: string }>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/feedback/${id}`,
+      { method: 'PATCH', headers: write(csrfToken, token, idempotencyKey), body: JSON.stringify(input) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: (await res.json()) as { id: string; status: string } };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}

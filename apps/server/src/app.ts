@@ -64,6 +64,9 @@ import { consoleAuthRoutes } from './modules/auth/route/consoleAuth.js';
 import { consoleMeRoutes } from './modules/auth/route/consoleMe.js';
 import { consoleDataRoutes } from './modules/db/route/consoleData.js';
 import { consoleAdminRoutes } from './modules/admin/route/consoleAdmin.js';
+import { MysqlFeedbackRepo } from './modules/feedback/repository/feedbackRepo.js';
+import { FeedbackService } from './modules/feedback/service/feedbackService.js';
+import { publicFeedbackRoutes } from './modules/feedback/route/publicFeedback.js';
 import { consoleAiTopupRoutes } from './modules/admin/route/consoleAiTopup.js';
 import { consoleAiProvidersRoutes } from './modules/admin/route/consoleAiProviders.js';
 import { consoleAiBillingRoutes } from './modules/admin/route/consoleAiBilling.js';
@@ -279,6 +282,8 @@ export async function createApp() {
     (fn) => withTransaction(app.mysql, fn),
     auditWriter,
   );
+  const feedbackRepo = new MysqlFeedbackRepo(getMysql);
+  const feedbackService = new FeedbackService(feedbackRepo);
   const adminService = new ConsoleAdminService({
     userRepo,
     refreshTokenRepo,
@@ -292,6 +297,7 @@ export async function createApp() {
     syncStateRepo,
     syncRecordService,
     rateLimiter,
+    feedbackRepo,
   });
   const cursorService = new CursorService(deriveCursorKey());
 
@@ -394,6 +400,7 @@ export async function createApp() {
   app.register(authRoutes, { authService, tokenService, getUser, getSessionActive, auditWriter, csrfService, consoleOrigin: config.consoleOrigin });
   app.register(meRoutes, { tokenService, getUser, getSessionActive, userRepo, personalSubscriptionRepo, planRepo });
   app.register(plansRoutes, { tokenService, getUser, getSessionActive, planRepo, featureDefRepo });
+  app.register(publicFeedbackRoutes, { service: feedbackService, rateLimiter });
   app.register(aiRoutes, {
     tokenService,
     getUser,

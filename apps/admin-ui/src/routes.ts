@@ -8,7 +8,9 @@ import type { RouteConfig } from './lib/router';
  * `ADMIN_DEFAULT_PATH`。
  */
 export const ADMIN_ROUTES: RouteConfig[] = [
-  { pattern: '/', name: 'admin-users' },
+  { pattern: '/', name: 'admin-overview' },
+  { pattern: '/overview', name: 'admin-overview' },
+  { pattern: '/feedback', name: 'admin-feedback' },
   { pattern: '/users', name: 'admin-users' },
   { pattern: '/users/:id', name: 'admin-user-detail' },
   { pattern: '/orders', name: 'admin-orders' },
@@ -22,4 +24,4 @@ export const ADMIN_ROUTES: RouteConfig[] = [
 ];
 
 /** 默认落地路径（`/` 规范化目标）。 */
-export const ADMIN_DEFAULT_PATH = '/users';
+export const ADMIN_DEFAULT_PATH = '/overview';

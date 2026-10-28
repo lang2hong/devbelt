@@ -4,7 +4,9 @@ import { router, navigate, withBase } from '../lib/router';
 /** 分组导航：按运营动线归类，避免 9 个平级入口。 */
 const groups = [
   { title: '运营', links: [
+    { name: 'admin-overview', path: '/overview', label: '概览' },
     { name: 'admin-users', path: '/users', label: '用户' },
+    { name: 'admin-feedback', path: '/feedback', label: '反馈' },
     { name: 'admin-orders', path: '/orders', label: '订单' },
     { name: 'admin-invoices', path: '/invoices', label: '发票' },
   ] },

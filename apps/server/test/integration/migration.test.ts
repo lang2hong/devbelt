@@ -158,9 +158,10 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       const [names] = (await pool.query('SHOW TABLES')) as [Array<Record<string, unknown>>, unknown];
       const tableNames = names.map((r) => Object.values(r)[0] as string);
       expect(tableNames).toContain('plans');
+      expect(tableNames).toContain('user_feedback');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback']);
     } finally {
       await pool.end();
     }

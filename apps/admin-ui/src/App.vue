@@ -17,6 +17,8 @@ import AdminAiTopupView from './pages/AdminAiTopupView.vue';
 import AdminAiProvidersView from './pages/AdminAiProvidersView.vue';
 import AdminAiBillingView from './pages/AdminAiBillingView.vue';
 import AdminVersionView from './pages/AdminVersionView.vue';
+import AdminOverviewView from './pages/AdminOverviewView.vue';
+import AdminFeedbackView from './pages/AdminFeedbackView.vue';
 
 installRouter(ADMIN_ROUTES);
 
@@ -29,6 +31,8 @@ const logoutError = ref(false);
 
 const view = computed<{ comp: Component | null; props: Record<string, unknown> }>(() => {
   switch (router.name) {
+    case 'admin-overview': return { comp: AdminOverviewView, props: {} };
+    case 'admin-feedback': return { comp: AdminFeedbackView, props: {} };
     case 'admin-users': return { comp: AdminUsersView, props: {} };
     case 'admin-user-detail': return { comp: AdminUserDetailView, props: { userId: router.params.id ?? '' } };
     case 'admin-orders': return { comp: AdminOrdersView, props: {} };
@@ -46,7 +50,7 @@ const view = computed<{ comp: Component | null; props: Record<string, unknown> }
 function redirectToLogin(): void {
   const p = stripBase(window.location.pathname);
   // 本地先过 safeReturnTo，不依赖登录页兜底：即使登录页未来漏了校验，也不会带出开放重定向。
-  const ret = safeReturnTo(p === '/' ? '/users' : p);
+  const ret = safeReturnTo(p === '/' ? ADMIN_DEFAULT_PATH : p);
   window.location.assign(`/login?returnTo=${encodeURIComponent(`/admin${ret}`)}`);
 }
 
