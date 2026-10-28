@@ -252,6 +252,10 @@ export interface SyncDoctorResultMessage extends WebviewMessage {
   failed: number;
   pushed?: number;
   pending?: number;
+  /** 被权益/版本阻止、未做任何修改的条数。 */
+  blocked?: number;
+  /** 阻止原因，用于选择提示文案。 */
+  blockedBy?: 'entitlement' | 'unsupported';
 }
 
 // ────────────────────────── P5：2FA/TOTP 验证器协议 ──────────────────────────

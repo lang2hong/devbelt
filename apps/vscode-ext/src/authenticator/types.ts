@@ -72,17 +72,25 @@ export const TAGS_KEY = 'devbelt.authenticator.tags';
 export const SECRET_KEY_PREFIX = 'devbelt.authenticator.';
 export const SECRET_KEY_SUFFIX = '.secret';
 
-/** 拼 SecretStorage 键：`devbelt.authenticator.<id>.secret`。 */
-export function secretKey(id: string): string {
-  return `${SECRET_KEY_PREFIX}${id}${SECRET_KEY_SUFFIX}`;
+/**
+ * 拼 SecretStorage 键：
+ * - 未登录（`local`）：`devbelt.authenticator.<id>.secret`（保持旧格式，兼容已有数据）；
+ * - 已登录：`devbelt.authenticator.u.<scope>.<id>.secret`，与连接凭据同一套作用域语义。
+ */
+export function secretKey(id: string, scope: string = 'local'): string {
+  const prefix = scope === 'local' ? SECRET_KEY_PREFIX : `${SECRET_KEY_PREFIX}u.${scope}.`;
+  return `${prefix}${id}${SECRET_KEY_SUFFIX}`;
 }
 
 /**
- * 从 SecretStorage key 反解 entry id；不属于 authenticator 命名空间返回 null，
- * 供 secrets.onDidChange 回调过滤其他模块（连接凭据）的密钥变更。
+ * 从 SecretStorage key 反解当前作用域下的 entry id；不属于当前作用域返回 null。
+ * 供 secrets.onDidChange 回调过滤其他模块（连接凭据）与**其他账号**的密钥变更。
  */
-export function parseSecretKey(key: string): string | null {
-  if (!key.startsWith(SECRET_KEY_PREFIX) || !key.endsWith(SECRET_KEY_SUFFIX)) return null;
-  const id = key.slice(SECRET_KEY_PREFIX.length, key.length - SECRET_KEY_SUFFIX.length);
-  return id || null;
+export function parseSecretKey(key: string, scope: string = 'local'): string | null {
+  const prefix = scope === 'local' ? SECRET_KEY_PREFIX : `${SECRET_KEY_PREFIX}u.${scope}.`;
+  if (!key.startsWith(prefix) || !key.endsWith(SECRET_KEY_SUFFIX)) return null;
+  const id = key.slice(prefix.length, key.length - SECRET_KEY_SUFFIX.length);
+  // 未登录时不把 `u.<scope>.<id>` 误认成 entry id
+  if (!id || id.includes('.')) return null;
+  return id;
 }

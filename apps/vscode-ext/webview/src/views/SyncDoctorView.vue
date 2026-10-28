@@ -37,17 +37,20 @@ onMounted(() => {
       lastCheckAt.value = snap.lastCheckAt;
     } else if (msg?.type === 'syncDoctorResult') {
       const r = msg as SyncDoctorResultMessage;
-      if ((r.pushed ?? 0) > 0) {
-        resultBanner.value = (r.repaired > 0)
-          ? `${t('sync.doctorResult', { repaired: r.repaired })} ${t('sync.doctorPushed', { count: r.pushed })}`
-          : t('sync.doctorPushed', { count: r.pushed });
-      } else if ((r.pending ?? 0) > 0) {
-        resultBanner.value = t('sync.doctorQueued', { count: r.pending });
-      } else if (r.failed > 0) {
-        resultBanner.value = t('sync.doctorResultPartial', { repaired: r.repaired, failed: r.failed });
-      } else {
-        resultBanner.value = t('sync.doctorResult', { repaired: r.repaired });
+      // 组合所有计数：修复 / 推送 / 入队 / 被权益阻止 / 失败。
+      // blocked 必须单独显示——它没有修改任何数据，若只报「已修复」用户会反复重试。
+      const bits: string[] = [];
+      if (r.repaired > 0) bits.push(t('sync.doctorResult', { repaired: r.repaired }));
+      if ((r.pushed ?? 0) > 0) bits.push(t('sync.doctorPushed', { count: r.pushed }));
+      if ((r.pending ?? 0) > 0) bits.push(t('sync.doctorQueued', { count: r.pending }));
+      if ((r.blocked ?? 0) > 0) {
+        bits.push(t(
+          r.blockedBy === 'entitlement' ? 'sync.doctorBlockedEntitlement' : 'sync.doctorBlockedUnsupported',
+          { count: r.blocked },
+        ));
       }
+      if (r.failed > 0) bits.push(t('sync.doctorFailed', { count: r.failed }));
+      resultBanner.value = bits.length > 0 ? bits.join(' ') : t('sync.doctorResult', { repaired: r.repaired });
     }
   });
   post({ type: 'ready' });

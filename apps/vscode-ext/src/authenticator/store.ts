@@ -54,6 +54,7 @@ import {
   secretKey,
   parseSecretKey,
 } from './types';
+import { accountScope, readScoped, writeScoped } from '../sync/accountScope';
 
 /**
  * 最小日志句柄——默认走 console，extension.ts 换成 diagnostics 通道，
@@ -146,16 +147,17 @@ export class AuthenticatorStore implements VscodeDisposable {
    * 必须在 provider / 命令注册之前 await 完成；不抛异常中断激活。
    */
   async init(): Promise<void> {
-    this.entries = this.memento.get<AuthenticatorEntry[]>(ENTRIES_KEY) ?? [];
-    this.groups = this.memento.get<AuthenticatorGroup[]>(GROUPS_KEY) ?? [];
-    this.tags = this.memento.get<AuthenticatorTag[]>(TAGS_KEY) ?? [];
+    // 按账号作用域读取（登录后首次读取会把旧键数据复制到当前作用域，旧键保留）。
+    this.entries = readScoped<AuthenticatorEntry[]>(this.memento, ENTRIES_KEY) ?? [];
+    this.groups = readScoped<AuthenticatorGroup[]>(this.memento, GROUPS_KEY) ?? [];
+    this.tags = readScoped<AuthenticatorTag[]>(this.memento, TAGS_KEY) ?? [];
     // 无「未分组」语义：把历史无分组/孤儿 groupId 归入第一个分组（一个分组都没有时留待建组后自愈）。
     if (this.healUngroupedEntries()) await this.saveEntries();
     this.secretCache.clear();
     this.missingSecrets.clear();
     await Promise.all(this.entries.filter((e) => !e.deleted).map(async (e) => {
       try {
-        const v = await this.secrets.get(secretKey(e.id));
+        const v = await this.readSecret(e.id);
         this.applySecretValue(e.id, v);
       } catch (err) {
         // 单条失败不阻断整批预热，标记为缺失由 UI 显示灰色条
@@ -168,7 +170,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     //  1) 条目已不在本 store 时直接忽略（deleteEntry 后的自写回调不污染 missingSecrets）；
     //  2) 仅当缓存状态确实变化才 publish（addEntry 自写不再产生多余快照刷新）。
     this.secretEventsSub = this.secrets.onDidChange((e) => {
-      const id = parseSecretKey(e.key);
+      const id = parseSecretKey(e.key, accountScope());
       if (id === null) return;
       void (async () => {
         try {
@@ -286,9 +288,38 @@ export class AuthenticatorStore implements VscodeDisposable {
   }
 
   // memento 写入封装：所有写操作最终走这些函数，便于将来加 diff/审计。
-  private async saveEntries(): Promise<void> { await this.memento.update(ENTRIES_KEY, this.entries); }
-  private async saveGroups(): Promise<void> { await this.memento.update(GROUPS_KEY, this.groups); }
-  private async saveTags(): Promise<void> { await this.memento.update(TAGS_KEY, this.tags); }
+  private async saveEntries(): Promise<void> { await writeScoped(this.memento, ENTRIES_KEY, this.entries); }
+  private async saveGroups(): Promise<void> { await writeScoped(this.memento, GROUPS_KEY, this.groups); }
+  private async saveTags(): Promise<void> { await writeScoped(this.memento, TAGS_KEY, this.tags); }
+
+  /**
+   * 读当前账号作用域下的 secret；登录且该作用域尚无数据时，把旧（未隔离）键的值复制过来。
+   * 只复制、不删除旧键，迁移失败时仍可回退。
+   */
+  private async readSecret(id: string): Promise<string | undefined> {
+    const scope = accountScope();
+    const scoped = await this.secrets.get(secretKey(id, scope));
+    if (scoped !== undefined || scope === 'local') return scoped;
+    const legacy = await this.secrets.get(secretKey(id, 'local'));
+    if (legacy !== undefined) await this.secrets.store(secretKey(id, scope), legacy);
+    return legacy;
+  }
+
+  /**
+   * 账号切换后重新加载：清空内存状态与缓存，按新作用域重新 init。
+   * 由 extension 的作用域切换回调在刷新视图之前调用。
+   */
+  async reload(): Promise<void> {
+    this.secretEventsSub?.dispose();
+    this.secretEventsSub = undefined;
+    this.entries = [];
+    this.groups = [];
+    this.tags = [];
+    this.secretCache.clear();
+    this.missingSecrets.clear();
+    this.initialized = false;
+    await this.init();
+  }
 
   private publish(kind: 'entry' | 'group' | 'tag', op: 'create' | 'update' | 'delete', id: string): void {
     void eventBus.publish(new AuthenticatorChangedEvent(kind, op, id));
@@ -347,7 +378,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     };
     // 事务顺序：先写 secret，成功后才动 memento——secret 写失败不产生孤儿索引
     try {
-      await this.secrets.store(secretKey(id), canonicalSecret);
+      await this.secrets.store(secretKey(id, accountScope()), canonicalSecret);
     } catch (err) {
       this.log.error('authenticator add secret storage failed', String(err));
       return { ok: false, reason: 'storageError', message: String(err) };
@@ -412,7 +443,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     }
     if (newSecret !== undefined) {
       try {
-        await this.secrets.store(secretKey(id), newSecret);
+        await this.secrets.store(secretKey(id, accountScope()), newSecret);
       } catch (err) {
         this.log.error('authenticator update secret storage failed', String(err));
         return { ok: false, reason: 'storageError' };
@@ -448,7 +479,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     if (!id) throw new Error('upsertFromSync requires an explicit id');
     const canonical = canonicalizeSecret(secret);
     if (!canonical) throw new Error('upsertFromSync requires a non-empty secret');
-    await this.secrets.store(secretKey(id), canonical);
+    await this.secrets.store(secretKey(id, accountScope()), canonical);
     this.secretCache.set(id, canonical);
     this.missingSecrets.delete(id);
     const next: AuthenticatorEntry = { ...entry, tags: [...entry.tags], deleted: false };
@@ -465,7 +496,7 @@ export class AuthenticatorStore implements VscodeDisposable {
   async removeFromSync(id: string): Promise<void> {
     this.assertInit();
     try {
-      await this.secrets.delete(secretKey(id));
+      await this.secrets.delete(secretKey(id, accountScope()));
     } catch (err) {
       this.log.warn('authenticator removeFromSync secret delete failed', String(err));
     }
@@ -544,7 +575,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     this.assertInit();
     // 事务顺序：先删 secret，成功后再改 memento；secret 删除失败索引不动，避免 orphan secret
     try {
-      await this.secrets.delete(secretKey(id));
+      await this.secrets.delete(secretKey(id, accountScope()));
     } catch (err) {
       this.log.error('authenticator delete secret failed', String(err));
       return { ok: false, reason: 'storageError' };
@@ -663,7 +694,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     const deleted: string[] = [];
     for (const e of members) {
       try {
-        await this.secrets.delete(secretKey(e.id));
+        await this.secrets.delete(secretKey(e.id, accountScope()));
         this.secretCache.delete(e.id);
         this.missingSecrets.delete(e.id);
         e.deleted = true;
@@ -832,7 +863,7 @@ export class AuthenticatorStore implements VscodeDisposable {
     const failed: string[] = [];
     for (const e of this.entries) {
       try {
-        await this.secrets.delete(secretKey(e.id));
+        await this.secrets.delete(secretKey(e.id, accountScope()));
         this.secretCache.delete(e.id);
         this.missingSecrets.delete(e.id);
       } catch (err) {

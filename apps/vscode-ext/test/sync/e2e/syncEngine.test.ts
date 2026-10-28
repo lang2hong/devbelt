@@ -1089,7 +1089,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(report.findings).toEqual([]); // 有待推出站 → 尊重意图，不产生发现
 
     const r = await eng.repairFindings();
-    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
     expect(client.putRecordSigned).not.toHaveBeenCalled();
     expect(client.deleteRecordSigned).not.toHaveBeenCalled();
   });
@@ -1108,7 +1108,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(report.findings).toEqual([]);
     expect(report.incomplete).toBe(false);
     const r = await eng.repairFindings();
-    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
   });
 
   it('repairLocalMissing：本地墓碑 + 云端存活 → 复活（清 deleted）', async () => {
@@ -1129,6 +1129,56 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(r).toMatchObject({ cloud: 1, failed: 0 });
     expect((await eng.inspectFindings()).findings).toEqual([]);
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBeFalsy();
+  });
+
+  it('repairFindings：云端记录引擎不在套餐内 → blocked，不谎报已修复', async () => {
+    // 复现用户场景：本地删除了一个 Elasticsearch 连接，云端仍在，点「使用云端」。
+    // Free 套餐不允许 ES 个人连接 → applyRecord 返回 skipped-entitlement。
+    // 修复必须报告 blocked 而不是 cloud，否则体检会无限重复同一条。
+    const id = 'A'.repeat(22);
+    const mapStore = new RecordMapStore(makeMemento(), '7', '1');
+    await mapStore.put(id, { type: 'connection', localId: 'c-es', recordVersion: '1', revision: 0, status: 'confirmed' });
+    const store = makeStore([
+      { id: 'c-es', name: '订单', dbType: 'ELASTICSEARCH', host: 'h', port: 9200, deleted: true, updateTime: 0 } as unknown as SavedConnection,
+    ]);
+    const esRecord = (() => {
+      const conn = { id: 'c-old', name: '订单', dbType: 'ELASTICSEARCH', host: 'h', port: 9200 } as unknown as SavedConnection;
+      const payload = encodeRecordPayload(conn);
+      const nonce = new Uint8Array(12);
+      const box = sealRecord(
+        new Uint8Array(32),
+        nonce,
+        new Uint8Array(Buffer.from(JSON.stringify(payload), 'utf8')),
+        { userId: '7', keyEpoch: '1', recordId: id, recordVersion: '2' },
+      );
+      return {
+        recordId: id, version: '2', changeSequence: '5', deleteTime: null,
+        cipherSuite: 'AES-256-GCM', formatVersion: 1,
+        nonce: u8(nonce), ciphertext: u8(box.ciphertext), tag: u8(box.tag),
+      };
+    })();
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [esRecord] })),
+    });
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client,
+      stateStore: makeStateStore(SNAP) as never,
+      mapStore,
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      entities: new EntityStore(store),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-new-1',
+      entitlement: () => ({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite'], maxDevices: 2, maxSavedConnections: 10, allowConnectionImport: false }),
+      seedConflictCarrier: seedConflictStub,
+    });
+
+    expect((await eng.inspectFindings()).findings).toHaveLength(1);
+    const r = await eng.repairFindings();
+    expect(r).toMatchObject({ cloud: 0, blocked: 1, blockedBy: 'entitlement', failed: 0 });
+    // 本地仍是墓碑，云端也没被改：数据没有静默丢失或被误合并。
+    expect((store.get('c-es') as unknown as { deleted?: boolean } | undefined)?.deleted).toBe(true);
   });
 
   it('repairLocalMissing：本地墓碑 + 云端墓碑 → 应用墓碑并删映射（向云端收敛）', async () => {
@@ -1174,7 +1224,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(r.cloud).toBe(1);
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBeFalsy();
     const again = await eng.repairFindings();
-    expect(again).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(again).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
   });
 
   it('孤儿墓碑有待推出站（真实删除意图）→ 尊重意图：不检出、不修复也不拉取', async () => {
@@ -1192,7 +1242,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const report = await eng.inspectFindings();
     expect(report.findings).toEqual([]);
     const r = await eng.repairFindings();
-    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
     expect(client.putRecordSigned).not.toHaveBeenCalled();
     expect(client.deleteRecordSigned).not.toHaveBeenCalled();
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBe(true);
@@ -1208,7 +1258,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store: makeStore() });
 
     const r = await eng.repairFindings();
-    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
     expect(client.getRecords).not.toHaveBeenCalled();
   });
 
@@ -1226,7 +1276,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect(report.incomplete).toBe(true);
     expect(report.findings).toEqual([]);
     const r = await eng.repairFindings();
-    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
   });
 
   function relinkStore(conn: SavedConnection, groups: Array<{ id: string; name: string }>) {

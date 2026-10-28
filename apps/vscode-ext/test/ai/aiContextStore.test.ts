@@ -13,6 +13,7 @@ import {
   findColumnNote,
   findTableNote,
 } from '../../src/ai/aiContextStore';
+import { scopedMemento, setAccountScope } from '../../src/sync/accountScope';
 
 function makeMemento(): { memento: any; data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
@@ -167,5 +168,29 @@ describe('AiContextStore（连接级域上下文/默认指令）', () => {
     await store.saveTableNote('c4', 'a', 't', { columns: [{ name: 'c', note: 'n' }] });
     await store.clearForConnection('c4');
     expect(store.getSchemaNotes('c4', 'a').tables).toEqual({});
+  });
+});
+
+describe('AiContextStore（账号隔离）', () => {
+  it('域上下文与默认指令按账号隔离，切换账号读到各自的数据', async () => {
+    const { memento } = makeMemento();
+    // extension 的装配方式：包一层 scopedMemento
+    const store = new AiContextStore(scopedMemento(memento));
+
+    setAccountScope('uA');
+    await store.setDomainContext('conn-1', 'A 账号的规则');
+    await store.setDefaultDirectives('conn-1', 'A 指令');
+
+    setAccountScope('uB');
+    expect(store.getDomainContext('conn-1')).toBe('');
+    expect(store.getDefaultDirectives('conn-1')).toBe('');
+    await store.setDomainContext('conn-1', 'B 账号的规则');
+
+    setAccountScope('uA');
+    expect(store.getDomainContext('conn-1')).toBe('A 账号的规则');
+    expect(store.getDefaultDirectives('conn-1')).toBe('A 指令');
+
+    setAccountScope(undefined);
+    expect(store.getDomainContext('conn-1')).toBe('');
   });
 });

@@ -149,11 +149,13 @@ export class SyncDoctorView extends BaseWebView {
         failed: result.failed,
         pushed: result.local,
         pending: result.pending,
+        blocked: result.blocked,
+        ...(result.blockedBy ? { blockedBy: result.blockedBy } : {}),
       });
       // 定向推送在引擎内完成（只发本次点选的 mutation，不动 outbox 其它积压）。
     } catch (err) {
       diagError('sync doctor repair failed', String(err));
-      this.post({ type: 'syncDoctorResult', repaired: 0, failed: 1 });
+      this.post({ type: 'syncDoctorResult', repaired: 0, failed: 1, blocked: 0 });
     }
     await this.check();
   }

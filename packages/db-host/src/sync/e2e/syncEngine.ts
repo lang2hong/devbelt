@@ -126,6 +126,13 @@ export interface RepairOutcome {
   failed: number;
   notFound: number;
   pending: number;
+  /**
+   * 被阻止、未做任何修改的条数（如：套餐不支持该引擎的个人连接、未知引擎）。
+   * 与 `failed` 区分：这不是异常，而是当前权益/版本下无法恢复，需要明确告知用户。
+   */
+  blocked: number;
+  /** blocked 的原因（多条合并时按 entitlement > unsupported 取首个）。 */
+  blockedBy?: 'entitlement' | 'unsupported';
 }
 
 interface RemoteState {
@@ -410,7 +417,7 @@ export class SyncEngine {
    * （失败可重入，writeEntity 自带回滚）。写入全部由用户在体检面板选择触发。
    */
   async repairFindings(ids?: string[], direction: RepairDirection = 'cloud'): Promise<RepairOutcome> {
-    const empty: RepairOutcome = { cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0 };
+    const empty: RepairOutcome = { cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 };
     let remoteState: RemoteState;
     try {
       remoteState = this.parseState(await this.deps.client.getState());
@@ -443,6 +450,8 @@ export class SyncEngine {
     let swept = 0;
     let failed = 0;
     let notFound = 0;
+    let blocked = 0;
+    let blockedBy: 'entitlement' | 'unsupported' | undefined;
     const created: string[] = [];
 
     for (const finding of selected) {
@@ -457,16 +466,30 @@ export class SyncEngine {
       try {
         switch (op) {
           case 'applyCloudPut': {
-            await applyRecord(
+            const applied = await applyRecord(
               { recordId: finding.recordId!, version: rec!.version, tombstone: false, payload: this.openRemotePayload(rec!, this.deps.keyEpoch), force: true },
               ctx,
             );
-            cloud += 1;
+            // 只有真正落地才算修复：被权益/引擎支持拦下时本地与映射都没变，
+            // 若仍计为成功，下一次体检会再次报同一条（用户看到「已修复」却反复出现）。
+            if (applied.disposition === 'created' || applied.disposition === 'updated') {
+              cloud += 1;
+            } else if (applied.disposition === 'skipped-entitlement') {
+              blocked += 1;
+              blockedBy = blockedBy ?? 'entitlement';
+            } else if (applied.disposition === 'skipped-unsupported') {
+              blocked += 1;
+              blockedBy = blockedBy ?? 'unsupported';
+            } else {
+              // skipped（云端版本未前进）/ ignored-tombstone：云端没有可恢复的内容。
+              notFound += 1;
+            }
             break;
           }
           case 'applyCloudTombstone': {
-            await applyRecord({ recordId: finding.recordId!, version: rec!.version, tombstone: true, force: true }, ctx);
-            cloud += 1;
+            const applied = await applyRecord({ recordId: finding.recordId!, version: rec!.version, tombstone: true, force: true }, ctx);
+            if (applied.disposition === 'deleted') cloud += 1;
+            else notFound += 1;
             break;
           }
           case 'pushPut':
@@ -522,7 +545,17 @@ export class SyncEngine {
     } catch {
       /* 引用收敛失败不判修复失败：下次同步仍会收敛 */
     }
-    return { cloud, local: pushed, merged, swept, failed, notFound, pending: created.length - pushed };
+    return {
+      cloud,
+      local: pushed,
+      merged,
+      swept,
+      failed,
+      notFound,
+      pending: created.length - pushed,
+      blocked,
+      ...(blockedBy ? { blockedBy } : {}),
+    };
   }
 
   private async run(phase: SyncPhase = 'both'): Promise<SyncRunResult> {

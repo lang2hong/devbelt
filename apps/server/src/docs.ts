@@ -434,7 +434,7 @@ export const DOCS: readonly DocPage[] = [
       },
       {
         heading: '两步验证（2FA / TOTP）',
-        html: `<p>内置 Authenticator 管理 TOTP 账户（命令 <code>devbelt.authenticator</code>），密钥保存在操作系统钥匙串；支持导出备份。开启 2FA 后登录需要验证码。</p>`,
+        html: `<p>内置 Authenticator 管理 TOTP 账户（命令 <code>devbelt.authenticator</code>），条目与密钥按账号隔离，密钥保存在操作系统钥匙串；支持导出备份。开启 2FA 后登录需要验证码。</p>`,
       },
     ],
   },
@@ -540,7 +540,7 @@ export const DOCS: readonly DocPage[] = [
       },
       {
         heading: '账号数据隔离',
-        html: `<p>登录后，连接、AI Key、对话历史、审计日志与备份全部按账号隔离存储（<code>&lt;base&gt;::u.&lt;userId&gt;</code>）；退出登录回到 <code>local</code> 作用域。</p>
+        html: `<p>登录后，连接、AI Key、对话历史、AI 上下文与自定义规则、验证器（2FA）条目、审计日志与备份全部按账号隔离存储（<code>&lt;base&gt;::u.&lt;userId&gt;</code>）；退出登录回到 <code>local</code> 作用域。</p>
           <p>切换账号时会关闭所有会话与面板、重新加载连接树、暂停后台任务，并提供一次性把本地数据复制到当前账号的选项（只复制，不移动）。</p>`,
       },
       {

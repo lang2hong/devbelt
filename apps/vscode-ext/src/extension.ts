@@ -193,6 +193,9 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
    * 账号切换的收尾：旧账号的会话与结果面板必须立即失效（连接 id 可能在新账号里
    * 指向另一条连接），然后刷新树，并在首次进入该账号时询问是否复制本机数据。
    */
+  /** 验证器 store 在下方创建；启动时本回调会先执行，因此用延迟引用。 */
+  let reloadAuthenticator: (() => Promise<void>) | undefined;
+
   const onAccountSwitched = async (): Promise<void> => {
     TableQueryView.closeAll();
     RedisView.closeAll();
@@ -217,6 +220,9 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     }
     // init 同时把当前账号的密码重新装进缓存（账号里连接 id 与 local 不一定相同）。
     await store.init();
+    // 验证器条目与密钥同样按账号隔离：切换后必须重载，否则会显示上一个账号的 2FA 条目。
+    // 启动阶段本回调先于 authStore 创建执行（那时 init() 已按新作用域读过，无需重载）。
+    if (reloadAuthenticator) await reloadAuthenticator();
     syncHasConnections();
     treeProvider.refresh();
     // 备份计划按账号：先停掉旧账号的计时器，再按当前作用域重新加载。
@@ -266,6 +272,11 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   } catch (err) {
     diagError('authenticator store init failed', String(err));
   }
+  reloadAuthenticator = async () => {
+    await authStore.reload();
+    // 面板若开着，立即按新账号的数据重发快照（否则会停留在上一个账号的条目）。
+    AuthenticatorView.refreshCurrent();
+  };
   // 条目/分组/标签变更 → 已打开的验证器面板重发快照（面板未打开时 no-op）。
   context.subscriptions.push(
     eventBus.subscribe(AuthenticatorChangedEvent, () => AuthenticatorView.refreshCurrent()),
@@ -328,7 +339,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   const authStatusBar = createAuthStatusBar(context, auth);
 
   // P9 S7f：AI 上下文的连接级存储在同步工厂之前建好（schemaNotes 实体后端与 AI 面板共用同一实例）。
-  const aiContextStore = new AiContextStore(context.globalState);
+  // 按账号隔离：域上下文 / 默认指令 / 业务规则跟随当前账号，切换账号后读到的是该账号自己的数据。
+  const aiContextStore = new AiContextStore(scopedMemento(context.globalState));
   // 模型接入：Key 面与同步工厂共用同一实例（aiModelAccess 实体后端出站需读缓存 Key）。
   const aiKeyStore = new AiKeyStore(context.secrets);
   context.subscriptions.push(aiKeyStore);
