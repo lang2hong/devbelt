@@ -100,6 +100,48 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
     }
   });
 
+  it('014_plan_engines_devices：Pro 增加 elasticsearch，设备数 free=2 / pro=5（幂等）', async () => {
+    const pool = createTestPool();
+    const readPlan = async (code: string): Promise<Map<string, unknown>> => {
+      const [rows] = (await pool.query(
+        `SELECT d.feature_key, v.value_json
+           FROM plans p
+           JOIN plan_feature_values v ON v.plan_id = p.id
+           JOIN plan_feature_defs d ON d.id = v.feature_def_id
+          WHERE p.code = ?`,
+        [code],
+      )) as [Array<{ feature_key: string; value_json: unknown }>, unknown];
+      const byKey = new Map<string, unknown>();
+      for (const r of rows) {
+        byKey.set(r.feature_key, typeof r.value_json === 'string' ? JSON.parse(r.value_json) : r.value_json);
+      }
+      return byKey;
+    };
+    try {
+      await dropAll(pool);
+      // 模拟存量库：跑完 013。
+      const legacy = migrations.filter((m) => m.version !== '014_plan_engines_devices');
+      await runMigrations(pool as any, [...legacy], LEGACY_MIGRATION_VERSIONS);
+      const proBefore = await readPlan('pro');
+      expect(proBefore.get('allowedDatabaseTypes')).toEqual(['mysql', 'postgresql', 'sqlite', 'redis']);
+      expect(proBefore.get('maxDevices')).toBe(0);
+      const freeBefore = await readPlan('free');
+      expect(freeBefore.get('maxDevices')).toBe(0);
+
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      const pro = await readPlan('pro');
+      expect(pro.get('allowedDatabaseTypes')).toEqual(['mysql', 'postgresql', 'sqlite', 'redis', 'elasticsearch']);
+      expect(pro.get('maxDevices')).toBe(5);
+      expect((await readPlan('free')).get('maxDevices')).toBe(2);
+
+      // 幂等
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      expect((await readPlan('pro')).get('allowedDatabaseTypes')).toEqual(['mysql', 'postgresql', 'sqlite', 'redis', 'elasticsearch']);
+    } finally {
+      await pool.end();
+    }
+  });
+
   it('accepts a legacy ledger (001–024) and rebuilds via baseline', async () => {
     const pool = createTestPool();
     try {
@@ -118,7 +160,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('plans');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices']);
     } finally {
       await pool.end();
     }

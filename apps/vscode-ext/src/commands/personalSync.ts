@@ -6,7 +6,6 @@ import type { InitialSyncMaterial } from '@devbelt/db-host/sync/keyLifecycle';
 import { createInitialMaterial, newRecoveryCode, unlockDek } from '@devbelt/db-host/sync/keyLifecycle';
 import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
-import { canUseDataSync } from '@devbelt/db-host/sync/entitlementGate';
 import type { FindingsReport } from '@devbelt/db-host/sync/e2e/syncEngine';
 import { l10n } from '../i18n';
 import { diagError, diagInfo } from '../utils/diagnostics';
@@ -396,11 +395,8 @@ async function runExplicitSync(
   op: SyncOp,
   run: (session: SyncSessionPort) => Promise<SyncRun>,
 ): Promise<void> {
-  // 数据同步门禁：走统一 gate（仅当权益明确禁用时拦截，默认允许），不再用动态 cast。
-  if (!canUseDataSync(deps.auth.getCachedEntitlement())) {
-    deps.ui.warn(l10n('entitlement.dataSyncRequired'));
-    return;
-  }
+  // 数据同步本身没有套餐级客户端门禁：真实配额（元数据数 / 空间 / allowDataSync）
+  // 由服务端在写入时裁定，客户端不预先拦截（历史上门禁与 Free/Pro 配置相同，是死门限）。
   const session = await getSession(deps);
   if (!session) return;
   if (!session.isUnlocked) {

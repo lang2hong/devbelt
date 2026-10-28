@@ -19,9 +19,7 @@ import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
   canImportConnections,
-  canExportConnections,
   maxSavedConnections,
-  maxConcurrentConnections,
 } from '@devbelt/db-host/sync/entitlementGate';
 
 async function redisServerVersion(session: RedisConnectionSession): Promise<string> {
@@ -135,13 +133,6 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.openConnection', async (arg?: SavedConnection | DbTreeNode) => {
     const conn = arg instanceof DbTreeNode ? arg.conn : arg ?? getSelectedNode?.()?.conn;
     if (!conn?.id) return;
-    // 并发连接数门禁：已打开则不算新增；0 = 不限。
-    const maxConcurrent = maxConcurrentConnections(auth.getCachedEntitlement());
-    // 「是否已打开」与引擎无关：用 peek()（peekSql 只认 SQL 会话，会在 S2 误判已开的 Redis 连接）。
-    if (maxConcurrent > 0 && !manager.peek(conn.id) && manager.openCount() >= maxConcurrent) {
-      vscode.window.showWarningMessage(l10n('entitlement.maxConnections', { max: maxConcurrent }));
-      return;
-    }
     treeProvider.markOpen(conn.id);
     treeProvider.setConnVersion(conn.id, l10n('tree.connecting'));
     connCtx.setLast(conn);
@@ -203,10 +194,6 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.refresh', () => treeProvider.refresh());
 
   sub('devbelt.exportConnections', async (node?: DbTreeNode) => {
-    if (!canExportConnections(auth.getCachedEntitlement())) {
-      vscode.window.showWarningMessage(l10n('entitlement.exportRequired'));
-      return;
-    }
     const all = store.list();
     if (!all.length) {
       vscode.window.showInformationMessage(l10n('conn.exportNone'));

@@ -24,7 +24,11 @@ export class SyncDoctorView extends BaseWebView {
   private checking = false;
   private lastCheckAt?: number;
 
-  private constructor(private readonly factory: SyncSessionFactory) {
+  private constructor(
+    private readonly factory: SyncSessionFactory,
+    /** 检查/修复前刷新权益：否则套餐刚变更时仍按旧缓存判断（典型：升级后被误拦）。 */
+    private readonly refreshEntitlement: () => Promise<void>,
+  ) {
     super('devbelt.syncDoctor', l10n('sync.doctorTitle'));
   }
 
@@ -34,19 +38,26 @@ export class SyncDoctorView extends BaseWebView {
   }
 
   /** 打开或聚焦面板（单例）。 */
-  static open(factory: SyncSessionFactory): void {
+  static open(factory: SyncSessionFactory, refreshEntitlement: () => Promise<void>): void {
     if (SyncDoctorView.current) {
       SyncDoctorView.current.panel.reveal(vscode.ViewColumn.Active);
       return;
     }
-    SyncDoctorView.current = new SyncDoctorView(factory);
+    SyncDoctorView.current = new SyncDoctorView(factory, refreshEntitlement);
   }
 
   /** 命令注册：`devbelt.syncDoctor` = 打开面板（面板 ready 后自动检查）。 */
-  static register(context: vscode.ExtensionContext, factory: SyncSessionFactory): void {
+  static register(context: vscode.ExtensionContext, factory: SyncSessionFactory, refreshEntitlement: () => Promise<void>): void {
     context.subscriptions.push(
-      vscode.commands.registerCommand('devbelt.syncDoctor', () => SyncDoctorView.open(factory)),
+      vscode.commands.registerCommand('devbelt.syncDoctor', () => SyncDoctorView.open(factory, refreshEntitlement)),
     );
+  }
+
+  /** 检查/修复前统一刷新权益，失败静默（检查继续使用现有缓存）。 */
+  private async refresh(): Promise<void> {
+    try {
+      await this.refreshEntitlement();
+    } catch { /* 网络失败时沿用缓存 */ }
   }
 
   protected async handleMessage(raw: unknown): Promise<void> {
@@ -112,6 +123,7 @@ export class SyncDoctorView extends BaseWebView {
     if (this.checking) return;
     this.checking = true;
     this.postChecking(true);
+    await this.refresh();
     try {
       const session = await this.session();
       if (!session || !session.isUnlocked) {
@@ -137,6 +149,7 @@ export class SyncDoctorView extends BaseWebView {
   }
 
   private async repair(ids?: string[], direction?: 'cloud' | 'local' | 'merge'): Promise<void> {
+    await this.refresh();
     const session = await this.session();
     if (!session?.isUnlocked) return;
     try {

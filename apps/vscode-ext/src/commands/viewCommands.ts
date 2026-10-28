@@ -20,7 +20,6 @@ import { RedisView } from '../result/redisView';
 import { ElasticsearchView } from '../result/elasticsearchView';
 import { deletePatternPrefill, redisPrefixPattern, toRedisMatchPattern } from '../result/redisKeyFold';
 import { deleteByPatternKeys, PatternDeleteError, scanPatternKeys, type PatternPageHooks } from './redisPatternDelete';
-import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
 import { configureBackupSchedule } from './backupWizard';
 import { confirmProductionWrite } from '../utils/sqlSafety';
 import { pgSchemaFor } from '../utils/sql';
@@ -45,7 +44,7 @@ export interface ViewCommandDeps {
  * 视图/面板类命令注册（从 extension.ts 抽出，降低 activate 篇幅）。
  */
 export function registerViewCommands(deps: ViewCommandDeps): void {
-  const { context, manager, treeProvider, auth, backupScheduler, auditLogger } = deps;
+  const { context, manager, treeProvider, backupScheduler, auditLogger } = deps;
 
   /** 树节点命令不带 arguments 时回退到当前选中节点（右键菜单仍显式传参）。 */
   const resolveNode = (node: any): any => node ?? getSelectedTreeNode();
@@ -205,10 +204,6 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     // ER 图
     vscode.commands.registerCommand('devbelt.showERDiagram', (node: any) => {
-      if (!canUseErDiagram(auth.getCachedEntitlement())) {
-        vscode.window.showWarningMessage(l10n('entitlement.erRequired'));
-        return;
-      }
       if (node?.conn && node?.database) {
         ERDiagramView.open(node.conn, node.database, manager, node.schema);
       }

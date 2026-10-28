@@ -105,6 +105,19 @@ export class LoginFormView extends BaseWebView {
   }
 
   private postError(err: unknown): void {
+    // 权益错误单独本地化：设备数超限等来自服务端的 403，否则英文原文会直接冒泡进登录框。
+    const codeOf = (x: unknown): string | undefined => {
+      if (!x || typeof x !== 'object') return undefined;
+      const c = (x as { code?: string }).code;
+      if (typeof c === 'string') return c;
+      const cause = (x as { cause?: unknown }).cause;
+      return codeOf(cause);
+    };
+    if (codeOf(err) === 'PERSONAL_FEATURE_REQUIRED') {
+      diagError('login failed: personal feature required', String((err as Error)?.message ?? err));
+      this.post({ type: 'error', message: l10n('login.deviceLimit') });
+      return;
+    }
     const e = err as Error & { cause?: { code?: string; message?: string } };
     const cause = e.cause ? [e.cause.code, e.cause.message].filter(Boolean).join(': ') : '';
     const m = e.message || l10n('login.fail');

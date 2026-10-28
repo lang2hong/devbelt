@@ -89,6 +89,12 @@ export class AuthService {
   /** 规范 userId：解锁时用它定位本地 sync state/DEK，避免重启后必须联网拉 /api/db/me。 */
   private static readonly USER_ID_KEY = 'devbelt.auth.userId';
   private static readonly ENTITLEMENT_CACHE_KEY = 'devbelt.sync.cachedEntitlement';
+  /**
+   * 跨窗口权益刷新哨兵（SecretStorage）：值只在**套餐字段**变化时改变。
+   * 多窗口宿主的 globalState 没有变更事件，用 SecretStorage 的 onDidChange 作为
+   * "另一个窗口刷新了权益"的唯一可靠信号。
+   */
+  private static readonly ENTITLEMENT_GEN_KEY = 'devbelt.sync.cachedEntitlement.gen';
 
   /** 同步客户端（token 通过 getter 实时读取） */
   readonly client: SyncClient;
@@ -142,10 +148,28 @@ export class AuthService {
 
   /** 设置缓存权益，同步写 globalState。 */
   setCachedEntitlement(entitlement: CachedEntitlement): void {
+    const previous = this.cachedEntitlement;
     this.cachedEntitlement = entitlement;
     try {
       this.memento?.update(AuthService.ENTITLEMENT_CACHE_KEY, entitlement);
     } catch { /* memento 写失败不影响本次判断 */ }
+    // 套餐字段变化（升级/降级）时写跨窗口哨兵，让其它窗口丢弃内存缓存并重新拉取。
+    const planChanged =
+      previous === undefined ||
+      previous.planCode !== entitlement.planCode ||
+      JSON.stringify(previous.allowedDatabaseTypes ?? []) !== JSON.stringify(entitlement.allowedDatabaseTypes ?? []);
+    if (planChanged) void this.pushEntitlementGen();
+  }
+
+  /** 写权益哨兵；值未变化则不写（避免跨窗口互相触发刷新风暴）。 */
+  private async pushEntitlementGen(): Promise<void> {
+    const ent = this.cachedEntitlement;
+    if (!ent) return;
+    const next = `${ent.planCode}|${(ent.allowedDatabaseTypes ?? []).join(',')}`;
+    try {
+      if ((await this.secrets.get(AuthService.ENTITLEMENT_GEN_KEY)) === next) return;
+      await this.secrets.store(AuthService.ENTITLEMENT_GEN_KEY, next);
+    } catch { /* 哨兵写失败只影响多窗口即时性，不影响本窗口判定 */ }
   }
 
   /**
@@ -240,6 +264,12 @@ export class AuthService {
       // 派生身份缓存，避免账户 A 的权益/ userId 落进已持账户 B token 的本实例。
       if (e.key === AuthService.ACCESS_TOKEN_KEY || e.key === AuthService.REFRESH_TOKEN_KEY) {
         this.invalidateCachedIdentity();
+      }
+      // 另一窗口刷新到的套餐已变化（升级/降级）：本窗口丢弃过期内存缓存并重拉，
+      // 否则医生面板/引擎门限会继续按旧套餐判断。
+      if (e.key === AuthService.ENTITLEMENT_GEN_KEY) {
+        this.cachedEntitlement = undefined;
+        if (this.accessToken) void this.refreshEntitlement();
       }
     });
   }

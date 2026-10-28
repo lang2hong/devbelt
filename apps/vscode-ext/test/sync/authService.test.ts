@@ -352,7 +352,11 @@ describe('AuthService.refreshEntitlement', () => {
     storeOrder.length = 0;
 
     await expect(auth.refreshAccessToken()).resolves.toBe('A2');
-    expect(storeOrder).toEqual([REFRESH_KEY, ACCESS_KEY]);
+    // 半写态自愈只依赖 refresh 先于 access 落盘；权益哨兵（init 的异步刷新并发写入）
+    // 可能穿插其间，不影响轮换语义。
+    expect(storeOrder.indexOf(REFRESH_KEY)).toBeGreaterThanOrEqual(0);
+    expect(storeOrder.indexOf(ACCESS_KEY)).toBeGreaterThan(storeOrder.indexOf(REFRESH_KEY));
+    expect(storeOrder).toContain('devbelt.sync.cachedEntitlement.gen');
   });
 
   it('refresh 落盘失败时删除已被消费的旧 token，避免后续复用检测', async () => {
@@ -442,6 +446,50 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.logout();
 
     expect(secrets.values.has(USER_ID_KEY)).toBe(false);
+  });
+
+  it('套餐字段变化时写跨窗口哨兵，字段未变化时不写', async () => {
+    const secrets = makeSharedSecrets();
+    const memento = makeMemento();
+    await secrets.store(ACCESS_KEY, 'A1');
+    await secrets.store(REFRESH_KEY, 'R1');
+    installFetch((url) => {
+      if (url.includes('/me')) return { status: 200, body: meResponse(proSub) };
+      return { status: 200, body: {} };
+    });
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    await auth.init();
+    await expect(auth.refreshEntitlement()).resolves.toBeUndefined();
+    // 首次写入（无旧值）→ 哨兵写入
+    expect(secrets.values.get('devbelt.sync.cachedEntitlement.gen')).toBe('pro|mysql,postgresql,sqlite');
+
+    // 再次刷新同一套餐 → 哨兵值不变，不再写
+    const before = secrets.values.get('devbelt.sync.cachedEntitlement.gen');
+    await auth.refreshEntitlement();
+    expect(secrets.values.get('devbelt.sync.cachedEntitlement.gen')).toBe(before);
+  });
+
+  it('另一窗口哨兵变化 → 本窗口丢弃内存缓存并重拉', async () => {
+    const secrets = makeSharedSecrets();
+    const memento = makeMemento();
+    await secrets.store(ACCESS_KEY, 'A1');
+    await secrets.store(REFRESH_KEY, 'R1');
+    const calls: string[] = [];
+    installFetch((url) => {
+      calls.push(url);
+      if (url.includes('/me')) return { status: 200, body: meResponse(proSub) };
+      return { status: 200, body: {} };
+    });
+    const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+    await auth.init();
+    await expect(auth.refreshEntitlement()).resolves.toBeUndefined();
+    const meCallsBefore = calls.filter((u) => u.includes('/me')).length;
+    expect(auth.getCachedEntitlement()?.planCode).toBe('pro');
+
+    // 模拟另一窗口升级写哨兵
+    await secrets.store('devbelt.sync.cachedEntitlement.gen', 'pro|mysql,postgresql,sqlite,elasticsearch');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls.filter((u) => u.includes('/me')).length).toBeGreaterThan(meCallsBefore);
   });
 
   it('只有 access、没有 refresh 不算登录态', async () => {
