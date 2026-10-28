@@ -43,20 +43,35 @@ watch(yFields, (ys) => {
     return;
   }
   if (isPieLike.value && ys.length > 1) chartType.value = 'bar';
+  // 散点图需要逐行的原始 X/Y，聚合后没有可配对的点。
+  if (chartType.value === 'scatter' && aggregate.value !== 'none') chartType.value = 'line';
 });
 
-watch(
-  () => [props.rows, chartType.value, xField.value, [...yFields.value], aggregate.value],
-  () => { if (xField.value && yFields.value.length) void renderChart(); },
-  { deep: true },
-);
+watch(aggregate, (agg) => {
+  if (agg !== 'none' && chartType.value === 'scatter') chartType.value = 'line';
+});
+
+function scheduleRender(): void {
+  if (xField.value && yFields.value.length > 0) void renderChart();
+}
+
+// rows 只在结果集整体替换时变（浅监听即可）；配置项用 ref 身份比较。
+// 早前把 rows 放进 deep 监听，会在每次改配置时遍历全部结果行。
+watch(() => props.rows, scheduleRender);
+watch([chartType, xField, yFields, aggregate], scheduleRender);
+
+/** 标题输入防抖：避免每个按键重建一次 chart.js 实例。 */
+let titleTimer: ReturnType<typeof setTimeout> | undefined;
+watch(chartTitle, () => {
+  if (titleTimer) clearTimeout(titleTimer);
+  titleTimer = setTimeout(() => { titleTimer = undefined; scheduleRender(); }, 250);
+});
 
 /** 默认标题：`A、B、C 按 X`。 */
 const effectiveTitle = computed(() => {
   if (chartTitle.value.trim()) return chartTitle.value.trim();
   if (yFields.value.length === 0) return '';
-  const metrics = yFields.value.join(' / ');
-  return `${metrics} by ${xField.value}`;
+  return t('wv.chart.defaultTitle', { metrics: yFields.value.join(' / '), dim: xField.value });
 });
 
 async function renderChart() {
@@ -133,6 +148,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  if (titleTimer) { clearTimeout(titleTimer); titleTimer = undefined; }
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
 });
 
@@ -153,7 +169,7 @@ function exportChart() {
         <option value="line">{{ t('wv.chart.typeLine') }}</option>
         <option value="pie" :disabled="yFields.length > 1" :title="yFields.length > 1 ? t('wv.chart.pieSingleOnly') : ''">{{ t('wv.chart.typePie') }}</option>
         <option value="doughnut" :disabled="yFields.length > 1" :title="yFields.length > 1 ? t('wv.chart.pieSingleOnly') : ''">{{ t('wv.chart.typeDoughnut') }}</option>
-        <option value="scatter">{{ t('wv.chart.typeScatter') }}</option>
+        <option value="scatter" :disabled="aggregate !== 'none'" :title="aggregate !== 'none' ? t('wv.chart.scatterRawOnly') : ''">{{ t('wv.chart.typeScatter') }}</option>
         <option value="radar">{{ t('wv.chart.typeRadar') }}</option>
       </select>
       <span class="axis-label">{{ t('wv.chart.xAxis') }}</span>
@@ -165,6 +181,7 @@ function exportChart() {
         v-model="yFields"
         multiple
         :size="Math.min(5, Math.max(3, allFields.length))"
+        :title="t('wv.chart.maxSeries', { max: MAX_SERIES })"
       >
         <option v-for="f in allFields" :key="f" :value="f">{{ f }}</option>
       </select>

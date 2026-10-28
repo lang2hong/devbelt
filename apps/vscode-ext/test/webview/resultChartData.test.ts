@@ -48,6 +48,16 @@ describe('buildChartData（宽表 → 多系列）', () => {
     expect(avg.series[0].values).toEqual([2, 5]);
   });
 
+  it('count 统计组内行数（含 NULL / 文本行），不是可解析数值的个数', () => {
+    const rows = [
+      { g: 'a', v: 1 },
+      { g: 'a', v: 'oops' },
+      { g: 'a', v: null },
+      { g: 'b', v: 2 },
+    ];
+    expect(buildChartData(rows, 'g', ['v'], 'count').series[0].values).toEqual([3, 1]);
+  });
+
   it('count/max/min 聚合', () => {
     const rows = [
       { g: 'a', v: 2 },

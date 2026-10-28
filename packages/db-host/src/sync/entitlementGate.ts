@@ -1,5 +1,14 @@
 import { DatabaseType, databaseEngineOf } from '@devbelt/db-core';
 
+/**
+ * 注意：`canExportConnections` / `canUseErDiagram` / `canUseDataSync` /
+ * `maxConcurrentConnections` 当前**没有客户端调用点**——服务端两档套餐的配置相同
+ * （导出/ER/数据同步均为允许、并发不限），扩展曾在命令入口拦截，属死门限，已于
+ * 2026-10-28 移除。保留这些 helper 是为了运营将来真正收紧 Free 时能快速接回，
+ * 服务端字段（allowConnectionExport / allowErDiagram / allowDataSync /
+ * maxConcurrentConnections）仍然有效并可下发。
+ */
+
 export { databaseEngineOf } from '@devbelt/db-core';
 /** 缓存的个人权益（personal_plans entitlement_snapshot，不含时间字段）。 */
 export interface CachedEntitlement {

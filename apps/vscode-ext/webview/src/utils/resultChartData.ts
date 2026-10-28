@@ -28,11 +28,13 @@ export function parseChartNumber(cell: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function aggregateValues(vals: number[], agg: ChartAggregate): number {
+function aggregateValues(vals: number[], agg: ChartAggregate, rowCount: number): number {
   switch (agg) {
     case 'sum': return vals.reduce((a, b) => a + b, 0);
     case 'avg': return vals.length === 0 ? 0 : vals.reduce((a, b) => a + b, 0) / vals.length;
-    case 'count': return vals.length;
+    // count 的语义是「该组有多少行」，不是「该列有多少个可解析数字」——
+    // 列里混有 NULL/文本时两者不同，用户期待的是前者。
+    case 'count': return rowCount;
     case 'max': return vals.length === 0 ? 0 : Math.max(...vals);
     case 'min': return vals.length === 0 ? 0 : Math.min(...vals);
     default: return vals.length > 0 ? vals[0] : 0;
@@ -70,23 +72,23 @@ export function buildChartData(
   }
 
   // 聚合：组内每个 Y 列分别收集，再统一求值。
-  type Group = { order: number; byColumn: number[][] };
-  const order = new Map<string, Group>();
+  type Group = { byColumn: number[][]; rowCount: number };
+  const groups = new Map<string, Group>();
   for (const r of rows) {
     const key = String(r[xKey] ?? '');
-    if (!order.has(key)) order.set(key, { order: order.size, byColumn: yKeys.map(() => []) });
-    const g = order.get(key)!;
+    if (!groups.has(key)) groups.set(key, { byColumn: yKeys.map(() => []), rowCount: 0 });
+    const g = groups.get(key)!;
+    g.rowCount += 1;
     yKeys.forEach((y, i) => {
       const v = parseChartNumber(r[y]);
       if (v !== undefined) g.byColumn[i].push(v);
     });
   }
-  const sorted = [...order.entries()];
-  // 保持首次出现顺序（聚合图表按出现顺序更直观）。
-  const labels = sorted.map(([k]) => k);
-  for (const [, g] of sorted) {
+  // Map 的插入顺序即首次出现顺序（聚合图表按出现顺序更直观）。
+  const labels = [...groups.keys()];
+  for (const g of groups.values()) {
     yKeys.forEach((_y, i) => {
-      series[i].values.push(aggregateValues(g.byColumn[i], agg));
+      series[i].values.push(aggregateValues(g.byColumn[i], agg, g.rowCount));
     });
   }
   return { labels, series };
