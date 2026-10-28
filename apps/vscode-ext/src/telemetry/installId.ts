@@ -1,4 +1,3 @@
-import type * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -10,7 +9,13 @@ import { randomUUID } from 'node:crypto';
  */
 export const INSTALL_ID_KEY = 'devbelt.installId';
 
-export function getOrCreateInstallId(globalState: vscode.Memento): string {
+/** `vscode.Memento` 的最小子集（结构化类型，便于测试注入）。 */
+export interface InstallIdStore {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): Thenable<void>;
+}
+
+export function getOrCreateInstallId(globalState: InstallIdStore): string {
   const existing = globalState.get<string>(INSTALL_ID_KEY);
   if (existing) return existing;
   const id = randomUUID();

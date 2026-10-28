@@ -1,9 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { getOrCreateReplyKey, readReplyKey, REPLY_KEY_SECRET, type SecretStoreLike } from '../../src/feedback/replyKey';
 
-vi.mock('vscode', () => ({}));
-
-const { countUnread } = await import('../../src/feedback/feedbackView');
 
 function memorySecrets(initial: Record<string, string> = {}): SecretStoreLike & { data: Map<string, string> } {
   const data = new Map(Object.entries(initial));
@@ -50,22 +47,5 @@ describe('replyKey', () => {
     const winner = 'W'.repeat(43);
     s.store = async (k) => { s.data.set(k, winner); };
     expect(await getOrCreateReplyKey(s)).toBe(winner);
-  });
-});
-
-describe('countUnread', () => {
-  const items = [
-    { id: '1', category: 'bug' as const, content: 'a', status: 'triaged' as const, createTime: '', replies: [
-      { id: '5', body: 'x', createTime: '' },
-      { id: '12', body: 'y', createTime: '' },
-    ] },
-    { id: '2', category: 'other' as const, content: 'b', status: 'new' as const, createTime: '', replies: [] },
-  ];
-
-  it('按数值比较回复 id（非字典序）', () => {
-    expect(countUnread(items, 0n)).toBe(2);
-    expect(countUnread(items, 5n)).toBe(1);
-    expect(countUnread(items, 9n)).toBe(1);
-    expect(countUnread(items, 12n)).toBe(0);
   });
 });

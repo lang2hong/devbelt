@@ -149,9 +149,9 @@ Heartbeats are sent only when VS Code telemetry is enabled and `devbelt.telemetr
 
 ### Feedback
 
-The **Feedback** sidebar sends feedback straight to the DevBelt team; no sign-in required. Each submission includes the random installation ID, the extension version and OS. When you are signed in, the feedback is linked to your account.
+The **Feedback** sidebar view only holds an entry point and an unread indicator. **Send feedback / View replies** (or the command `DevBelt: Send Feedback / View Replies`) opens a separate Feedback panel in the editor area with the feedback form, **My feedback & replies**, and the other channels (bug report, feature request, docs, review). No sign-in is required; each submission includes the random installation ID, the extension version and OS. When you are signed in, the feedback is linked to your account.
 
-Replies from the DevBelt team appear under **My feedback & replies** in the same panel. They are fetched when you open the panel, click **Refresh**, or submit feedback; they are not pushed in real time. Anonymous replies are tied to this installation through a random reply key kept in VS Code's secret storage, so they are lost if that storage is cleared; replies to signed-in feedback follow your account. If you leave an email address, the team may also send the reply by email.
+Replies from the DevBelt team appear under **My feedback & replies**, and the sidebar icon shows an unread count. Replies are fetched when you open the view, open the panel, click **Refresh**, or submit feedback; they are not pushed in real time. Anonymous replies are tied to this installation through a random reply key kept in VS Code's secret storage, so they are lost if that storage is cleared; replies to signed-in feedback follow your account. If you leave an email address, the team may also send the reply by email.
 
 ### Documentation
 

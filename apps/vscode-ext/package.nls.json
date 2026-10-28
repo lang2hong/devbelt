@@ -27,6 +27,7 @@
   "cmd.updateCell": "Update Cell",
   "cmd.explorerMenu": "More Actions",
   "cmd.authenticator": "Authenticator",
+  "cmd.feedback.open": "Send Feedback / View Replies",
   "cmd.ai.chat": "AI Chat",
   "cmd.ai.setApiKey": "AI: Set API Key",
   "cmd.ai.clearApiKey": "AI: Clear API Key",

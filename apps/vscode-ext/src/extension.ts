@@ -21,6 +21,8 @@ import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connect
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
 import { ToolsViewProvider } from './tools/toolsView';
 import { FeedbackViewProvider } from './feedback/feedbackView';
+import { FeedbackController } from './feedback/feedbackController';
+import { FeedbackPanel } from './feedback/feedbackPanel';
 import { maybeSendInstallHeartbeat } from './telemetry/heartbeat';
 import { BackupScheduler } from './schedule/backupScheduler';
 import { registerViewCommands } from './commands/viewCommands';
@@ -310,14 +312,21 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // 侧边栏「工具」视图（竖向工具列表；首项 = 验证器）。
   context.subscriptions.push(ToolsViewProvider.register());
 
-  // 侧边栏「反馈」视图：Bug 反馈、功能建议、文档、评价入口。
-  context.subscriptions.push(FeedbackViewProvider.register({
+  // 反馈：侧边栏只放入口与未读提醒；表单、回复线程、其他渠道在独立面板（devbelt.feedback.open）。
+  const feedbackController = new FeedbackController({
     serverUrl,
     globalState: context.globalState,
     secrets: context.secrets,
     extensionVersion: String(context.extension.packageJSON.version ?? ''),
+    os: `${process.platform}/${process.arch}`,
     getAccessToken: () => auth.getAccessToken(),
-  }));
+  });
+  context.subscriptions.push(
+    FeedbackViewProvider.register(feedbackController),
+    // 命令名用字面量：commandRegistration 测试按字面量扫描「声明 ↔ 注册」；
+    // 与 feedbackView 的 OPEN_FEEDBACK_COMMAND 一致性由 feedbackEntry.test.ts 保证。
+    vscode.commands.registerCommand('devbelt.feedback.open', () => FeedbackPanel.open(feedbackController)),
+  );
 
   // 匿名安装/活跃心跳：每天最多一次；尊重 VS Code 遥测与 devbelt.telemetry.enabled。
   void maybeSendInstallHeartbeat({

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { navigate } from '../lib/router';
 import {
   getFeedbackDetail,
@@ -113,7 +113,7 @@ async function loadExtra(id: string): Promise<void> {
   extraState.value = 'error';
 }
 
-function openDetail(f: AdminFeedback): void {
+function openDetail(f: AdminFeedback, focusReply = false): void {
   detail.value = f;
   editStatus.value = f.status;
   editNote.value = f.adminNote ?? '';
@@ -124,6 +124,17 @@ function openDetail(f: AdminFeedback): void {
   replyError.value = '';
   replyOk.value = '';
   void loadExtra(f.id);
+  if (focusReply) void focusReplyBox();
+}
+
+/** 从「回复」入口打开：等弹窗挂载后把回复框滚入视野并聚焦（Modal 自己会先聚焦对话框，故延后一帧）。 */
+async function focusReplyBox(): Promise<void> {
+  await nextTick();
+  await nextTick();
+  const box = document.getElementById('reply-body');
+  if (!box) return;
+  box.scrollIntoView({ block: 'nearest' });
+  box.focus({ preventScroll: true });
 }
 
 function closeDetail(): void {
@@ -231,7 +242,7 @@ onMounted(load);
         <tr v-for="f in items" :key="f.id">
           <td class="mono">{{ f.id }}</td>
           <td><span class="badge">{{ CATEGORY_LABEL[f.category] ?? f.category }}</span></td>
-          <td class="content">{{ f.content }}</td>
+          <td class="content"><div class="content-clamp" :title="f.content">{{ f.content }}</div></td>
           <td class="mono">
             <a v-if="f.userId" class="user-link" href="#" @click.prevent="goUser(f.userId)">{{ f.userId }}</a>
             <span v-else class="muted">匿名</span>
@@ -239,7 +250,10 @@ onMounted(load);
           <td class="muted small">{{ f.appVersion ?? '—' }}<br />{{ f.os ?? '—' }}</td>
           <td><span class="badge" :class="f.status">{{ STATUS_LABEL[f.status] ?? f.status }}</span></td>
           <td class="muted small">{{ formatDateTime(f.createTime) }}</td>
-          <td class="actions"><button class="btn small" @click="openDetail(f)">查看</button></td>
+          <td class="actions">
+            <button v-if="f.status === 'new'" class="btn small" data-testid="feedback-reply" @click="openDetail(f, true)">回复</button>
+            <button v-else class="btn small ghost" data-testid="feedback-view" @click="openDetail(f)">查看</button>
+          </td>
         </tr>
         <tr v-if="items.length === 0"><td colspan="8" class="muted">暂无反馈。</td></tr>
       </tbody>
@@ -258,7 +272,9 @@ onMounted(load);
       @update:page-size="changePageSize"
     />
 
-    <Modal v-if="detail" title="反馈详情" :closable="!busy" @close="closeDetail">
+    <Modal v-if="detail" title="反馈详情" size="lg" :closable="!busy" @close="closeDetail">
+      <div class="detail-grid">
+      <div class="col-main">
       <table class="kv">
         <tbody>
           <tr><th>分类</th><td>{{ CATEGORY_LABEL[detail.category] ?? detail.category }}</td></tr>
@@ -278,8 +294,17 @@ onMounted(load);
         </tbody>
       </table>
       <label>内容</label>
-      <pre class="content-box">{{ detail.content }}</pre>
+      <pre class="content-box content-full">{{ detail.content }}</pre>
 
+      <label>状态</label>
+      <select v-model="editStatus">
+        <option v-for="s in STATUS_OPTIONS" :key="s" :value="s">{{ STATUS_LABEL[s] }}</option>
+      </select>
+      <label>处理备注（可选）</label>
+      <textarea v-model="editNote" rows="3" maxlength="1000"></textarea>
+      </div>
+
+      <div class="col-side">
       <section class="replies" aria-labelledby="replies-title">
         <div class="replies-head">
           <h3 id="replies-title">回复</h3>
@@ -327,17 +352,12 @@ onMounted(load);
           <button class="btn" :disabled="replying || !replyBody.trim()" @click="sendReply">{{ replying ? '发送中…' : '发送回复' }}</button>
         </div>
       </section>
-
-      <label>状态</label>
-      <select v-model="editStatus">
-        <option v-for="s in STATUS_OPTIONS" :key="s" :value="s">{{ STATUS_LABEL[s] }}</option>
-      </select>
-      <label>处理备注（可选）</label>
-      <textarea v-model="editNote" rows="3" maxlength="1000"></textarea>
+      </div>
+      </div>
       <p v-if="error" class="error">{{ error }}</p>
       <div class="modal-actions">
-        <button class="btn" :disabled="busy" @click="save">{{ busy ? '保存中…' : '保存' }}</button>
-        <button class="btn ghost" :disabled="busy" @click="closeDetail">取消</button>
+        <button class="btn" :disabled="busy" @click="save">{{ busy ? '保存中…' : '保存状态与备注' }}</button>
+        <button class="btn ghost" :disabled="busy" @click="closeDetail">关闭</button>
       </div>
     </Modal>
   </section>
@@ -354,7 +374,8 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .table th, .table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--c-border-strong); vertical-align: top; }
 .table th { color: var(--c-text-muted); font-weight: 600; font-size: 12px; }
-.content { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.content { max-width: 560px; }
+.content-clamp { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
 .badge { display: inline-block; padding: 1px 7px; border: 1px solid var(--c-border-strong); border-radius: 5px; font-size: 12px; }
 .badge.new { border-color: var(--c-accent); color: var(--c-accent); }
 .badge.done { border-color: #3aa675; color: #3aa675; }
@@ -372,9 +393,10 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .kv th { text-align: left; width: 110px; color: var(--c-text-muted); font-weight: 500; padding: 4px 0; font-size: 12px; }
 .kv td { padding: 4px 0; font-size: 13px; }
 .content-box { margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--c-border-strong); border-radius: 6px; background: var(--c-surface); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; font-size: 13px; }
+.content-full { max-height: 50vh; min-height: 96px; }
 label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--c-text-muted); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
-.replies { margin: 6px 0 14px; padding-top: 10px; border-top: 1px solid var(--c-border-strong); }
+.replies { margin: 0; }
 .replies-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .replies-head h3 { margin: 0; font-size: 14px; }
 .reply-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -388,4 +410,11 @@ label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--c-text
 .warn { color: var(--c-warn-text, #9a6700); }
 .email-status.failed { color: var(--c-danger); }
 .email-status.sent { color: #3aa675; }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.col-main, .col-side { min-width: 0; }
+.col-side { padding-left: 24px; border-left: 1px solid var(--c-border-strong); }
+@media (max-width: 720px) {
+  .detail-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .col-side { padding-left: 0; border-left: none; padding-top: 12px; border-top: 1px solid var(--c-border-strong); }
+}
 </style>
