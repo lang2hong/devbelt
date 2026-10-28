@@ -21,6 +21,7 @@ function secrets() {
     async get(k: string) { return map.get(k); },
     async store(k: string, v: string) { map.set(k, v); },
     async delete(k: string) { map.delete(k); },
+    async keys() { return [...map.keys()]; },
     onDidChange() { return { dispose() { /* no-op */ } }; },
   };
 }
@@ -82,6 +83,29 @@ describe('Authenticator 按账号隔离', () => {
     expect(mem.map.has(`${ENTRIES_KEY}::u.uB`)).toBe(true);
     expect(sec.map.has(secretKey(entryA.id, 'uA'))).toBe(true);
     expect(sec.map.has(secretKey(entryB.id, 'uB'))).toBe(true);
+    store.dispose();
+  });
+
+  it('旧验证器数据只迁移给第一个账号，第二个账号拿到空列表（不泄漏 2FA）', async () => {
+    const mem = memento();
+    const sec = secrets();
+    await mem.update(ENTRIES_KEY, [
+      { id: 'e-legacy', issuer: 'Legacy', account: 'me@x', groupId: undefined, updateTime: 1 },
+    ]);
+    await sec.store(secretKey('e-legacy', 'local'), 'JBSWY3DPEHPK3PXP');
+
+    // 账号 A 认领旧数据
+    setAccountScope('uA');
+    const store = new AuthenticatorStore(mem, sec as never, auth() as never);
+    await store.init();
+    expect(store.listEntries().map((e) => e.id)).toEqual(['e-legacy']);
+    expect(sec.map.get(secretKey('e-legacy', 'uA'))).toBe('JBSWY3DPEHPK3PXP');
+
+    // 账号 B 必须从空开始：既没有条目，也不会拿到 A 的密钥
+    setAccountScope('uB');
+    await store.reload();
+    expect(store.listEntries()).toEqual([]);
+    expect(sec.map.has(secretKey('e-legacy', 'uB'))).toBe(false);
     store.dispose();
   });
 

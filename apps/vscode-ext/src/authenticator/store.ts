@@ -51,6 +51,8 @@ import {
   ENTRIES_KEY,
   GROUPS_KEY,
   TAGS_KEY,
+  SECRET_KEY_PREFIX,
+  SECRET_KEY_SUFFIX,
   secretKey,
   parseSecretKey,
 } from './types';
@@ -295,14 +297,36 @@ export class AuthenticatorStore implements VscodeDisposable {
   /**
    * 读当前账号作用域下的 secret；登录且该作用域尚无数据时，把旧（未隔离）键的值复制过来。
    * 只复制、不删除旧键，迁移失败时仍可回退。
+   *
+   * **只迁移一次**：与 `readScoped` 同理，旧键只能被第一个账号认领。本机若已有任意账号
+   * 作用域下的同名密钥（`devbelt.authenticator.u.<scope>.<id>.secret`），说明旧数据已被
+   * 上一个账号拿走，当前账号必须从「没有密钥」开始，否则 2FA 密钥会跨账号泄漏。
    */
   private async readSecret(id: string): Promise<string | undefined> {
     const scope = accountScope();
     const scoped = await this.secrets.get(secretKey(id, scope));
     if (scoped !== undefined || scope === 'local') return scoped;
     const legacy = await this.secrets.get(secretKey(id, 'local'));
-    if (legacy !== undefined) await this.secrets.store(secretKey(id, scope), legacy);
+    if (legacy === undefined) return undefined;
+    if (await this.legacySecretClaimed(id, scope)) return undefined;
+    await this.secrets.store(secretKey(id, scope), legacy);
     return legacy;
+  }
+
+  /** 除当前作用域外，是否已有其他账号作用域持有同一条目的密钥。 */
+  private async legacySecretClaimed(id: string, currentScope: string): Promise<boolean> {
+    const secrets = this.secrets as Partial<{ keys(): Thenable<string[]> }>;
+    if (typeof secrets.keys !== 'function') return false; // 测试替身/旧宿主：退回迁移行为
+    const suffix = `.${id}${SECRET_KEY_SUFFIX}`;
+    const prefix = `${SECRET_KEY_PREFIX}u.`;
+    try {
+      const keys = await secrets.keys();
+      return keys.some(
+        (key) => key.startsWith(prefix) && key.endsWith(suffix) && key !== secretKey(id, currentScope),
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**

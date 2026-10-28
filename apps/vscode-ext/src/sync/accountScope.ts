@@ -48,6 +48,11 @@ export function scopedPrefix(base: string, scope: string = accountScope()): stri
 /**
  * 读作用域化数据：目标为空时回退到旧键，并异步复制一份（只读时迁移）。
  * 同步函数：调用方需要立刻拿到数据，复制失败只影响下一次读取。
+ *
+ * **只迁移一次**：旧键属于「升级前的本机数据」，只能被第一个账号认领。
+ * 若本机已经存在任何一个账号副本（`<base>::u.*`），说明旧键已被认领，
+ * 后来登录的账号必须从空数据开始——否则第二个/第三个账号会各自拿到一份
+ * 同样的旧 2FA 条目、密钥与聊天历史（跨账号泄漏）。
  */
 export function readScoped<T>(memento: Memento, base: string, scope: string = accountScope()): T | undefined {
   const target = scopedKey(base, scope);
@@ -55,8 +60,18 @@ export function readScoped<T>(memento: Memento, base: string, scope: string = ac
   if (scoped !== undefined) return scoped;
   if (scope === 'local') return undefined;
   const legacy = memento.get<T>(base);
-  if (legacy !== undefined) void memento.update(target, legacy);
+  if (legacy === undefined) return undefined;
+  if (hasAnyScopedKey(memento, base)) return undefined;
+  void memento.update(target, legacy);
   return legacy;
+}
+
+/** 本机是否已有该键的任意账号副本（`<base>::u.<scope>`）。 */
+function hasAnyScopedKey(memento: Memento, base: string): boolean {
+  const m = memento as Partial<Pick<Memento, 'keys'>>;
+  if (typeof m.keys !== 'function') return false; // 测试替身/旧宿主：退回迁移行为
+  const prefix = `${base}::u.`;
+  return m.keys().some((key) => key.startsWith(prefix));
 }
 
 /** 写作用域化数据。 */

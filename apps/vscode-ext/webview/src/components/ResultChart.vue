@@ -32,8 +32,16 @@ const allFields = computed(() => props.fields.map((f) => f.name));
 
 const isPieLike = computed(() => chartType.value === 'pie' || chartType.value === 'doughnut');
 
-/** 多系列时饼图/环形图无意义：禁用并自动切回柱状图。 */
+/**
+ * Y 多选的后置约束：
+ * - 超过 MAX_SERIES 截断（原生多选允许全选，这里收敛到上限）；
+ * - 多系列时饼图/环形图无意义 → 自动切回柱状图。
+ */
 watch(yFields, (ys) => {
+  if (ys.length > MAX_SERIES) {
+    yFields.value = ys.slice(0, MAX_SERIES);
+    return;
+  }
   if (isPieLike.value && ys.length > 1) chartType.value = 'bar';
 });
 
@@ -42,12 +50,6 @@ watch(
   () => { if (xField.value && yFields.value.length) void renderChart(); },
   { deep: true },
 );
-
-function onYMultiChange(e: Event): void {
-  const sel = e.target as HTMLSelectElement;
-  const picked = Array.from(sel.selectedOptions).map((o) => o.value).slice(0, MAX_SERIES);
-  yFields.value = picked.length > 0 ? picked : yFields.value.length > 0 ? yFields.value : [];
-}
 
 /** 默认标题：`A、B、C 按 X`。 */
 const effectiveTitle = computed(() => {
@@ -160,10 +162,9 @@ function exportChart() {
       </select>
       <span class="axis-label">{{ t('wv.chart.yAxis') }}</span>
       <select
+        v-model="yFields"
         multiple
         :size="Math.min(5, Math.max(3, allFields.length))"
-        :value="yFields"
-        @change="onYMultiChange"
       >
         <option v-for="f in allFields" :key="f" :value="f">{{ f }}</option>
       </select>

@@ -52,6 +52,23 @@ describe('account scope', () => {
     expect(m.data['devbelt.ai.chatSessions']).toEqual([{ id: 'a' }]);
   });
 
+  it('旧数据只迁移给第一个账号：第二个账号从空开始，不继承', async () => {
+    const m = memento({ 'devbelt.ai.chatSessions': [{ id: 'legacy' }] });
+
+    setAccountScope('u1');
+    expect(readScoped(m, 'devbelt.ai.chatSessions')).toEqual([{ id: 'legacy' }]);
+    await Promise.resolve();
+    expect(m.data['devbelt.ai.chatSessions::u.u1']).toEqual([{ id: 'legacy' }]);
+
+    // 第二个账号：旧键已被 u1 认领，必须返回空而不是再复制一份
+    setAccountScope('u2');
+    expect(readScoped(m, 'devbelt.ai.chatSessions')).toBeUndefined();
+    await Promise.resolve();
+    expect(m.data['devbelt.ai.chatSessions::u.u2']).toBeUndefined();
+    // 旧键保留（可回退）
+    expect(m.data['devbelt.ai.chatSessions']).toEqual([{ id: 'legacy' }]);
+  });
+
   it('账号自己的数据优先于旧键', () => {
     const m = memento({
       'devbelt.ai.chatSessions': [{ id: 'legacy' }],
