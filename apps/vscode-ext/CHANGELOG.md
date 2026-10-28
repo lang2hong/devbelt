@@ -4,6 +4,32 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.1] - 2026-10-28
+
+### English
+
+#### Fixed
+
+- **The authenticator (2FA) is now isolated per account.** Entries, groups, tags and their secrets were stored under fixed keys, so every signed-in account saw the same entries. They are now scoped like connections (`devbelt.authenticator.entries::u.<userId>`, `devbelt.authenticator.u.<scope>.<id>.secret`). Data written before this release is copied into the current account the first time it is read; the old keys are left in place. Switching accounts reloads the list, including an already-open panel.
+- **AI domain context, default directives and business rules are per account.** They were still stored in the global state while chat history and model access were already scoped.
+- **Data Check no longer reports repairs that did not happen.** When the cloud record could not be restored (for example an Elasticsearch connection on the Free plan, where personal connections are limited to MySQL/SQLite), the panel used to say "Fixed 1 item" while nothing had changed, so re-checking showed the same item again. It now reports *"1 item not restored: your plan does not allow personal connections for that engine"* and leaves local data untouched.
+
+#### Changed
+
+- Marketplace metadata: the description and keywords now cover PostgreSQL/PG, Elasticsearch/ES, AI Chat and the per-engine client terms, so long-tail searches such as "mysql client" or "ai chat" can find the extension.
+
+### 中文
+
+#### 修复
+
+- **验证器（2FA）按账号隔离**：此前条目、分组、标签与密钥使用固定键，登录多个账号看到的是同一份数据。现在与连接使用同一套作用域（`devbelt.authenticator.entries::u.<userId>`、`devbelt.authenticator.u.<scope>.<id>.secret`）；升级前写入的数据在首次读取时复制到当前账号，旧键保留。切换账号会重新加载列表，已打开的面板也会刷新。
+- **AI 域上下文、默认指令与业务规则按账号隔离**：此前对话历史与模型接入已隔离，这三项仍存放在全局状态。
+- **数据体检不再把"未修复"报成"已修复"**：当云端记录无法恢复时（例如 Free 套餐下个人连接仅支持 MySQL/SQLite，而该连接是 Elasticsearch），面板会显示"已修复 1 项"但实际没有任何变化，重新检查又出现同一条。现在会明确提示"1 项未修复：当前套餐不支持该数据库引擎的个人连接"，并保持本地数据不变。
+
+#### 变更
+
+- Marketplace 元数据：描述与关键词补充 PostgreSQL/PG、Elasticsearch/ES、AI Chat 以及各引擎的 client 长尾词，便于通过「mysql client」「ai chat」等词搜到本扩展。
+
 ## [0.4.0] - 2026-10-27
 
 ### English
