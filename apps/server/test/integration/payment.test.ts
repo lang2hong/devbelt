@@ -235,7 +235,7 @@ describe.skipIf(!URL)('payment repo (real MySQL)', () => {
       expect(sub!.planId).toBe(proPlan!.id);
       expect(sub!.planId).not.toBe(freePlan!.id);
       expect(sub!.periodEndTime).not.toBeNull();
-      expect(deriveEntitlement(sub, proPlan, freePlan).maxConnectionMetas).toBe(5000);
+      expect(deriveEntitlement(sub, proPlan, freePlan).maxConnectionMetas).toBe(500);
 
       // 重复回调（同 trade_no）→ duplicate，不再推进/改写。
       const dup = await svc.handleCallback('wechat', cbBody, headers);

@@ -60,9 +60,11 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
           WHERE p.code = 'free'`,
       )) as [Array<{ feature_key: string; value_json: unknown }>, unknown];
       const byKey = new Map(freeFeatures.map((r) => [r.feature_key, typeof r.value_json === 'string' ? JSON.parse(r.value_json) : r.value_json]));
-      expect(byKey.get('allowedDatabaseTypes')).toEqual(['mysql', 'sqlite', 'redis']);
-      expect(byKey.get('maxConnectionMetas')).toBe(500);
-      expect(byKey.get('syncStorageBytes')).toBe(33554432);
+      // 019_plan_boundaries 把种子对齐到生产实际值（Free 引擎含 postgresql、
+      // 云端 5 条 / 1 MiB），这里断言的是**最终**边界，不是 001/002 的旧种子。
+      expect(byKey.get('allowedDatabaseTypes')).toEqual(['mysql', 'sqlite', 'redis', 'postgresql']);
+      expect(byKey.get('maxConnectionMetas')).toBe(5);
+      expect(byKey.get('syncStorageBytes')).toBe(1048576);
     } finally {
       await pool.end();
     }
@@ -83,17 +85,19 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
     };
     try {
       await dropAll(pool);
-      // 模拟「已跑过 001（无 redis）」的存量库。
-      const legacy = migrations.filter((m) => m.version !== '006_redis_engine');
-      await runMigrations(pool as any, [...legacy], LEGACY_MIGRATION_VERSIONS);
+      // 按版本切片模拟「已跑过 001–005（无 redis）」的存量库。
+      // 不能用「排除 006」：后来新增的 019 会把 postgresql 一起带进来。
+      const before006 = migrations.filter((m) => m.version < '006_redis_engine');
+      await runMigrations(pool as any, [...before006], LEGACY_MIGRATION_VERSIONS);
       expect(await readFree()).toEqual(['mysql', 'sqlite']);
 
-      // 增量 006 补上 redis。
-      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      // 增量跑到 006：补上 redis（019 之后还会再补 postgresql，见文件末尾的全量断言）。
+      const through006 = migrations.filter((m) => m.version <= '006_redis_engine');
+      await runMigrations(pool as any, [...through006], LEGACY_MIGRATION_VERSIONS);
       expect(await readFree()).toEqual(['mysql', 'sqlite', 'redis']);
 
       // 再跑一次：幂等，不重复追加。
-      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      await runMigrations(pool as any, [...through006], LEGACY_MIGRATION_VERSIONS);
       expect(await readFree()).toEqual(['mysql', 'sqlite', 'redis']);
     } finally {
       await pool.end();

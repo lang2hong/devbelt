@@ -114,7 +114,7 @@ describe.skipIf(!URL)('concurrency (real MySQL)', () => {
       const email = uniqueEmail();
       await registerAndVerify(emailSender, auth, email);
       const user = await userRepo.findByEmail(email);
-      // Free 的 max_devices=0（无限）；此处把该用户**所用 plan 的 maxDevices 特性**收紧为 1，
+      // Free 默认 1 台设备；此处把该用户**所用 plan 的 maxDevices 特性**显式设为 1，
       // 验证并发不超额。权益由 plan 派生（baseline 已删除 entitlement_snapshot 列）。
       await db.query(
         `UPDATE plan_feature_values pfv
