@@ -4,7 +4,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
-## [0.5.0] - 2026-10-29
+## [0.4.3] - 2026-10-29
 
 ### English
 
