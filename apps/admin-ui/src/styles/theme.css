@@ -169,7 +169,7 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--c-accent);
   box-shadow: 0 0 0 3px var(--c-accent-ring);
 }
-input, select { box-sizing: border-box; }
+input, select, textarea { box-sizing: border-box; }
 
 /* ============ 通用组件样式（全站共享） ============ */
 .card {

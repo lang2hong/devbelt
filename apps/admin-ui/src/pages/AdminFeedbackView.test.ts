@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 describe('AdminFeedbackView 操作列', () => {
-  it('待处理显示“回复”，其余状态显示“查看”', async () => {
+  it('未结案（待处理 / 处理中）显示“回复”，已结案显示“查看”', async () => {
     const items = [fb('3', 'new'), fb('2', 'triaged'), fb('1', 'done'), fb('0', 'rejected')];
     vi.mocked(queryFeedback).mockResolvedValue({ kind: 'ok', value: { items, nextCursor: null, total: 4 } });
 
@@ -62,15 +62,26 @@ describe('AdminFeedbackView 操作列', () => {
 
     const reply = wrapper.findAll('[data-testid="feedback-reply"]');
     const view = wrapper.findAll('[data-testid="feedback-view"]');
-    expect(reply).toHaveLength(1);
-    expect(reply[0]!.text()).toBe('回复');
-    expect(view).toHaveLength(3);
+    expect(reply).toHaveLength(2);
+    expect(reply.every((b) => b.text() === '回复')).toBe(true);
+    expect(view).toHaveLength(2);
     expect(view.every((b) => b.text() === '查看')).toBe(true);
     wrapper.unmount();
   });
 
+  it('状态标签：triaged 显示“处理中”，不再出现“已分类”', async () => {
+    const items = [fb('2', 'triaged')];
+    vi.mocked(queryFeedback).mockResolvedValue({ kind: 'ok', value: { items, nextCursor: null, total: 1 } });
+
+    const wrapper = mount(AdminFeedbackView);
+    await flushPromises();
+    expect(wrapper.text()).toContain('处理中');
+    expect(wrapper.text()).not.toContain('已分类');
+    wrapper.unmount();
+  });
+
   it('点“回复”打开宽弹窗并聚焦回复框；点“查看”不抢焦点', async () => {
-    const items = [fb('3', 'new'), fb('2', 'triaged')];
+    const items = [fb('3', 'new'), fb('2', 'done')];
     vi.mocked(queryFeedback).mockResolvedValue({ kind: 'ok', value: { items, nextCursor: null, total: 2 } });
 
     const wrapper = mount(AdminFeedbackView, { attachTo: document.body });

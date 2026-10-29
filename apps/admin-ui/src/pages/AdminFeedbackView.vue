@@ -26,7 +26,7 @@ const categoryFilter = ref('');
 const userId = ref('');
 
 const CATEGORY_LABEL: Record<string, string> = { bug: 'Bug', feature: '建议', other: '其他' };
-const STATUS_LABEL: Record<string, string> = { new: '待处理', triaged: '已分类', done: '已处理', rejected: '已拒绝' };
+const STATUS_LABEL: Record<string, string> = { new: '待处理', triaged: '处理中', done: '已处理', rejected: '已拒绝' };
 const STATUS_OPTIONS = ['new', 'triaged', 'done', 'rejected'];
 const CATEGORY_OPTIONS = ['bug', 'feature', 'other'];
 
@@ -111,6 +111,11 @@ async function loadExtra(id: string): Promise<void> {
   }
   if (r.kind === 'unauthorized') { relogin(); return; }
   extraState.value = 'error';
+}
+
+/** 未结案（待处理 / 处理中）的反馈直接给「回复」入口；已处理、已拒绝只读查看。 */
+function canReply(f: AdminFeedback): boolean {
+  return f.status === 'new' || f.status === 'triaged';
 }
 
 function openDetail(f: AdminFeedback, focusReply = false): void {
@@ -251,7 +256,7 @@ onMounted(load);
           <td><span class="badge" :class="f.status">{{ STATUS_LABEL[f.status] ?? f.status }}</span></td>
           <td class="muted small">{{ formatDateTime(f.createTime) }}</td>
           <td class="actions">
-            <button v-if="f.status === 'new'" class="btn small" data-testid="feedback-reply" @click="openDetail(f, true)">回复</button>
+            <button v-if="canReply(f)" class="btn small" data-testid="feedback-reply" @click="openDetail(f, true)">回复</button>
             <button v-else class="btn small ghost" data-testid="feedback-view" @click="openDetail(f)">查看</button>
           </td>
         </tr>
@@ -417,4 +422,5 @@ label { display: block; margin: 10px 0 4px; font-size: 12px; color: var(--c-text
   .detail-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .col-side { padding-left: 0; border-left: none; padding-top: 12px; border-top: 1px solid var(--c-border-strong); }
 }
+textarea { width: 100%; box-sizing: border-box; resize: vertical; font-family: inherit; line-height: 1.5; }
 </style>

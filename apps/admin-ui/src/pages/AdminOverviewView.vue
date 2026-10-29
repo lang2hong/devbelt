@@ -13,7 +13,7 @@ const error = ref('');
 
 const STATUS_LABEL: Record<string, string> = {
   new: '待处理',
-  triaged: '已分类',
+  triaged: '处理中',
   done: '已处理',
   rejected: '已拒绝',
 };

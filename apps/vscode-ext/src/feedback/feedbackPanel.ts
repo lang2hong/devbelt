@@ -14,21 +14,21 @@ import type { FeedbackController } from './feedbackController';
  * - 只有面板**可见**时才把回复标为已读。
  */
 
-const FEEDBACK_ITEMS: ReadonlyArray<{ id: string; labelKey: string; url: string }> = [
+export const FEEDBACK_ITEMS: ReadonlyArray<{ id: string; labelKey: string; url: string }> = [
   {
     id: 'bug',
     labelKey: 'feedback.bug',
-    url: 'https://github.com/lang2hong/vscode-db-client/issues/new?labels=bug&title=%5BBug%5D%20',
+    url: 'https://github.com/lang2hong/devbelt/issues/new?labels=bug&title=%5BBug%5D%20',
   },
   {
     id: 'feature',
     labelKey: 'feedback.feature',
-    url: 'https://github.com/lang2hong/vscode-db-client/issues/new?labels=enhancement&title=%5BFeature%5D%20',
+    url: 'https://github.com/lang2hong/devbelt/issues/new?labels=enhancement&title=%5BFeature%5D%20',
   },
   {
     id: 'docs',
     labelKey: 'feedback.docs',
-    url: 'https://github.com/lang2hong/vscode-db-client/tree/main/docs',
+    url: 'https://github.com/lang2hong/devbelt/tree/main/docs',
   },
   {
     id: 'review',
