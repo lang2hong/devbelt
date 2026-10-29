@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 多数据库：MySQL、SQLite、PostgreSQL 本地连接完整可用；Redis、Elasticsearch 面板可用；跨设备端到端加密同步覆盖连接、保存的查询、表注记、验证器、AI 模型接入，具体可用范围按当前套餐为准
+- 多数据库：MySQL、SQLite、PostgreSQL 本地连接完整可用；Redis、Elasticsearch 面板可用；跨设备端到端加密同步（Pro 能力）覆盖连接、保存的查询、表注记、验证器、AI 模型接入，各套餐边界见[套餐边界](docs/套餐边界.md)
 - SQL 编辑、补全、格式化、执行、取消、EXPLAIN
 - 结果表格、受控行内编辑、多结果集
 - CSV/JSON/XML/XLSX/SQL 导入导出、库间数据传输

@@ -162,7 +162,69 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('extension_installs');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies', '018_extension_active_days']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies', '018_extension_active_days', '019_plan_boundaries']);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('019_plan_boundaries：Free 关同步开导入、Pro 设备 5、标签改名（幂等，Free 设备/配额不动）', async () => {
+    const pool = createTestPool();
+    const readPlan = async (code: string): Promise<Map<string, unknown>> => {
+      const [rows] = (await pool.query(
+        `SELECT d.feature_key, v.value_json
+           FROM plans p
+           JOIN plan_feature_values v ON v.plan_id = p.id
+           JOIN plan_feature_defs d ON d.id = v.feature_def_id
+          WHERE p.code = ?`,
+        [code],
+      )) as [Array<{ feature_key: string; value_json: unknown }>, unknown];
+      return new Map(rows.map((r) => [r.feature_key, typeof r.value_json === 'string' ? JSON.parse(r.value_json) : r.value_json]));
+    };
+    const readLabel = async (): Promise<{ en: string; zh: string }> => {
+      const [rows] = (await pool.query(
+        `SELECT label_json FROM plan_feature_defs WHERE feature_key = 'maxConnectionMetas'`,
+      )) as [Array<{ label_json: unknown }>, unknown];
+      const raw = rows[0]?.label_json;
+      return typeof raw === 'string' ? JSON.parse(raw) : (raw as { en: string; zh: string });
+    };
+    try {
+      await dropAll(pool);
+      // 模拟生产：已跑完 018，且 Pro 设备数仍是「不限」。
+      const legacy = migrations.filter((m) => m.version !== '019_plan_boundaries');
+      await runMigrations(pool as any, [...legacy], LEGACY_MIGRATION_VERSIONS);
+      await pool.query(
+        `UPDATE plan_feature_values v
+           JOIN plans p ON p.id = v.plan_id
+           JOIN plan_feature_defs d ON d.id = v.feature_def_id
+            SET v.value_json = '0'
+          WHERE p.code = 'pro' AND d.feature_key = 'maxDevices'`,
+      );
+      const freeBefore = await readPlan('free');
+      expect(freeBefore.get('allowDataSync')).toBe(true);
+      expect(freeBefore.get('allowConnectionImport')).toBe(false);
+      expect((await readPlan('pro')).get('maxDevices')).toBe(0);
+      expect((await readLabel()).zh).toBe('云端连接元数据');
+
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      const free = await readPlan('free');
+      const pro = await readPlan('pro');
+      expect(free.get('allowDataSync')).toBe(false);
+      expect(free.get('allowConnectionImport')).toBe(true);
+      expect(pro.get('allowDataSync')).toBe(true);
+      expect(pro.get('allowConnectionImport')).toBe(true);
+      expect(pro.get('maxDevices')).toBe(5);
+      // 不在本迁移范围内的值保持原样
+      for (const key of ['maxDevices', 'maxConnectionMetas', 'syncStorageBytes', 'maxSavedConnections', 'maxAuthenticatorEntries']) {
+        expect(free.get(key)).toBe(freeBefore.get(key));
+      }
+      expect(free.get('allowedDatabaseTypes')).toEqual(freeBefore.get('allowedDatabaseTypes'));
+      expect(await readLabel()).toEqual({ en: 'Cloud sync records', zh: '云端同步记录数' });
+
+      // 幂等
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      expect((await readPlan('free')).get('allowDataSync')).toBe(false);
+      expect((await readPlan('pro')).get('maxDevices')).toBe(5);
     } finally {
       await pool.end();
     }
