@@ -4,16 +4,18 @@ import { ADMIN_DEFAULT_PATH, ADMIN_ROUTES } from '../routes';
 
 describe('admin 路由表', () => {
   it('根路径 `/` 落到默认页（修复 /admin/ 显示「页面不存在」）', () => {
-    expect(matchRoute('/', ADMIN_ROUTES)).toEqual({ name: 'admin-users', params: {} });
+    expect(matchRoute('/', ADMIN_ROUTES)).toEqual({ name: 'admin-overview', params: {} });
   });
 
   it('默认落地路径本身可匹配', () => {
-    expect(matchRoute(ADMIN_DEFAULT_PATH, ADMIN_ROUTES)?.name).toBe('admin-users');
+    expect(matchRoute(ADMIN_DEFAULT_PATH, ADMIN_ROUTES)?.name).toBe('admin-overview');
   });
 
   it('每个后台页面都有对应路由', () => {
     const names = ADMIN_ROUTES.map((r) => r.name);
     for (const expected of [
+      'admin-overview',
+      'admin-feedback',
       'admin-users',
       'admin-orders',
       'admin-invoices',
