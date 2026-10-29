@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DatabaseType } from '@devbelt/db-core';
 import { DbTreeNode, NodeKind } from '../tree/dbTreeNode';
 import { ConnectionForm } from '../connection/connectionForm';
-import { ConnectionPathError } from '../connection/connectionManager';
+import { ConnectionPathError, ConcurrentConnectionLimitError } from '../connection/connectionManager';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { l10n } from '../i18n';
 import { AuditLogger } from '../utils/auditLogger';
@@ -10,6 +10,7 @@ import { flattenGroups } from '../utils/groupTree';
 import { sanitizeConnectionForExport } from '../utils/connectionExport';
 import { connectionTargetChanged } from '../utils/connectionTarget';
 import { diagInfo, diagWarn } from '../utils/diagnostics';
+import { promptProFeature } from '../sync/proFeature';
 import { chmod, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { RedisConnectionSession } from '../connection/connectionSession';
@@ -18,6 +19,7 @@ import { AiChatView } from '../result/aiChatView';
 import type { Deps, Sub } from './shared';
 import { confirm } from './shared';
 import {
+  canExportConnections,
   canImportConnections,
   maxSavedConnections,
 } from '@devbelt/db-host/sync/entitlementGate';
@@ -153,7 +155,9 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
       // 连接失败必须恢复为关闭态，否则节点会显示“已打开/可展开”但实际无会话。
       treeProvider.markClosed(conn.id);
       treeProvider.refresh();
-      if (err instanceof ConnectionPathError) {
+      if (err instanceof ConcurrentConnectionLimitError) {
+        await promptProFeature(l10n('plan.proOnly.concurrentLimit', { limit: err.limit }));
+      } else if (err instanceof ConnectionPathError) {
         const fields = err.result.issues.map((i) => i.field).join(', ');
         const picked = await vscode.window.showErrorMessage(
           l10n('sync.pathInvalid', { fields }),
@@ -194,6 +198,11 @@ export function registerConnectionCommands(deps: Deps, sub: Sub): void {
   sub('devbelt.refresh', () => treeProvider.refresh());
 
   sub('devbelt.exportConnections', async (node?: DbTreeNode) => {
+    // 导出连接配置是 Pro 能力；导入仍对 Free 开放（迁移入口）。
+    if (!canExportConnections(auth.getCachedEntitlement())) {
+      await promptProFeature(l10n('plan.proOnly.exportConnections'));
+      return;
+    }
     const all = store.list();
     if (!all.length) {
       vscode.window.showInformationMessage(l10n('conn.exportNone'));

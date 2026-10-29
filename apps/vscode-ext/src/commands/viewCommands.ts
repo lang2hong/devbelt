@@ -7,6 +7,8 @@ import type { ConnectionManager } from '../connection/connectionManager';
 import { REDIS_TREE_HARD_CAP, type DbTreeDataProvider } from '../tree/dbTreeDataProvider';
 import type { BackupScheduler } from '../schedule/backupScheduler';
 import type { AuthService } from '../sync/authService';
+import { canUseErDiagram } from '@devbelt/db-host/sync/entitlementGate';
+import { promptProFeature } from '../sync/proFeature';
 import { AuditLogger } from '../utils/auditLogger';
 import { TerminalService } from '../terminal/terminalService';
 import { TableDesignView } from '../result/tableDesignView';
@@ -44,7 +46,7 @@ export interface ViewCommandDeps {
  * 视图/面板类命令注册（从 extension.ts 抽出，降低 activate 篇幅）。
  */
 export function registerViewCommands(deps: ViewCommandDeps): void {
-  const { context, manager, treeProvider, backupScheduler, auditLogger } = deps;
+  const { context, manager, treeProvider, backupScheduler, auditLogger, auth } = deps;
 
   /** 树节点命令不带 arguments 时回退到当前选中节点（右键菜单仍显式传参）。 */
   const resolveNode = (node: any): any => node ?? getSelectedTreeNode();
@@ -204,6 +206,11 @@ export function registerViewCommands(deps: ViewCommandDeps): void {
     }),
     // ER 图
     vscode.commands.registerCommand('devbelt.showERDiagram', (node: any) => {
+      // ER 图是 Pro 能力；未登录按 Free 处理（entitlementGate 缺省 fail-closed）。
+      if (!canUseErDiagram(auth.getCachedEntitlement())) {
+        void promptProFeature(l10n('plan.proOnly.erDiagram'));
+        return;
+      }
       if (node?.conn && node?.database) {
         ERDiagramView.open(node.conn, node.database, manager, node.schema);
       }

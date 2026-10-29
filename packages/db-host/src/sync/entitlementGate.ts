@@ -1,12 +1,15 @@
 import { DatabaseType, databaseEngineOf } from '@devbelt/db-core';
 
 /**
- * 注意：`canExportConnections` / `canUseErDiagram` / `canUseDataSync` /
- * `maxConcurrentConnections` 当前**没有客户端调用点**——服务端两档套餐的配置相同
- * （导出/ER/数据同步均为允许、并发不限），扩展曾在命令入口拦截，属死门限，已于
- * 2026-10-28 移除。保留这些 helper 是为了运营将来真正收紧 Free 时能快速接回，
- * 服务端字段（allowConnectionExport / allowErDiagram / allowDataSync /
- * maxConcurrentConnections）仍然有效并可下发。
+ * 能力门禁（0.4.2 起）：
+ * - `canUseErDiagram` / `canExportConnections` 是 **Pro 能力**，缺省 fail-closed
+ *   （`=== true`）。未登录用户没有缓存的权益，因此按 Free 处理。
+ * - `maxConcurrentConnections` 是容量项：0 = 不限，缺省按不限，由调用方在打开
+ *   连接时执行。
+ * - `canUseDataSync` 保留给「同步入口」使用；服务端 `allowDataSync` 已在
+ *   assertRecordQuota 强制，客户端只做提前提示。
+ *
+ * 这些是本地能力，服务端只下发取值，旧版客户端不受约束。
  */
 
 export { databaseEngineOf } from '@devbelt/db-core';
@@ -122,14 +125,14 @@ export function maxConcurrentConnections(entitlement?: CachedEntitlement | null)
   return typeof v === 'number' && v >= 0 ? v : 0;
 }
 
-/** 是否允许导出连接配置；默认允许（free 不限制）。 */
+/** 是否允许导出连接配置；Pro 能力，缺省 fail-closed（未登录按 Free）。 */
 export function canExportConnections(entitlement?: CachedEntitlement | null): boolean {
-  return entitlement?.allowConnectionExport !== false;
+  return entitlement?.allowConnectionExport === true;
 }
 
-/** 是否允许 ER 图；默认允许。 */
+/** 是否允许 ER 图；Pro 能力，缺省 fail-closed（未登录按 Free）。 */
 export function canUseErDiagram(entitlement?: CachedEntitlement | null): boolean {
-  return entitlement?.allowErDiagram !== false;
+  return entitlement?.allowErDiagram === true;
 }
 
 /** 是否允许数据同步；默认允许。 */

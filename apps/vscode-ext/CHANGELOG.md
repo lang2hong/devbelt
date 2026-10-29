@@ -28,6 +28,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - **Epoch transition waits for an in-flight sync round to finish** before clearing the old epoch, so a round that was already pulling cannot recreate entities that were just removed. Cancellation is checked between outbox entries, pages and records; `stopAndDrain()` bounds the wait at 15 seconds so a hung network request cannot block sign-out / account switch. A cancelled round is not counted as a failure and does not trigger backoff.
 - **Cross-window account change.** When another VS Code window signs in as a different account or signs out, this window stops personal sync and shows a single warning with a *Reload Window* action. The session is not migrated automatically — panels and connection state were loaded for the old account, and reloading is the consistent path forward.
 - **Feedback and audit-log panels reset on account switch**, matching the connection tree and slow-query panel.
+- **Free plan capabilities are now enforced.** ER diagrams and exporting connection profiles are Pro features; the Free plan allows at most two open connections at a time. Importing connection profiles stays free, and users who are not signed in are treated as Free. These are local capabilities checked by the extension, so older extension versions are unaffected.
 - **Network and account-hub errors are localized**; the raw error text is written to the diagnostics log instead of shown to the user.
 
 #### Fixed
@@ -64,6 +65,7 @@ All notable changes to DevBelt DB Client are documented in this file.
 - **Epoch 切换前先等在途同步轮次结束**，再清理旧 epoch，避免已在拉取的轮次把刚清掉的实体重新写回来。取消检查点放在出站队列条目之间、页之间、记录之间；`stopAndDrain()` 最多等 15 秒，避免网络卡死把登出/切号一起拖死。被取消的轮次不计失败、不触发退避。
 - **跨窗口换号停同步**：另一个 VS Code 窗口登录了别的账号或登出时，本窗口停止个人同步，并弹一次提示含「重新加载窗口」操作。不做自动换号——面板与连接状态是按旧账号加载的，重新加载才是一致的做法。
 - **反馈面板与审计日志面板在切号时重置**，与连接树、慢查询面板一致。
+- **Free 套餐的能力边界已生效**：ER 图与导出连接配置为 Pro 能力；Free 同时最多打开 2 个连接；导入连接仍然免费。未登录按 Free 处理。这些是扩展本地检查，旧版插件不受影响。
 - **网络错误与账户中心错误本地化**：原始错误文本写入诊断日志，不直接展示给用户。
 
 #### 修复

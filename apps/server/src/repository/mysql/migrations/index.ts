@@ -18,12 +18,13 @@ import { extensionTelemetryMigration } from './016_extension_telemetry.js';
 import { feedbackRepliesMigration } from './017_feedback_replies.js';
 import { extensionActiveDaysMigration } from './018_extension_active_days.js';
 import { planBoundariesMigration } from './019_plan_boundaries.js';
+import { planCapabilitiesMigration } from './020_plan_capabilities.js';
 
 /**
  * 迁移集合（开发阶段 squash：原 001–024 已合并为单一基线）。
  * 新库/旧库均由基线重建；旧库的历史版本由 LEGACY_MIGRATION_VERSIONS 识别并放行。
  */
-export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration, planOrderingMigration, authenticatorQuotaMigration, syncEntityKindMigration, redisEngineMigration, auditQueryIndexesMigration, aiQuotaMigration, aiTopupMigration, aiProvidersMigration, aiModelPricingMigration, aiCreditsBillingMigration, aiCreditTiersMigration, planEnginesDevicesMigration, userFeedbackMigration, extensionTelemetryMigration, feedbackRepliesMigration, extensionActiveDaysMigration, planBoundariesMigration];
+export const migrations: readonly Migration[] = [baselineMigration, planFeaturesV2Migration, planOrderingMigration, authenticatorQuotaMigration, syncEntityKindMigration, redisEngineMigration, auditQueryIndexesMigration, aiQuotaMigration, aiTopupMigration, aiProvidersMigration, aiModelPricingMigration, aiCreditsBillingMigration, aiCreditTiersMigration, planEnginesDevicesMigration, userFeedbackMigration, extensionTelemetryMigration, feedbackRepliesMigration, extensionActiveDaysMigration, planBoundariesMigration, planCapabilitiesMigration];
 
 /**
  * squash 前的历史版本登记（001–024）。基线会重建这些表；

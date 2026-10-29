@@ -31,6 +31,14 @@ export class ConnectionPathError extends Error {
  * 内部通过 db-core 的 ConnectionFactory 工厂创建连接并装配方言。
  * 支持连接池配置、LRU 淘汰、空闲超时、健康检查。
  */
+/** 超出套餐的并发连接上限（Free 默认 2）。调用方据此提示升级，而不是当成连接失败。 */
+export class ConcurrentConnectionLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`concurrent connection limit reached: ${limit}`);
+    this.name = 'ConcurrentConnectionLimitError';
+  }
+}
+
 export class ConnectionManager {
   private readonly sessions = new Map<string, ConnectionSession>();
   /** 长生命周期持有者的引用计数（见 retain/release）。 */
@@ -74,6 +82,11 @@ export class ConnectionManager {
      * 缺省为恒等（无覆盖）。仅注入纯函数，不引入 vscode 依赖。
      */
     private readonly resolveEffective?: (conn: SavedConnection) => SavedConnection,
+    /**
+     * 套餐的并发连接上限（0 = 不限）。缺省不限，测试与同步等无限制的场景不用传。
+     * 只按**不同 connId** 计数：同一连接的 PG 衍生库会话不重复占用名额。
+     */
+    private readonly concurrentLimit?: () => number,
   ) {
     this.config = { ...DEFAULT_POOL_CONFIG, ...config };
     this.startHealthCheck();
@@ -193,6 +206,12 @@ export class ConnectionManager {
     const inflight = this.connecting.get(key);
     if (inflight) return inflight;
 
+    // 容量门禁：只拦「新连接」，不拦已打开连接的多库会话或重连。
+    const limit = this.concurrentLimit?.() ?? 0;
+    if (limit > 0 && this.activeConnectionCount(conn.id) >= limit) {
+      throw new ConcurrentConnectionLimitError(limit);
+    }
+
     const generation = this.generation(conn.id);
     const promise = this.doConnect(conn, key === conn.id ? undefined : database, key);
     this.connecting.set(key, promise);
@@ -213,6 +232,19 @@ export class ConnectionManager {
   }
 
   /** 会话键：优先复用绑定该库的已有会话，否则按规则计算。 */
+  /**
+   * 当前活跃的**不同连接**数，排除正在打开的这一条。
+   * PG 多库会为一个连接配置保留多个会话键，按 connId 去重才不会把配额吃光。
+   */
+  private activeConnectionCount(excludeConnId: string): number {
+    const ids = new Set<string>();
+    for (const entry of this.sessionEntries.values()) {
+      if (entry.connId === excludeConnId) continue;
+      if (entry.session.isAlive()) ids.add(entry.connId);
+    }
+    return ids.size;
+  }
+
   private findSessionKeyOrPrimary(conn: SavedConnection, database?: string): string {
     if (conn.dbType !== DatabaseType.PG || !database) return conn.id;
     // 连接配置库，或主会话实际所在库（conn.database 为空时识别）→ 主会话。

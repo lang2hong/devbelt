@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
+import { maxConcurrentConnections } from '@devbelt/db-host/sync/entitlementGate';
 import { applyQueryTimeoutFromConfig } from './utils/sqlTimeout';
 import { ConnectionManager } from './connection/connectionManager';
 import { ConnectionPathOverrideStore } from './connection/connectionPathOverrideStore';
@@ -140,7 +141,12 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
   // 不再依赖各命令自行调用 history.add（漏一个就少一段痕迹）。
   // resolveEffective 是建连/路径校验的单一有效配置入口（覆盖优先）。
-  const manager = new ConnectionManager(undefined, history, (c) => overrideStore.applyOverrides(c));
+  const manager = new ConnectionManager(
+    undefined,
+    history,
+    (c) => overrideStore.applyOverrides(c),
+    () => maxConcurrentConnections(auth.getCachedEntitlement()),
+  );
   // cluster over SSH 未映射节点（扩容/resharding 后拓扑变化）：记诊断，并**按连接只提示一次**。
   const unmappedReporters = new Map<string, UnmappedNodeReporter>();
   manager.onRedisNodeUnmapped = (connId, address) => {

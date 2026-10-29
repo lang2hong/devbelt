@@ -168,7 +168,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('extension_installs');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies', '018_extension_active_days', '019_plan_boundaries']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies', '018_extension_active_days', '019_plan_boundaries', '020_plan_capabilities']);
     } finally {
       await pool.end();
     }
@@ -238,6 +238,54 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
       expect((await readPlan('free')).get('allowDataSync')).toBe(false);
       expect((await readPlan('pro')).get('maxDevices')).toBe(5);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('020_plan_capabilities：Free 关 ER 图与导出、并发 2；Pro 全开、并发不限（幂等）', async () => {
+    const pool = createTestPool();
+    const readPlan = async (code: string): Promise<Map<string, unknown>> => {
+      const [rows] = (await pool.query(
+        `SELECT d.feature_key, v.value_json
+           FROM plans p
+           JOIN plan_feature_values v ON v.plan_id = p.id
+           JOIN plan_feature_defs d ON d.id = v.feature_def_id
+          WHERE p.code = ?`,
+        [code],
+      )) as [Array<{ feature_key: string; value_json: unknown }>, unknown];
+      return new Map(rows.map((r) => [r.feature_key, typeof r.value_json === 'string' ? JSON.parse(r.value_json) : r.value_json]));
+    };
+    const view = (m: Map<string, unknown>, k: string): unknown => {
+      const v = m.get(k);
+      return typeof v === 'string' ? JSON.parse(v) : v;
+    };
+    try {
+      await dropAll(pool);
+      // 模拟 020 之前：能力键两档都允许，并发 free=2 / pro=0。
+      const legacy = migrations.filter((m) => m.version !== '020_plan_capabilities');
+      await runMigrations(pool as any, [...legacy], LEGACY_MIGRATION_VERSIONS);
+      const before = await readPlan('free');
+      expect(view(before, 'allowErDiagram')).toBe(true);
+      expect(view(before, 'allowConnectionExport')).toBe(true);
+
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      const free = await readPlan('free');
+      const pro = await readPlan('pro');
+      expect(view(free, 'allowErDiagram')).toBe(false);
+      expect(view(free, 'allowConnectionExport')).toBe(false);
+      expect(view(free, 'maxConcurrentConnections')).toBe(2);
+      expect(view(pro, 'allowErDiagram')).toBe(true);
+      expect(view(pro, 'allowConnectionExport')).toBe(true);
+      expect(view(pro, 'maxConcurrentConnections')).toBe(0);
+      // 019 的取值不受影响
+      expect(view(free, 'allowDataSync')).toBe(false);
+      expect(view(free, 'maxDevices')).toBe(1);
+
+      // 幂等
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      expect(view(await readPlan('free'), 'allowErDiagram')).toBe(false);
+      expect(view(await readPlan('pro'), 'maxConcurrentConnections')).toBe(0);
     } finally {
       await pool.end();
     }

@@ -110,12 +110,20 @@ describe('并发/导出/ER/数据同步 门禁', () => {
     expect(maxConcurrentConnections({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 5 })).toBe(5);
   });
 
-  it('导出/ER/数据同步：缺省允许，显式 false 才禁用', () => {
-    expect(canExportConnections(undefined)).toBe(true);
-    expect(canExportConnections({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, allowConnectionExport: false })).toBe(false);
-    expect(canUseErDiagram({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, allowErDiagram: false })).toBe(false);
-    expect(canUseDataSync({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, allowDataSync: false })).toBe(false);
-    expect(canUseErDiagram(undefined)).toBe(true);
+  it('导出/ER 是 Pro 能力：缺省 fail-closed（未登录按 Free）', () => {
+    // 未登录没有缓存权益 → 按 Free 处理，不能使用 Pro 能力。
+    expect(canExportConnections(undefined)).toBe(false);
+    expect(canUseErDiagram(undefined)).toBe(false);
+    // 显式 true 才放行。
+    expect(canExportConnections({ planCode: 'pro', allowedDatabaseTypes: [], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, allowConnectionExport: true })).toBe(true);
+    expect(canUseErDiagram({ planCode: 'pro', allowedDatabaseTypes: [], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true, allowErDiagram: true })).toBe(true);
+    // 显式 false 禁用。
+    expect(canExportConnections({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 1, maxSavedConnections: 10, allowConnectionImport: true, allowConnectionExport: false })).toBe(false);
+    expect(canUseErDiagram({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 1, maxSavedConnections: 10, allowConnectionImport: true, allowErDiagram: false })).toBe(false);
+  });
+
+  it('数据同步开关：服务端强制，客户端缺省允许（只做提前提示）', () => {
     expect(canUseDataSync(undefined)).toBe(true);
+    expect(canUseDataSync({ planCode: 'free', allowedDatabaseTypes: [], maxDevices: 1, maxSavedConnections: 10, allowConnectionImport: true, allowDataSync: false })).toBe(false);
   });
 });
