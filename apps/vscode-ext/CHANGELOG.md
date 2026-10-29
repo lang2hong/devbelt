@@ -4,6 +4,80 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [Unreleased]
+
+### English
+
+#### Added
+
+- **In-app feedback with replies.** A new **Feedback** item in the sidebar opens an editor panel where you can submit bug reports, feature requests and messages, optionally leaving an email. Replies from the DevBelt team appear under *My feedback & replies*, and the sidebar icon shows an unread count. Anonymous replies are tied to this installation through a key stored in VS Code's secret storage; signed-in feedback follows your account.
+- **Anonymous daily heartbeat** for install and active-installation counts. Sent at most once per day per installation. The payload contains a random install ID, extension version, OS/architecture and whether the window is remote; it does not contain email, account, connections, queries or IP. It is sent only when both VS Code telemetry and `devbelt.telemetry.enabled` (default **on**) are enabled. The request IP is used only for per-IP rate limiting on the heartbeat endpoint; rate-limit buckets are cleared after two hours and are not joined with install records.
+- **Charts: multiple Y axes, editable titles and per-column aggregation.** Result charts support multiple Y series, a click-to-edit title, and aggregation per selected column (count / sum / avg / min / max).
+- **Plan/quota status.** When your plan's device limit or other personal-sync entitlements are exceeded, the sync status bar and account hub now surface the reason instead of a generic "authentication expired" error.
+- **`DevBelt: Show Sync Diagnostics`** opens an output channel with the last sync run, failure codes, stalled mutations and conflict details, linked from the failure notification and status bar tooltip.
+
+#### Changed
+
+- **Sync failures are visible.** After three consecutive failures or any terminal error a single background-failure toast is shown per failure class, with *View Logs*, *Sync Now*, *Unlock Again* and *Sign In Again* actions. Manual and automatic sync share the same notification path so you do not see duplicate toasts. The status-bar tooltip shows the localized reason and points at the diagnostics log.
+- **Auto-sync quietly restores unlock on startup** when you are signed in and the DEK is still stored, instead of showing an unlock prompt on every window open.
+- **`DevBelt: Toggle Auto Sync`** and **`DevBelt: Sync Doctor`** are reachable whenever you are signed in, not only after unlock. Toggling auto-sync shows a confirmation message.
+- **Slow Queries** measures cost time from the driver (summing per-statement driver times) instead of wall clock, so UI work and scheduling noise no longer inflate the numbers; MySQL vs PostgreSQL fingerprints are kept separate so the same text against two engines no longer collapses into one entry. Adjacent identical records (same SQL, same cost, same failure) within one second are de-duplicated. Changing `devbelt.insights.historyLimit` now trims existing history immediately.
+- **Sync doctor reports what it cannot prove.** When the engine cannot reach the server or the run is aborted mid-way it now says the check is incomplete, instead of falsely claiming "consistent with cloud".
+- **Unknown future entity types in the sync feed are skipped, not fatal.** They are counted and the cursor advances, matching how unknown engines are already handled so the protocol can grow forward.
+- **Connection-color and other local-only fields survive remote updates.** Fields that are not part of the engine's sync whitelist (for example the MySQL/PostgreSQL connection color, connect/request timeouts) are carried over when a remote version lands; synced fields still follow the remote exactly, including password clears. Nothing is carried across an engine-type change.
+- **Epoch transition waits for an in-flight sync round to finish** before clearing the old epoch, so a round that was already pulling cannot recreate entities that were just removed. Cancellation is checked between outbox entries, pages and records; `stopAndDrain()` bounds the wait at 15 seconds so a hung network request cannot block sign-out / account switch. A cancelled round is not counted as a failure and does not trigger backoff.
+- **Cross-window account change.** When another VS Code window signs in as a different account or signs out, this window stops personal sync and shows a single warning with a *Reload Window* action. The session is not migrated automatically — panels and connection state were loaded for the old account, and reloading is the consistent path forward.
+- **Feedback and audit-log panels reset on account switch**, matching the connection tree and slow-query panel.
+- **Network and account-hub errors are localized**; the raw error text is written to the diagnostics log instead of shown to the user.
+
+#### Fixed
+
+- **Quota rejection no longer freezes inbound sync.** When an outbox mutation is rejected for quota reasons the rest of the outbox and the full pull still run; the run is still reported as terminal so the UI shows the failure instead of silently spinning.
+- **Slow-query panel, audit-log panel and feedback state are closed/reset on account switch** so they do not leak data from the previous account.
+- **Hard-coded Chinese "Yes" button and stray English parentheses in the merge hint** are replaced with localized strings.
+
+#### Known limitations
+
+- After another window changes the signed-in account, this window must be reloaded to see the new account; until reload, panels still show data from the old account and personal sync is stopped.
+- Epoch transition waits at most 15 seconds for an in-flight round; if a network request hangs past that window the race between cleanup and a late write can still occur (the window is now much smaller).
+- Sync merges are shallow: concurrent edits to different fields of the same record resolve as "last writer wins field by field" rather than a deep merge.
+
+### 中文
+
+#### 新增
+
+- **应用内反馈与站内回复**：侧边栏新增「反馈」入口，在编辑器区打开面板，可提交 Bug、建议与留言，可选填邮箱；DevBelt 团队的回复显示在「我的反馈与回复」里，侧边栏图标显示未读数。匿名反馈通过保存在 VS Code 安全存储的回复凭证与本安装绑定；登录后提交的反馈随账号可见。
+- **每日匿名心跳**：用于统计安装量与活跃安装数，每安装每天最多一次。载荷只有随机安装 ID、扩展版本、操作系统/架构、是否远程窗口；不包含邮箱、账号、连接、查询或 IP。仅在 VS Code 遥测与 `devbelt.telemetry.enabled`（默认**开启**）同时启用时发送。请求 IP 仅用于心跳接口的限流，限流桶两小时后清理，不与安装记录关联。
+- **图表支持多 Y 轴、可改标题、按列聚合**：结果图表可叠加多条 Y 轴序列、点击标题可编辑，选中列支持 count / sum / avg / min / max 聚合。
+- **套餐/配额状态可见**：设备数超限或其他个人同步权益不足时，同步状态栏与账户中心显示具体原因，不再统一报成「会话过期」。
+- **`DevBelt: 查看同步诊断`**：打开输出通道展示最近一次同步结果、失败码、卡住的改动与冲突详情；从失败通知和状态栏提示均可跳转。
+
+#### 变更
+
+- **同步失败现在看得见**：连续 3 次失败或任意终态错误后，按失败类别弹一次后台失败提示，含「查看日志」「立即同步」「重新解锁」「重新登录」操作。手动同步与自动同步走同一条通知路径，不重复弹提示。状态栏提示显示本地化原因并指向诊断日志。
+- **启动时自动静默恢复解锁**：已登录且本地仍持有 DEK 时，启动不再弹解锁框，直接恢复同步。
+- **`DevBelt: 切换自动同步` 与 `DevBelt: 同步体检`** 在登录后即可调用，无需先解锁；切换自动同步会给出确认提示。
+- **慢查询耗时取驱动实测**：按每条语句的驱动耗时累加，不再受 UI 调度噪声影响；MySQL 与 PostgreSQL 的同 SQL 模板按方言指纹分开，不再合并为一条；相邻 1 秒内完全相同（SQL/耗时/失败状态）的记录去重。修改 `devbelt.insights.historyLimit` 会立即裁剪已有历史。
+- **同步体检只说它能证明的事**：无法连到服务端或中途被打断时标记为「未完成」，不再误报「与云端一致」。
+- **同步 feed 中遇到未来版本的新实体类型跳过，不致命**：计数后继续推进游标，与未知引擎的前向兼容一致，允许协议向前扩展。
+- **连接颜色等本机独有字段不再被远端更新覆盖**：不在该引擎同步白名单里的字段（例如 MySQL/PostgreSQL 的连接颜色、连接/请求超时），在远端版本落地时保留；同步字段仍完全以远端为准（远端清空密码就是清空）。引擎类型变化时不搬运旧字段。
+- **Epoch 切换前先等在途同步轮次结束**，再清理旧 epoch，避免已在拉取的轮次把刚清掉的实体重新写回来。取消检查点放在出站队列条目之间、页之间、记录之间；`stopAndDrain()` 最多等 15 秒，避免网络卡死把登出/切号一起拖死。被取消的轮次不计失败、不触发退避。
+- **跨窗口换号停同步**：另一个 VS Code 窗口登录了别的账号或登出时，本窗口停止个人同步，并弹一次提示含「重新加载窗口」操作。不做自动换号——面板与连接状态是按旧账号加载的，重新加载才是一致的做法。
+- **反馈面板与审计日志面板在切号时重置**，与连接树、慢查询面板一致。
+- **网络错误与账户中心错误本地化**：原始错误文本写入诊断日志，不直接展示给用户。
+
+#### 修复
+
+- **配额拒登不再冻结入站同步**：出站 mutation 被配额拒绝时，其余出站项与整轮入站拉取仍会跑完；轮次仍标记为终态，UI 会显示失败而非静默转圈。
+- **慢查询面板、审计日志面板与反馈状态在切号时关闭/重置**，避免泄露上一账号的数据。
+- **合并提示里硬编码的中文「是」和多余的英文括号**改为本地化字符串；加载点不再硬编码。
+
+#### 已知限制
+
+- 另一个窗口切换登录账号后，本窗口必须重新加载才能看到新账号；重新加载前面板仍显示旧账号数据、个人同步已停止。
+- Epoch 切换最多等 15 秒；若网络请求卡住超过这个窗口，清理与延迟写入之间仍可能发生竞态（窗口已大幅缩小）。
+- 同步合并是浅层合并：同一记录不同字段被并发修改时，按字段「最后写入者胜」，不做字段级深合并。
+
 ## [0.4.1] - 2026-10-28
 
 ### English

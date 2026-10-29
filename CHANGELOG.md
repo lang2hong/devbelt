@@ -1,6 +1,9 @@
 # Changelog
 
-## 未发布（0.1.0）
+> 本文件为开发日志（按提交主题阶段性整理，内部用）。面向用户的正式发布说明见
+> [`apps/vscode-ext/CHANGELOG.md`](apps/vscode-ext/CHANGELOG.md)（中英双语，按版本分组）。
+
+## 未发布（下一版）
 
 ### 安全与会话加固（2026-10-20）
 
