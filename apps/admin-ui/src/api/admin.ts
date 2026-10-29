@@ -1098,19 +1098,30 @@ export interface FeedbackFilters {
 }
 
 export interface AdminOverview {
-  users: { total: number; new7d: number; active7d: number };
+  users: {
+    total: number;
+    new7d: number;
+    active7d: number;
+    daily: Array<{ day: string; newUsers: number }>;
+  };
   devices: {
     active: number;
     platforms: Array<{ platform: string; count: number }>;
     versions: Array<{ version: string; count: number }>;
   };
   sync: { connectionMetas: number; storageBytes: number; syncedUsers: number };
-  ai: { monthTokens: number; monthRequests: number };
+  ai: {
+    monthTokens: number;
+    monthBilledTokens: number;
+    monthRequests: number;
+    daily: Array<{ day: string; tokens: number; requests: number }>;
+  };
   billing: {
     paidOrders30d: number;
     revenueCents30d: number;
     topupOrders30d: number;
     topupRevenueCents30d: number;
+    daily: Array<{ day: string; planCents: number; topupCents: number }>;
   };
   feedback: {
     newCount: number;
@@ -1124,6 +1135,7 @@ export interface AdminOverview {
     active24h: number;
     active7d: number;
     active30d: number;
+    daily: Array<{ day: string; newInstalls: number; activeInstalls: number }>;
   };
 }
 

@@ -1,4 +1,5 @@
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
+import { dayKey, lastDaysUtc } from '../../../repository/mysql/dailySeries.js';
 import type {
   FeedbackDetail,
   FeedbackEmailStatus,
@@ -258,6 +259,12 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
               SUM(last_login_time >= NOW() - INTERVAL 7 DAY) AS active7d
          FROM users`,
     );
+    const userDailyRows = await rows(
+      `SELECT DATE(create_time) AS day, COUNT(*) AS n
+         FROM users
+        WHERE create_time >= UTC_DATE() - INTERVAL 29 DAY
+        GROUP BY DATE(create_time)`,
+    );
     const [devicesRow] = await rows(
       `SELECT COUNT(*) AS active FROM devices WHERE status = 'active'`,
     );
@@ -266,18 +273,39 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
          FROM personal_connection_meta WHERE delete_time IS NULL`,
     );
     const [aiRow] = await rows(
-      `SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS tokens,
+      `SELECT COALESCE(SUM(raw_prompt_tokens + raw_completion_tokens), 0) AS raw_tokens,
+              COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS billed_tokens,
               COALESCE(SUM(request_count), 0) AS requests
          FROM ai_token_usage WHERE usage_month = DATE_FORMAT(NOW(), '%Y-%m')`,
     );
+    const aiDailyRows = await rows(
+      `SELECT DATE(create_time) AS day,
+              COALESCE(SUM(raw_prompt_tokens + raw_completion_tokens), 0) AS tokens,
+              COUNT(*) AS requests
+         FROM ai_request_log
+        WHERE create_time >= UTC_DATE() - INTERVAL 29 DAY
+        GROUP BY DATE(create_time)`,
+    );
+    // 成功订单最终是 fulfilled；手工充值（channel='manual'）不是真实营收，排除。
     const [billingRow] = await rows(
       `SELECT COUNT(*) AS orders, COALESCE(SUM(amount_cents), 0) AS cents
-         FROM orders WHERE status = 'paid' AND paid_time >= NOW() - INTERVAL 30 DAY`,
+         FROM orders
+        WHERE status IN ('paid', 'fulfilled') AND channel <> 'manual'
+          AND paid_time >= NOW() - INTERVAL 30 DAY`,
+    );
+    const billingDailyRows = await rows(
+      `SELECT DATE(paid_time) AS day, purpose, COALESCE(SUM(amount_cents), 0) AS cents
+         FROM orders
+        WHERE status IN ('paid', 'fulfilled') AND channel <> 'manual'
+          AND paid_time >= UTC_DATE() - INTERVAL 29 DAY
+        GROUP BY DATE(paid_time), purpose`,
     );
     const [syncedRow] = await rows(`SELECT COUNT(*) AS users FROM personal_sync_state`);
     const [topupRow] = await rows(
       `SELECT COUNT(*) AS orders, COALESCE(SUM(amount_cents), 0) AS cents
-         FROM orders WHERE purpose = 'topup' AND status = 'paid' AND paid_time >= NOW() - INTERVAL 30 DAY`,
+         FROM orders
+        WHERE purpose = 'topup' AND status IN ('paid', 'fulfilled') AND channel <> 'manual'
+          AND paid_time >= NOW() - INTERVAL 30 DAY`,
     );
     const statusRows = await rows(`SELECT status, COUNT(*) AS n FROM user_feedback GROUP BY status`);
     const categoryRows = await rows(`SELECT category, COUNT(*) AS n FROM user_feedback GROUP BY category ORDER BY n DESC`);
@@ -301,20 +329,50 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
     const topup = topupRow ?? {};
     const byStatus = statusRows.map((r) => ({ status: String(r.status ?? ''), count: num(r.n) }));
     const byCategory = categoryRows.map((r) => ({ category: String(r.category ?? ''), count: num(r.n) }));
+    const days = lastDaysUtc(30);
+    const newUsersByDay = new Map(userDailyRows.map((r) => [dayKey(r.day), num(r.n)]));
+    const aiByDay = new Map(aiDailyRows.map((r) => [dayKey(r.day), { tokens: num(r.tokens), requests: num(r.requests) }]));
+    const revenueByDay = new Map<string, { planCents: number; topupCents: number }>();
+    for (const r of billingDailyRows) {
+      const day = dayKey(r.day);
+      const cur = revenueByDay.get(day) ?? { planCents: 0, topupCents: 0 };
+      if (String(r.purpose ?? 'plan') === 'topup') cur.topupCents += num(r.cents);
+      else cur.planCents += num(r.cents);
+      revenueByDay.set(day, cur);
+    }
     return {
-      users: { total: num(users.total), new7d: num(users.new7d), active7d: num(users.active7d) },
+      users: {
+        total: num(users.total),
+        new7d: num(users.new7d),
+        active7d: num(users.active7d),
+        daily: days.map((day) => ({ day, newUsers: newUsersByDay.get(day) ?? 0 })),
+      },
       devices: {
         active: num(devices.active),
         platforms: platformRows.map((r) => ({ platform: String(r.platform ?? ''), count: num(r.n) })),
         versions: versionRows.map((r) => ({ version: String(r.version ?? ''), count: num(r.n) })),
       },
       sync: { connectionMetas: num(sync.metas), storageBytes: num(sync.bytes), syncedUsers: num(synced.users) },
-      ai: { monthTokens: num(ai.tokens), monthRequests: num(ai.requests) },
+      ai: {
+        monthTokens: num(ai.raw_tokens),
+        monthBilledTokens: num(ai.billed_tokens),
+        monthRequests: num(ai.requests),
+        daily: days.map((day) => ({
+          day,
+          tokens: aiByDay.get(day)?.tokens ?? 0,
+          requests: aiByDay.get(day)?.requests ?? 0,
+        })),
+      },
       billing: {
         paidOrders30d: num(billing.orders),
         revenueCents30d: num(billing.cents),
         topupOrders30d: num(topup.orders),
         topupRevenueCents30d: num(topup.cents),
+        daily: days.map((day) => ({
+          day,
+          planCents: revenueByDay.get(day)?.planCents ?? 0,
+          topupCents: revenueByDay.get(day)?.topupCents ?? 0,
+        })),
       },
       feedback: {
         newCount: byStatus.find((x) => x.status === 'new')?.count ?? 0,

@@ -1,22 +1,34 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { getOverview, type AdminOverview } from '../api/admin';
 import { setAccessToken } from '@devbelt/auth-client';
+import TelemetryTrendChart from '../components/TelemetryTrendChart.vue';
+import DonutChart from '../components/charts/DonutChart.vue';
+import BarListChart from '../components/charts/BarListChart.vue';
+import DailyBarChart from '../components/charts/DailyBarChart.vue';
+import { chartColor } from '../components/charts/palette';
 
 /**
- * 平台概览：用户 / 设备 / 同步 / AI / 营收 / 反馈的只读聚合。
- * 数据来自现有表与 user_feedback，无独立埋点。
+ * 平台概览：图表化仪表盘。
+ * 数据来自既有表；趋势口径均为 UTC，服务端已补齐 30 天。
  */
 const data = ref<AdminOverview | null>(null);
 const state = ref<'loading' | 'ready' | 'error'>('loading');
 const error = ref('');
 
 const STATUS_LABEL: Record<string, string> = {
-  new: '待处理',
+  new: '待回复',
   triaged: '处理中',
-  done: '已处理',
-  rejected: '已拒绝',
+  done: '已解决',
+  rejected: '已关闭',
 };
+const STATUS_COLOR: Record<string, string> = {
+  new: 'var(--c-accent)',
+  triaged: '#d9ad2b',
+  done: '#3aa675',
+  rejected: '#d6303f',
+};
+const STATUS_ORDER = ['new', 'triaged', 'done', 'rejected'] as const;
 
 const CATEGORY_LABEL: Record<string, string> = {
   bug: 'Bug',
@@ -46,6 +58,49 @@ function fmtCents(n: number): string {
   return `¥${(n / 100).toFixed(2)}`;
 }
 
+const platformItems = computed(() => (data.value?.devices.platforms ?? [])
+  .map((p, i) => ({ label: p.platform || '未知', value: p.count, color: chartColor(i) })));
+
+const versionItems = computed(() => (data.value?.devices.versions ?? [])
+  .map((v, i) => ({ label: v.version || '未知', value: v.count, color: chartColor(i) })));
+
+const statusItems = computed(() => {
+  const counts = new Map((data.value?.feedback.byStatus ?? []).map((s) => [s.status, s.count]));
+  return STATUS_ORDER
+    .map((status) => ({ label: STATUS_LABEL[status] ?? status, value: counts.get(status) ?? 0, color: STATUS_COLOR[status] }))
+    .filter((i) => i.value > 0);
+});
+
+const categoryItems = computed(() => (data.value?.feedback.byCategory ?? [])
+  .map((c, i) => ({ label: CATEGORY_LABEL[c.category] ?? c.category, value: c.count, color: chartColor(i) }))
+  .filter((i) => i.value > 0));
+
+const revenueItems = computed(() => {
+  const b = data.value?.billing;
+  if (!b) return [];
+  const plan = Math.max(0, b.revenueCents30d - b.topupRevenueCents30d);
+  return [
+    { label: '套餐', value: plan, color: 'var(--c-accent)' },
+    { label: 'AI 充值', value: b.topupRevenueCents30d, color: '#3aa675' },
+  ].filter((i) => i.value > 0);
+});
+
+const activeWindowItems = computed(() => {
+  const t = data.value?.telemetry;
+  if (!t) return [];
+  return [
+    { label: '24 小时', value: t.active24h, color: 'var(--c-accent)' },
+    { label: '7 天', value: t.active7d, color: '#3aa675' },
+    { label: '30 天', value: t.active30d, color: '#d9ad2b' },
+  ];
+});
+
+const feedbackTotal = computed(() => (data.value?.feedback.byStatus ?? []).reduce((n, s) => n + s.count, 0));
+const processedFeedback = computed(() => {
+  const counts = data.value?.feedback.byStatus ?? [];
+  return counts.find((s) => s.status === 'triaged')?.count ?? 0;
+});
+
 async function load(): Promise<void> {
   state.value = 'loading';
   error.value = '';
@@ -68,7 +123,7 @@ onMounted(load);
     <header class="head">
       <div>
         <h2>概览</h2>
-        <p class="sub">用户、设备、同步、AI 用量与反馈的当前快照。</p>
+        <p class="sub">用户、安装、营收、AI 与反馈的图表化快照。趋势按 UTC 日期。</p>
       </div>
       <button class="btn" :disabled="state === 'loading'" @click="load">刷新</button>
     </header>
@@ -77,70 +132,119 @@ onMounted(load);
     <p v-else-if="state === 'error'" class="error">{{ error }}</p>
 
     <template v-else-if="data">
-      <div class="cards">
-        <div class="card"><div class="label">用户总数</div><div class="value">{{ data.users.total }}</div></div>
-        <div class="card"><div class="label">7 日新增</div><div class="value">{{ data.users.new7d }}</div></div>
-        <div class="card"><div class="label">7 日活跃</div><div class="value">{{ data.users.active7d }}</div></div>
-        <div class="card"><div class="label">活跃设备</div><div class="value">{{ data.devices.active }}</div></div>
-        <div class="card"><div class="label">云端连接</div><div class="value">{{ data.sync.connectionMetas }}</div></div>
-        <div class="card"><div class="label">云端存储</div><div class="value">{{ fmtBytes(data.sync.storageBytes) }}</div></div>
-        <div class="card"><div class="label">已启用同步用户</div><div class="value">{{ data.sync.syncedUsers }}</div></div>
-        <div class="card"><div class="label">本月 AI tokens</div><div class="value">{{ fmtTokens(data.ai.monthTokens) }}</div><div class="hint">{{ data.ai.monthRequests }} 次请求</div></div>
-        <div class="card"><div class="label">近 30 天营收</div><div class="value">{{ fmtCents(data.billing.revenueCents30d) }}</div><div class="hint">{{ data.billing.paidOrders30d }} 笔支付</div></div>
-        <div class="card"><div class="label">其中 AI 充值（30 天）</div><div class="value">{{ fmtCents(data.billing.topupRevenueCents30d) }}</div><div class="hint">{{ data.billing.topupOrders30d }} 笔，已含在营收内</div></div>
-        <div class="card" :class="{ alert: data.feedback.newCount > 0 }"><div class="label">待处理反馈</div><div class="value">{{ data.feedback.newCount }}</div><div class="hint">共 {{ data.feedback.byStatus.reduce((a, b) => a + b.count, 0) }} 条</div></div>
+      <div class="kpis">
+        <div class="kpi">
+          <div class="kpi-label">用户总数</div>
+          <div class="kpi-value">{{ data.users.total.toLocaleString('zh-CN') }}</div>
+          <div class="kpi-hint">7 日新增 {{ data.users.new7d }} · 7 日活跃 {{ data.users.active7d }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">安装总数</div>
+          <div class="kpi-value">{{ data.telemetry.totalInstalls.toLocaleString('zh-CN') }}</div>
+          <div class="kpi-hint">7 日新装 {{ data.telemetry.newInstalls7d }} · 30 日 {{ data.telemetry.newInstalls30d }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">7 日活跃安装</div>
+          <div class="kpi-value">{{ data.telemetry.active7d.toLocaleString('zh-CN') }}</div>
+          <div class="kpi-hint">24 小时 {{ data.telemetry.active24h }} · 30 日 {{ data.telemetry.active30d }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">近 30 天营收</div>
+          <div class="kpi-value">{{ fmtCents(data.billing.revenueCents30d) }}</div>
+          <div class="kpi-hint">{{ data.billing.paidOrders30d }} 笔支付 · 其中 AI 充值 {{ fmtCents(data.billing.topupRevenueCents30d) }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">本月 AI tokens</div>
+          <div class="kpi-value">{{ fmtTokens(data.ai.monthTokens) }}</div>
+          <div class="kpi-hint">计费 {{ fmtTokens(data.ai.monthBilledTokens) }} · {{ data.ai.monthRequests }} 次请求</div>
+        </div>
+        <div class="kpi" :class="{ alert: data.feedback.newCount > 0 }">
+          <div class="kpi-label">待回复反馈</div>
+          <div class="kpi-value">{{ data.feedback.newCount.toLocaleString('zh-CN') }}</div>
+          <div class="kpi-hint">处理中 {{ processedFeedback }} · 共 {{ feedbackTotal }} 条</div>
+        </div>
       </div>
 
-      <div class="section-head">
-        <h3>扩展安装与活跃</h3>
-        <span class="muted">匿名心跳口径，非 Marketplace 安装数</span>
-      </div>
-      <div class="cards">
-        <div class="card"><div class="label">安装总数</div><div class="value">{{ data.telemetry.totalInstalls }}</div><div class="hint">首次激活</div></div>
-        <div class="card"><div class="label">7 日新安装</div><div class="value">{{ data.telemetry.newInstalls7d }}</div><div class="hint">30 日 {{ data.telemetry.newInstalls30d }}</div></div>
-        <div class="card"><div class="label">24 小时活跃</div><div class="value">{{ data.telemetry.active24h }}</div></div>
-        <div class="card"><div class="label">7 日活跃</div><div class="value">{{ data.telemetry.active7d }}</div></div>
-        <div class="card"><div class="label">30 日活跃</div><div class="value">{{ data.telemetry.active30d }}</div></div>
+      <div class="trend-grid">
+        <section class="panel span-2">
+          <header class="panel-head">
+            <h3>安装与活跃趋势</h3>
+            <span class="sub">近 30 天 · 活跃数据自上线起</span>
+          </header>
+          <TelemetryTrendChart :points="data.telemetry.daily" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head">
+            <h3>每日新增用户</h3>
+            <span class="sub">按注册时间</span>
+          </header>
+          <DailyBarChart :points="data.users.daily" :series="[{ key: 'newUsers', label: '新增用户' }]" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head">
+            <h3>每日 AI tokens</h3>
+            <span class="sub">原始用量</span>
+          </header>
+          <DailyBarChart :points="data.ai.daily" :series="[{ key: 'tokens', label: '原始 tokens' }]" kind="tokens" />
+        </section>
+
+        <section class="panel span-2">
+          <header class="panel-head">
+            <h3>每日营收</h3>
+            <span class="sub">套餐 + AI 充值 · 已排除手工赠送单</span>
+          </header>
+          <DailyBarChart
+            stacked
+            :points="data.billing.daily"
+            :series="[{ key: 'planCents', label: '套餐' }, { key: 'topupCents', label: 'AI 充值' }]"
+            kind="money"
+          />
+        </section>
       </div>
 
-      <div class="panels">
-        <div class="panel">
-          <h3>活跃设备平台</h3>
-          <ul v-if="data.devices.platforms.length">
-            <li v-for="p in data.devices.platforms" :key="p.platform">
-              <span>{{ p.platform || '（未知）' }}</span><b>{{ p.count }}</b>
-            </li>
-          </ul>
-          <p v-else class="muted">暂无数据。</p>
-        </div>
-        <div class="panel">
-          <h3>客户端版本</h3>
-          <ul v-if="data.devices.versions.length">
-            <li v-for="v in data.devices.versions" :key="v.version">
-              <span class="mono">{{ v.version || '—' }}</span><b>{{ v.count }}</b>
-            </li>
-          </ul>
-          <p v-else class="muted">暂无数据。</p>
-        </div>
-        <div class="panel">
-          <h3>反馈状态</h3>
-          <ul v-if="data.feedback.byStatus.length">
-            <li v-for="s in data.feedback.byStatus" :key="s.status">
-              <span>{{ STATUS_LABEL[s.status] ?? s.status }}</span><b>{{ s.count }}</b>
-            </li>
-          </ul>
-          <p v-else class="muted">暂无反馈。</p>
-        </div>
-        <div class="panel">
-          <h3>反馈分类</h3>
-          <ul v-if="data.feedback.byCategory.length">
-            <li v-for="c in data.feedback.byCategory" :key="c.category">
-              <span>{{ CATEGORY_LABEL[c.category] ?? c.category }}</span><b>{{ c.count }}</b>
-            </li>
-          </ul>
-          <p v-else class="muted">暂无反馈。</p>
-        </div>
+      <div class="dist-grid">
+        <section class="panel">
+          <header class="panel-head"><h3>设备平台</h3><span class="sub">活跃设备</span></header>
+          <DonutChart :items="platformItems" center-label="活跃设备" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h3>客户端版本</h3><span class="sub">活跃设备</span></header>
+          <BarListChart :items="versionItems" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h3>反馈状态</h3><span class="sub">全部反馈</span></header>
+          <DonutChart :items="statusItems" center-label="反馈" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h3>反馈分类</h3><span class="sub">全部反馈</span></header>
+          <DonutChart :items="categoryItems" center-label="反馈" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h3>营收构成</h3><span class="sub">近 30 天</span></header>
+          <DonutChart :items="revenueItems" center-label="营收" kind="money" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h3>活跃窗口</h3><span class="sub">滚动窗口，互相包含</span></header>
+          <BarListChart :items="activeWindowItems" />
+        </section>
       </div>
+
+      <section class="panel ops">
+        <header class="panel-head"><h3>同步与运行</h3><span class="sub">当前快照</span></header>
+        <div class="ops-grid">
+          <div><span>云端连接</span><b>{{ data.sync.connectionMetas.toLocaleString('zh-CN') }}</b></div>
+          <div><span>云端存储</span><b>{{ fmtBytes(data.sync.storageBytes) }}</b></div>
+          <div><span>已启用同步用户</span><b>{{ data.sync.syncedUsers.toLocaleString('zh-CN') }}</b></div>
+          <div><span>本月计费 tokens</span><b>{{ fmtTokens(data.ai.monthBilledTokens) }}</b></div>
+        </div>
+      </section>
     </template>
   </section>
 </template>
@@ -149,23 +253,41 @@ onMounted(load);
 .page { display: flex; flex-direction: column; gap: 16px; }
 .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 h2 { margin: 0 0 4px; font-size: 20px; }
-.sub { margin: 0; color: var(--c-text-muted); font-size: 13px; }
-.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.card { padding: 14px 16px; border: 1px solid var(--c-border-strong); border-radius: 8px; background: var(--c-surface); }
-.card .label { color: var(--c-text-muted); font-size: 12px; }
-.card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
-.card .hint { color: var(--c-text-muted); font-size: 12px; margin-top: 2px; }
-.card.alert { border-color: var(--c-accent); }
-.section-head { display: flex; align-items: baseline; gap: 10px; margin-top: 4px; }
-.section-head h3 { margin: 0; font-size: 14px; }
-.panels { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-.panel { padding: 14px 16px; border: 1px solid var(--c-border-strong); border-radius: 8px; background: var(--c-surface); }
-.panel h3 { margin: 0 0 10px; font-size: 14px; }
-.panel ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.panel li { display: flex; justify-content: space-between; font-size: 13px; }
-.mono { font-family: var(--c-font-mono, monospace); }
-.muted { color: var(--c-text-muted); font-size: 13px; }
-.error { color: var(--c-danger); font-size: 13px; }
+.sub { margin: 0; color: var(--c-text-muted); font-size: 12px; }
 .btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
+
+.kpis { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kpi { padding: 14px 16px; border: 1px solid var(--c-border-strong); border-radius: 8px; background: var(--c-surface); min-width: 0; }
+.kpi-label { color: var(--c-text-muted); font-size: 12px; }
+.kpi-value { font-size: 24px; font-weight: 700; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-hint { color: var(--c-text-muted); font-size: 11.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kpi.alert { border-color: var(--c-accent); }
+
+.trend-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.trend-grid .span-2 { grid-column: span 2; }
+.dist-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+.panel { padding: 14px 16px; border: 1px solid var(--c-border-strong); border-radius: 8px; background: var(--c-surface); min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.panel-head h3 { margin: 0; font-size: 14px; }
+.panel-head .sub { font-size: 11.5px; }
+
+.ops { margin-top: 2px; }
+.ops-grid { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 4px; }
+.ops-grid div { display: flex; flex-direction: column; gap: 2px; }
+.ops-grid span { color: var(--c-text-muted); font-size: 12px; }
+.ops-grid b { font-size: 17px; font-weight: 700; }
+
+.muted { color: var(--c-text-muted); font-size: 13px; }
+.error { color: var(--c-danger); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trend-grid { grid-template-columns: minmax(0, 1fr); }
+  .trend-grid .span-2 { grid-column: auto; }
+}
+@media (max-width: 560px) {
+  .kpis { grid-template-columns: minmax(0, 1fr); }
+}
 </style>

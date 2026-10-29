@@ -62,11 +62,11 @@ async function build() {
       list: async () => ({ items: [], nextId: null, total: 0 }),
       updateStatusInTx: async () => false,
       overview: async () => ({
-        users: { total: 0, new7d: 0, active7d: 0 },
+        users: { total: 0, new7d: 0, active7d: 0, daily: [] },
         devices: { active: 0, platforms: [], versions: [] },
         sync: { connectionMetas: 0, storageBytes: 0, syncedUsers: 0 },
-        ai: { monthTokens: 0, monthRequests: 0 },
-        billing: { paidOrders30d: 0, revenueCents30d: 0, topupOrders30d: 0, topupRevenueCents30d: 0 },
+        ai: { monthTokens: 0, monthBilledTokens: 0, monthRequests: 0, daily: [] },
+        billing: { paidOrders30d: 0, revenueCents30d: 0, topupOrders30d: 0, topupRevenueCents30d: 0, daily: [] },
         feedback: { newCount: 0, byStatus: [], byCategory: [] },
       }),
     } as never,
@@ -76,6 +76,7 @@ async function build() {
       overview: async () => ({
         totalInstalls: 0, newInstalls7d: 0, newInstalls30d: 0,
         active24h: 0, active7d: 0, active30d: 0,
+        daily: [],
       }),
     },
 

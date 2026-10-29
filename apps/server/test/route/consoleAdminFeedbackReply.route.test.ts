@@ -131,7 +131,7 @@ async function build(opts: { emailSender?: EmailSender | null } = {}) {
     feedbackRepo: feedback.repo(),
     telemetryRepo: {
       record: async () => undefined,
-      overview: async () => ({ totalInstalls: 0, newInstalls7d: 0, newInstalls30d: 0, active24h: 0, active7d: 0, active30d: 0 }),
+      overview: async () => ({ totalInstalls: 0, newInstalls7d: 0, newInstalls30d: 0, active24h: 0, active7d: 0, active30d: 0, daily: [] }),
     },
     emailSender,
     userRepo,

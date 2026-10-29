@@ -104,7 +104,13 @@ export interface FeedbackThreadQuery {
 }
 
 export interface FeedbackOverview {
-  users: { total: number; new7d: number; active7d: number };
+  users: {
+    total: number;
+    new7d: number;
+    active7d: number;
+    /** 近 30 天每日新增用户（UTC，服务端补 0）。 */
+    daily: Array<{ day: string; newUsers: number }>;
+  };
   devices: {
     active: number;
     platforms: Array<{ platform: string; count: number }>;
@@ -112,13 +118,23 @@ export interface FeedbackOverview {
   };
   /** syncedUsers：已启用个人同步的用户数（personal_sync_state 每用户一行）。 */
   sync: { connectionMetas: number; storageBytes: number; syncedUsers: number };
-  ai: { monthTokens: number; monthRequests: number };
+  ai: {
+    /** 原始 token（上游真实用量）。 */
+    monthTokens: number;
+    /** 计费 token（含倍率），用于展示口径差异。 */
+    monthBilledTokens: number;
+    monthRequests: number;
+    /** 近 30 天每日原始 token 与请求数（UTC，服务端补 0）。 */
+    daily: Array<{ day: string; tokens: number; requests: number }>;
+  };
   /** topup* 是 paidOrders30d / revenueCents30d 中 AI 充值订单的子集，不是额外增量。 */
   billing: {
     paidOrders30d: number;
     revenueCents30d: number;
     topupOrders30d: number;
     topupRevenueCents30d: number;
+    /** 近 30 天每日营收，按套餐/充值拆分（UTC，服务端补 0）。 */
+    daily: Array<{ day: string; planCents: number; topupCents: number }>;
   };
   feedback: {
     newCount: number;

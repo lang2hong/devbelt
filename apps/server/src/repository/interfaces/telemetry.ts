@@ -19,6 +19,15 @@ export interface TelemetryOverview {
   active24h: number;
   active7d: number;
   active30d: number;
+  /** 近 30 天（UTC），无数据的日期补 0。 */
+  daily: TelemetryDailyPoint[];
+}
+
+export interface TelemetryDailyPoint {
+  /** `YYYY-MM-DD`（UTC）。 */
+  day: string;
+  newInstalls: number;
+  activeInstalls: number;
 }
 
 export interface ITelemetryRepo {
