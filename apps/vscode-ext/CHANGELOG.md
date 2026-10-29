@@ -15,7 +15,8 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 #### Changed
 
-- **The feedback panel is a single column.** The form and "My feedback & replies" are stacked vertically instead of a left/right split, so the form is readable in narrow editor groups.
+- **The feedback panel is a single column.**
+- **AI Chat charts handle negative values.** Time-series results with refunds or losses (for example a monthly revenue report where the refund column is negative) now offer a line chart; previously any negative value made the whole result fall back to a table. Bar and pie charts still require non-negative values because they are drawn from a zero baseline. The form and "My feedback & replies" are stacked vertically instead of a left/right split, so the form is readable in narrow editor groups.
 - Free-tier engine fallback now includes PostgreSQL, matching the server's Free plan.
 - Import/export and authenticator-quota messages no longer hard-code "Pro" or "Free plan"; they read the current plan.
 - The feedback failure notice now offers **View plans** in addition to **View logs**.
@@ -34,7 +35,8 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 #### 变更
 
-- **反馈面板改为单列**：表单与「我的反馈与回复」上下排列，窄编辑器分组下不再左右挤压。
+- **反馈面板改为单列**
+- **AI Chat 图表支持负数**：带退款/亏损的时间序列（例如月度营收里退款为负）现在可以出折线图；此前只要出现负数就整表退回表格。柱状/饼图仍要求非负，因为它们按 0 基线绘制。：表单与「我的反馈与回复」上下排列，窄编辑器分组下不再左右挤压。
 - Free 的引擎兜底补上 PostgreSQL，与服务端 Free 套餐一致。
 - 导入/导出与验证器配额提示不再写死「Pro」「免费套餐」，改为按当前套餐表述。
 - 反馈失败提示增加「查看套餐」动作（原来只有「查看日志」）。

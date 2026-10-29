@@ -12,7 +12,7 @@ export const PIE_HEIGHT = 200;
 export const FALLBACK_WIDTH = 720;
 
 // 纯函数在 chartMath.ts（DOM 无关、可单测），此处转导出供组件沿用原导入路径。
-export { fitLabel, fmtChartValue, niceTicks, smartLabels, textWidth } from './chartMath';
+export { fitLabel, fmtChartValue, niceTicks, niceTicksRange, smartLabels, textWidth } from './chartMath';
 
 /** 容器实测宽度（ResizeObserver）：图表按真实像素绘制，字号不随宽度缩放。 */
 export function useChartWidth(): { el: Ref<HTMLElement | null>; width: Ref<number> } {

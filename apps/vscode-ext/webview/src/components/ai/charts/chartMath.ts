@@ -33,6 +33,25 @@ export function niceTicks(max: number, count = 4): number[] {
   return ticks;
 }
 
+/**
+ * 跨 0 的刻度：覆盖 [min, max]，步长取 1/2/5×10^n。
+ * 折线图允许负值时必须用这个，不能沿用「从 0 起」的 `niceTicks`。
+ */
+export function niceTicksRange(min: number, max: number, count = 4): number[] {
+  const lo = Math.min(min, 0);
+  const hi = Math.max(max, 0);
+  if (lo === hi) return [0, 1];
+  const rawStep = (hi - lo) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const start = Math.floor(lo / step) * step;
+  const end = Math.ceil(hi / step) * step;
+  const ticks: number[] = [];
+  for (let v = start; v <= end + step * 1e-9; v += step) ticks.push(Number(v.toFixed(10)));
+  return ticks;
+}
+
 /** 文本显示宽度估算（px，11px 字号；CJK 字符按双宽）。 */
 export function textWidth(s: string): number {
   let w = 0;

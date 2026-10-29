@@ -185,6 +185,14 @@ onMounted(load);
             :series="[{ key: 'planCents', label: '套餐' }, { key: 'topupCents', label: 'AI 充值' }]"
             kind="money"
           />
+          <div class="panel-foot">
+            <span class="foot-label">手工赠送 · 近 30 天（不计营收，不含已退款）</span>
+            <span class="foot-values">
+              {{ data.billing.manualGift.orders.toLocaleString('zh-CN') }} 笔 ·
+              面值 {{ fmtCents(data.billing.manualGift.faceValueCents) }} ·
+              {{ fmtTokens(data.billing.manualGift.tokens) }} tokens
+            </span>
+          </div>
         </section>
 
         <section class="panel">
@@ -233,30 +241,18 @@ onMounted(load);
         <section class="panel">
           <header class="panel-head"><h3>活跃窗口</h3><span class="sub">滚动窗口，互相包含</span></header>
           <BarListChart :items="activeWindowItems" />
+          <div class="panel-foot">
+            <span class="foot-label">同步 · 当前快照</span>
+            <span class="foot-values">
+              云端连接 {{ data.sync.connectionMetas.toLocaleString('zh-CN') }} ·
+              存储 {{ fmtBytes(data.sync.storageBytes) }} ·
+              已同步用户 {{ data.sync.syncedUsers.toLocaleString('zh-CN') }} ·
+              本月计费 {{ fmtTokens(data.ai.monthBilledTokens) }} tokens
+            </span>
+          </div>
         </section>
       </div>
 
-      <section class="panel gift-panel">
-        <header class="panel-head">
-          <h3>手工赠送</h3>
-          <span class="sub">近 30 天 · 不计营收，不含已退款</span>
-        </header>
-        <div class="gift-grid">
-          <div><span>笔数</span><b>{{ data.billing.manualGift.orders.toLocaleString('zh-CN') }}</b></div>
-          <div><span>面值</span><b>{{ fmtCents(data.billing.manualGift.faceValueCents) }}</b></div>
-          <div><span>发放 tokens</span><b>{{ fmtTokens(data.billing.manualGift.tokens) }}</b></div>
-        </div>
-      </section>
-
-      <section class="panel ops">
-        <header class="panel-head"><h3>同步与运行</h3><span class="sub">当前快照</span></header>
-        <div class="ops-grid">
-          <div><span>云端连接</span><b>{{ data.sync.connectionMetas.toLocaleString('zh-CN') }}</b></div>
-          <div><span>云端存储</span><b>{{ fmtBytes(data.sync.storageBytes) }}</b></div>
-          <div><span>已启用同步用户</span><b>{{ data.sync.syncedUsers.toLocaleString('zh-CN') }}</b></div>
-          <div><span>本月计费 tokens</span><b>{{ fmtTokens(data.ai.monthBilledTokens) }}</b></div>
-        </div>
-      </section>
     </template>
   </section>
 </template>
@@ -269,7 +265,7 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .btn { background: var(--c-accent); color: var(--c-surface); border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 
-.kpis { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kpis { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .kpi { padding: 14px 16px; border: 1px solid var(--c-border-strong); border-radius: 8px; background: var(--c-surface); min-width: 0; }
 .kpi-label { color: var(--c-text-muted); font-size: 12px; }
 .kpi-value { font-size: 24px; font-weight: 700; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -284,20 +280,20 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .panel-head h3 { margin: 0; font-size: 14px; }
 .panel-head .sub { font-size: 11.5px; }
 
-.ops { margin-top: 2px; }
-.gift-panel { margin-top: 2px; }
-.gift-grid { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 4px; }
-.gift-grid div { display: flex; flex-direction: column; gap: 2px; }
-.gift-grid span { color: var(--c-text-muted); font-size: 12px; }
-.gift-grid b { font-size: 17px; font-weight: 700; }
-.ops-grid { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 4px; }
-.ops-grid div { display: flex; flex-direction: column; gap: 2px; }
-.ops-grid span { color: var(--c-text-muted); font-size: 12px; }
-.ops-grid b { font-size: 17px; font-weight: 700; }
+.panel-foot {
+  display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline;
+  margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--c-border-strong);
+  font-size: 12px;
+}
+.panel-foot .foot-label { color: var(--c-text-muted); }
+.panel-foot .foot-values { color: var(--c-text); overflow-wrap: anywhere; }
 
 .muted { color: var(--c-text-muted); font-size: 13px; }
 .error { color: var(--c-danger); font-size: 13px; }
 
+@media (max-width: 1500px) {
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 900px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .trend-grid { grid-template-columns: minmax(0, 1fr); }

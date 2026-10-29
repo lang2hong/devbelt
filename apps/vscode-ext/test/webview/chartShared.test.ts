@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitLabel, fmtChartValue, niceTicks, smartLabels } from '../../webview/src/components/ai/charts/chartMath';
+import { fitLabel, fmtChartValue, niceTicks, niceTicksRange, smartLabels } from '../../webview/src/components/ai/charts/chartMath';
 
 describe('niceTicks（顶刻度必须 ≥ 最大值）', () => {
   it.each([16, 15, 550, 1838, 7, 1, 0.3, 99999])('max=%s', (max) => {
@@ -70,5 +70,24 @@ describe('fitLabel / fmtChartValue', () => {
     expect(fmtChartValue(12000)).toBe('12K');
     expect(fmtChartValue(2_500_000)).toBe('2.5M');
     expect(fmtChartValue(1.5)).toBe('1.5');
+  });
+});
+
+describe('niceTicksRange（跨 0 的折线轴）', () => {
+  it('同时覆盖负值与正值，且包含 0', () => {
+    const ticks = niceTicksRange(-12, 40);
+    expect(ticks[0]).toBeLessThanOrEqual(-12);
+    expect(ticks[ticks.length - 1]).toBeGreaterThanOrEqual(40);
+    expect(ticks).toContain(0);
+  });
+
+  it('全负/全正也包含 0，步长单调递增', () => {
+    for (const [lo, hi] of [[-9, -1], [1, 9], [-0.4, 0.4]] as const) {
+      const ticks = niceTicksRange(lo, hi);
+      expect(ticks[0]).toBeLessThanOrEqual(lo);
+      expect(ticks[ticks.length - 1]).toBeGreaterThanOrEqual(hi);
+      expect(ticks).toContain(0);
+      for (let i = 1; i < ticks.length; i++) expect(ticks[i]!).toBeGreaterThan(ticks[i - 1]!);
+    }
   });
 });

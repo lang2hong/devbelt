@@ -112,9 +112,9 @@ const PIE_MAX_SLICES = 12;
  * - x 列 = 首个非数值列（全数值列 → 无类别轴 → 不可画）；
  * - 数值列（去掉 x）按原顺序成序列，最多 6 条（超出忽略）；
  * - 行过滤：至少首个数值列可解析的行才进图；
- * - 资格：柱 ≤ 60 行且数值全非负；线 ≤ 200 点、x 时间样且数值全非负；
- *   饼 = 单指标、≤ 12 行、数值全非负且至少一个正数；额外文本列不影响饼
- *   （负值图元会被钳到 0 基线造成误导，故柱/线同样要求全非负，负值 fail-open 回表格）；
+ * - 资格：柱 ≤ 60 行且数值全非负；线 ≤ 200 点且 x 时间样（**允许负值**：折线按 min/max
+ *   域绘制，能正确显示退款等负数）；饼 = 单指标、≤ 12 行、数值全非负且至少一个正数；
+ *   柱/饼仍要求全非负（按 0 基线钳制，负值会失真）；
  * - 变体：时间单序列追加面积；多序列追加堆叠柱；分类多/标签长追加横向条形；
  * - 推荐序：时间样 → 线优先；分类小额 → 饼优先；否则柱优先。
  */
@@ -163,7 +163,8 @@ export function inferCharts(header: string[], rows: string[][]): ChartSpec | nul
     && firstValues.some((v) => v > 0);
 
   const barOk = allNonNegative && kept.length <= BAR_MAX_ROWS;
-  const lineOk = allNonNegative && timeLike && kept.length <= LINE_MAX_POINTS;
+  // 折线图按 [min, max] 域绘制（见 LineChart），负值无需钳到 0。
+  const lineOk = timeLike && kept.length <= LINE_MAX_POINTS;
   const singleSeries = spec.series.length === 1;
   const horizontalOk = barOk && (kept.length > 8 || spec.xValues.some((v) => v.length > 12));
 
@@ -171,7 +172,8 @@ export function inferCharts(header: string[], rows: string[][]): ChartSpec | nul
   const types: ChartType[] = [];
   if (lineOk) {
     types.push('line');
-    if (singleSeries) types.push('area');
+    // 面积填充以 0 为基线；跨 0 的数据不提供，避免填充区域误导。
+    if (singleSeries && allNonNegative) types.push('area');
   }
   if (!timeLike && pieOk) types.push('pie');
   if (barOk) {

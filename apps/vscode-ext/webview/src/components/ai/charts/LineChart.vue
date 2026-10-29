@@ -6,7 +6,7 @@ import {
   CHART_PALETTE,
   fitLabel,
   fmtChartValue,
-  niceTicks,
+  niceTicksRange,
   smartLabels,
   textWidth,
   useChartTip,
@@ -27,9 +27,13 @@ const BOTTOM = 24;
 const plotH = H - TOP - BOTTOM;
 const baseY = TOP + plotH;
 
-const maxV = computed(() => Math.max(1, ...props.series.flatMap((s) => s.values.map((v) => Math.abs(v)))));
-const ticks = computed(() => niceTicks(maxV.value));
-const yMax = computed(() => ticks.value[ticks.value.length - 1] || 1);
+// 折线允许负值：Y 轴覆盖 [min, max]，0 值处画轴线。柱/饼仍由推断层限制为非负。
+const minV = computed(() => Math.min(0, ...props.series.flatMap((s) => s.values)));
+const maxV = computed(() => Math.max(0, ...props.series.flatMap((s) => s.values)));
+const ticks = computed(() => niceTicksRange(minV.value, maxV.value));
+const yMin = computed(() => ticks.value[0] ?? 0);
+const yMax = computed(() => ticks.value[ticks.value.length - 1] ?? 1);
+const span = computed(() => yMax.value - yMin.value || 1);
 const tickLabels = computed(() => ticks.value.map(fmtChartValue));
 const left = computed(() => Math.ceil(Math.max(...tickLabels.value.map(textWidth))) + 12);
 const right = 16;
@@ -39,14 +43,15 @@ const n = computed(() => Math.max(props.xValues.length, 1));
 /** 点放在等分槽中心（首尾不贴边，标签不被裁）。 */
 const slotW = computed(() => plotW.value / n.value);
 const x = (i: number): number => left.value + slotW.value * i + slotW.value / 2;
-const y = (v: number): number => TOP + plotH - (Math.max(v, 0) / yMax.value) * plotH;
+const y = (v: number): number => TOP + plotH - ((v - yMin.value) / span.value) * plotH;
+const zeroY = computed(() => y(0));
 
 const lines = computed(() =>
   props.series.map((s, si) => {
     const pts = s.values.map((v, i) => ({ cx: x(i), cy: y(v), value: v, label: fmtChartValue(v) }));
     const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.cx.toFixed(1)},${p.cy.toFixed(1)}`).join(' ');
     const area = pts.length
-      ? `${path} L${pts[pts.length - 1]!.cx.toFixed(1)},${baseY} L${pts[0]!.cx.toFixed(1)},${baseY} Z`
+      ? `${path} L${pts[pts.length - 1]!.cx.toFixed(1)},${zeroY.value.toFixed(1)} L${pts[0]!.cx.toFixed(1)},${zeroY.value.toFixed(1)} Z`
       : '';
     return { label: s.label, color: CHART_PALETTE[si % CHART_PALETTE.length]!, points: pts, path, area };
   }),
@@ -89,7 +94,7 @@ const leave = () => {
     </div>
     <svg :width="width" :height="H" class="ai-chart-svg" role="img" :aria-label="`${xLabel} line chart`">
       <g v-for="(t, ti) in ticks" :key="ti">
-        <line :x1="left" :x2="width - right" :y1="y(t)" :y2="y(t)" :class="ti === 0 ? 'ai-chart-axis' : 'ai-chart-grid'" />
+        <line :x1="left" :x2="width - right" :y1="y(t)" :y2="y(t)" :class="Math.abs(t) < 1e-9 ? 'ai-chart-axis' : 'ai-chart-grid'" />
         <text :x="left - 8" :y="y(t) + 4" class="ai-chart-tick" text-anchor="end">{{ tickLabels[ti] }}</text>
       </g>
       <line v-if="hover !== null" :x1="x(hover)" :x2="x(hover)" :y1="TOP" :y2="baseY" class="ai-chart-cursor" />
@@ -108,7 +113,7 @@ const leave = () => {
           />
         </template>
         <template v-if="showValues">
-          <text v-for="(p, pi) in line.points" :key="`v${pi}`" :x="p.cx" :y="p.cy - 8" class="ai-chart-value" text-anchor="middle">{{ p.label }}</text>
+          <text v-for="(p, pi) in line.points" :key="`v${pi}`" :x="p.cx" :y="p.value >= 0 ? p.cy - 8 : p.cy + 14" class="ai-chart-value" text-anchor="middle">{{ p.label }}</text>
         </template>
       </g>
       <template v-for="(xv, i) in xValues" :key="i">

@@ -89,11 +89,27 @@ describe('inferCharts（结果形态 → 图表规格）', () => {
     expect(spec!.series).toHaveLength(1);
   });
 
-  it('负值：柱/线资格同时失效（fail-open 回表格，不把负值画成 0）', () => {
-    // 两列混合正负：饼要求全正、柱/线要求全非负 → 无图型
+  it('月度营收 + 退款为负：多序列仍可出折线（用户报表形态）', () => {
+    const spec = inferCharts(
+      ['月份', '不退款到款(万元)', '退款(万元)', '退款+到款(万元)', '退款比例(%)'],
+      [
+        ['2025-11', '120.35', '-8.20', '112.15', '-7.31'],
+        ['2025-12', '98.10', '-5.00', '93.10', '-5.37'],
+        ['2026-01', '150.00', '-10.00', '140.00', '-7.14'],
+      ],
+    );
+    expect(spec).not.toBeNull();
+    expect(spec!.types).toContain('line');
+    expect(spec!.types).not.toContain('bar');
+    expect(spec!.series.map((x) => x.label)).toEqual(['不退款到款(万元)', '退款(万元)', '退款+到款(万元)', '退款比例(%)']);
+  });
+
+  it('负值：分类数据不出图；时间序列允许折线（退款/亏损）', () => {
+    // 分类 + 混合正负：柱/饼都按 0 基线钳制 → 无图型。
     expect(inferCharts(['k', 'v'], [['a', '-5'], ['b', '3']])).toBeNull();
-    // 时间样 + 负值：线/柱均不可用
-    expect(inferCharts(['month', 'profit'], [['2026-01', '-5'], ['2026-02', '3']])).toBeNull();
+    // 时间样 + 负值：折线可用（按 min/max 域绘制），柱/面积/饼仍不可用。
+    const negativeSpec = inferCharts(['month', 'profit'], [['2026-01', '-5'], ['2026-02', '3']]);
+    expect(negativeSpec?.types).toEqual(['line']);
     // 全非负（含 0）保持可用（两列时间样：线/柱可用，饼仍按全正口径追加）
     const spec = inferCharts(['month', 'sales'], monthRows())!;
     expect(spec.types).toContain('line');
