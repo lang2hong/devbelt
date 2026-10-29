@@ -166,6 +166,8 @@ export const en: MessageCatalog = {
   'sync.action.syncNow': 'Sync Now',
   'sync.action.unlock': 'Unlock Again',
   'sync.action.login': 'Sign In Again',
+  'sync.crossWindowAccountChanged': 'The signed-in account was changed in another window, so personal sync stopped in this one. Reload this window to use the new account.',
+  'sync.action.reloadWindow': 'Reload Window',
   'sync.viewLogsHint': 'Details: Command Palette → DevBelt: Show Diagnostics Log',
   'sync.skippedDisabled': '{count} record(s) parked because this item is turned off on this device (auto-resumed when re-enabled)',
   'sync.doctorCheckFailed': 'The check did not finish: {detail}',

@@ -421,6 +421,99 @@ describe('AuthService.refreshEntitlement', () => {
     expect(secrets.values.get(USER_ID_KEY)).toBe('42');
   });
 
+  describe('跨窗口身份变更（onExternalIdentityChange）', () => {
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    async function loggedIn(userId = '1') {
+      const secrets = makeSharedSecrets();
+      const memento = makeMemento();
+      await secrets.store(ACCESS_KEY, 'A1');
+      await secrets.store(REFRESH_KEY, 'R1');
+      await secrets.store(USER_ID_KEY, userId);
+      installFetch(() => ({ status: 200, body: meResponse(null) }));
+      const auth = new AuthService(secrets as any, 'http://localhost:3000', memento as any);
+      await auth.init();
+      const changes: Array<{ from?: string; to?: string }> = [];
+      auth.onExternalIdentityChange((c) => changes.push(c));
+      return { secrets, auth, changes };
+    }
+
+    it('另一窗口把 userId 换成别的账号 → 触发，带 from/to', async () => {
+      const { secrets, changes } = await loggedIn('1');
+      await secrets.store(USER_ID_KEY, '2'); // 另一窗口登录为账号 2
+      await flush();
+      expect(changes).toEqual([{ from: '1', to: '2' }]);
+    });
+
+    it('另一窗口登出（userId 被删）→ 触发，to 为空', async () => {
+      const { secrets, changes } = await loggedIn('1');
+      await secrets.delete(USER_ID_KEY);
+      await flush();
+      expect(changes).toEqual([{ from: '1', to: undefined }]);
+    });
+
+    it('同一 userId 重复写入（令牌轮换等）不触发', async () => {
+      const { secrets, changes } = await loggedIn('1');
+      await secrets.store(USER_ID_KEY, '1');
+      await flush();
+      expect(changes).toEqual([]);
+    });
+
+    it('本窗口自己登录：onDidChange 回声不触发', async () => {
+      const secrets = makeSharedSecrets();
+      installFetch(() => ({ status: 200, body: { accessToken: 'A1', refreshToken: 'R1', user: { userId: '42' } } }));
+      const auth = new AuthService(secrets as any, 'http://localhost:3000', makeMemento() as any);
+      await auth.init();
+      const changes: unknown[] = [];
+      auth.onExternalIdentityChange((c) => changes.push(c));
+
+      await auth.login('a@b.c', 'password-1234');
+      await flush();
+
+      expect(secrets.values.get(USER_ID_KEY)).toBe('42');
+      expect(changes).toEqual([]);
+    });
+
+    it('本窗口自己登出：回声不触发（它走 AuthEvent）', async () => {
+      const { secrets, auth, changes } = await loggedIn('1');
+      void secrets;
+      await auth.logout();
+      await flush();
+      expect(changes).toEqual([]);
+    });
+
+    it('本窗口 getMe 写入 userId：回声不触发', async () => {
+      const secrets = makeSharedSecrets();
+      await secrets.store(ACCESS_KEY, 'A1');
+      await secrets.store(REFRESH_KEY, 'R1');
+      installFetch(() => ({ status: 200, body: meResponse(null) }));
+      const auth = new AuthService(secrets as any, 'http://localhost:3000', makeMemento() as any);
+      await auth.init();
+      const changes: unknown[] = [];
+      auth.onExternalIdentityChange((c) => changes.push(c));
+
+      await auth.getMe();
+      await flush();
+
+      expect(secrets.values.get(USER_ID_KEY)).toBe('1');
+      expect(changes).toEqual([]);
+    });
+
+    it('取消订阅后不再收到；监听方抛错不影响其他监听方', async () => {
+      const { secrets, auth } = await loggedIn('1');
+      const got: unknown[] = [];
+      auth.onExternalIdentityChange(() => { throw new Error('listener boom'); });
+      const sub = auth.onExternalIdentityChange((c) => got.push(c));
+      await secrets.store(USER_ID_KEY, '2');
+      await flush();
+      expect(got).toHaveLength(1);
+      sub.dispose();
+      await secrets.store(USER_ID_KEY, '3');
+      await flush();
+      expect(got).toHaveLength(1);
+    });
+  });
+
   it('getUserId 优先使用持久化 userId（不联网）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();

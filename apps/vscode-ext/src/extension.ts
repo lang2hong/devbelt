@@ -19,6 +19,7 @@ import { EsDslStore } from './result/esDslStore';
 import { diagDispose, diagInfo, diagWarn, diagError, diagShow } from './utils/diagnostics';
 import { SyncFailureNotifier } from './sync/syncFailureNotifier';
 import { errorDetail } from './sync/syncFailure';
+import { createCrossWindowIdentityHandler } from './sync/crossWindowIdentity';
 import { installUnhandledRejectionGuard } from './utils/unhandledRejectionGuard';
 import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connection/redisTopology';
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
@@ -467,6 +468,14 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     }).catch((err) => diagError('account switch failed', err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)));
   });
   context.subscriptions.push(onAuthChange);
+  // 另一窗口换号 / 登出：本窗口的同步会话持有旧账号密钥，必须停掉并提示重新加载（见 crossWindowIdentity.ts）。
+  context.subscriptions.push(auth.onExternalIdentityChange(createCrossWindowIdentityHandler({
+    invalidateSync: () => syncFactory.invalidate(),
+    refreshStatus: () => { syncStatusBar.refresh(); authStatusBar.refresh(); },
+    warn: (message, ...actions) => vscode.window.showWarningMessage(message, ...actions),
+    reloadWindow: () => { void vscode.commands.executeCommand('workbench.action.reloadWindow'); },
+    log: (message, detail) => diagInfo(message, detail),
+  })));
   // 同步可观测：本地用户改动（连接/分组/查询）后是否会自动排同步（取决于自动同步开关）。
   context.subscriptions.push(store.onChanged((source) => {
     syncHasConnections();

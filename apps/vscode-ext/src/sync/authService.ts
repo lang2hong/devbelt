@@ -109,6 +109,41 @@ export class AuthService {
   private authGeneration = 0;
   /** 刷新被拒后的清理幂等标记：并发 401 只清一次、只广播一次 logout。 */
   private authExpiredHandled = false;
+  /**
+   * 本窗口已知的 userId（"我自己写入的"或"启动时读到的"）。SecretStorage 的 onDidChange 在
+   * 写入方窗口自己也会触发，靠它区分「本窗口的回声」和「另一窗口换了账号」。
+   */
+  private knownUserId?: string;
+  private readonly externalIdentityListeners = new Set<(change: { from?: string; to?: string }) => void>();
+
+  /**
+   * 另一个窗口把登录身份换成了不同的 userId（换号 / 登出）。
+   *
+   * 本窗口已解锁的同步会话仍持有旧账号的密钥，却会带着新账号的 token 去请求，服务端只会
+   * 拒绝，表现为一个没有解释的停摆图标。调用方据此停掉同步会话并提示用户重新加载窗口。
+   * 本窗口自己的登录/登出不会触发（它们走 AuthEvent）。
+   */
+  onExternalIdentityChange(listener: (change: { from?: string; to?: string }) => void): { dispose(): void } {
+    this.externalIdentityListeners.add(listener);
+    return { dispose: () => { this.externalIdentityListeners.delete(listener); } };
+  }
+
+  private emitExternalIdentityChange(change: { from?: string; to?: string }): void {
+    for (const l of [...this.externalIdentityListeners]) {
+      try { l(change); } catch { /* 监听方异常不影响其他监听方 */ }
+    }
+  }
+
+  /** 本窗口写 userId：先更新「已知值」再写盘，这样 onDidChange 回声不会被当成别的窗口。 */
+  private async storeUserId(userId: string): Promise<void> {
+    this.knownUserId = userId;
+    await this.secrets.store(AuthService.USER_ID_KEY, userId);
+  }
+
+  private async deleteUserId(): Promise<void> {
+    this.knownUserId = undefined;
+    await this.secrets.delete(AuthService.USER_ID_KEY);
+  }
 
   /**
    * 读取当前用户规范 userId；内存 → 持久化 → /api/db/me。
@@ -121,6 +156,7 @@ export class AuthService {
     const stored = await this.secrets.get(AuthService.USER_ID_KEY);
     if (stored) {
       this.cachedUserId = stored;
+      this.knownUserId ??= stored;
       return stored;
     }
     const me = await this.getMe();
@@ -202,7 +238,7 @@ export class AuthService {
     });
     this.cachedUserId = me.user.userId;
     try {
-      await this.secrets.store(AuthService.USER_ID_KEY, me.user.userId);
+      await this.storeUserId(me.user.userId);
     } catch { /* 缓存失败不影响本次请求；下次 me 会再写 */ }
     return me;
   }
@@ -265,6 +301,16 @@ export class AuthService {
       if (e.key === AuthService.ACCESS_TOKEN_KEY || e.key === AuthService.REFRESH_TOKEN_KEY) {
         this.invalidateCachedIdentity();
       }
+      // userId 变了而本窗口并没有写它 = 另一窗口换号 / 登出。
+      if (e.key === AuthService.USER_ID_KEY) {
+        void this.secrets.get(AuthService.USER_ID_KEY).then((current) => {
+          const from = this.knownUserId;
+          if (current === from) return; // 本窗口自己的写入回声，或没有实质变化
+          this.knownUserId = current;
+          this.cachedUserId = current;
+          this.emitExternalIdentityChange({ from, to: current });
+        });
+      }
       // 另一窗口刷新到的套餐已变化（升级/降级）：本窗口丢弃过期内存缓存并重拉，
       // 否则医生面板/引擎门限会继续按旧套餐判断。
       if (e.key === AuthService.ENTITLEMENT_GEN_KEY) {
@@ -298,6 +344,7 @@ export class AuthService {
   async init(): Promise<void> {
     this.accessToken = await this.secrets.get(AuthService.ACCESS_TOKEN_KEY);
     this.refreshToken = await this.secrets.get(AuthService.REFRESH_TOKEN_KEY);
+    this.knownUserId = await this.secrets.get(AuthService.USER_ID_KEY);
     // 只有 access、没有 refresh：无法续期，不能算登录态。旧版本/半写残留会在
     // 15 分钟后变成「界面已登录、所有请求 401」的僵尸态。只清内存、不删存储：
     // 另一窗口可能正处在「先存 access、再存 refresh」之间，删掉会破坏它的登录。
@@ -371,7 +418,7 @@ export class AuthService {
       await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
       await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
       await this.secrets.delete(AuthService.USER_EMAIL_KEY);
-      await this.secrets.delete(AuthService.USER_ID_KEY);
+      await this.deleteUserId();
     } catch { /* SecretStorage 删除失败不应阻断登出 */ }
     void eventBus.publish(new AuthEvent('logout'));
   }
@@ -422,7 +469,7 @@ export class AuthService {
     await this.secrets.delete(AuthService.ACCESS_TOKEN_KEY);
     await this.secrets.delete(AuthService.REFRESH_TOKEN_KEY);
     await this.secrets.delete(AuthService.USER_EMAIL_KEY);
-    await this.secrets.delete(AuthService.USER_ID_KEY);
+    await this.deleteUserId();
     void eventBus.publish(new AuthEvent('logout'));
   }
 
@@ -471,7 +518,7 @@ export class AuthService {
     if (result.user?.userId) {
       this.cachedUserId = result.user.userId;
       try {
-        await this.secrets.store(AuthService.USER_ID_KEY, result.user.userId);
+        await this.storeUserId(result.user.userId);
       } catch { /* 下次 getMe 会补写 */ }
     }
     this.accessToken = result.accessToken;

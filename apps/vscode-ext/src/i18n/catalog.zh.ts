@@ -147,6 +147,8 @@ export const zh: MessageCatalog = {
   'sync.action.syncNow': '立即同步',
   'sync.action.unlock': '重新解锁',
   'sync.action.login': '重新登录',
+  'sync.crossWindowAccountChanged': '另一个窗口切换了登录账号，本窗口的个人同步已停止。请重新加载窗口以使用新账号。',
+  'sync.action.reloadWindow': '重新加载窗口',
   'sync.viewLogsHint': '详细原因：命令面板 → DevBelt: 查看诊断日志',
   'sync.skippedDisabled': '{count} 条因本机关闭了对应同步项而暂存（重新开启后自动补拉）',
   'sync.doctorCheckFailed': '检查没有完成：{detail}',
