@@ -19,8 +19,8 @@ export interface EpochTransitionDeps {
   entities: EntityStore;
   /** 会话当前 epoch（未建立为 undefined）；reconcile 用它做 fromKeyEpoch 一致性校验。 */
   currentEpoch: () => string | undefined;
-  /** 切换前停止协调器（停止在途 drain）。 */
-  stopCoordinator: () => void;
+  /** 切换前停止协调器并等待在途轮次结束（否则它会在清理之后继续往旧 epoch 写入）。 */
+  stopCoordinator: () => void | Promise<void>;
   /** 切换后丢弃运行组件/密钥并广播状态变化。 */
   resetRuntime: () => void;
 }
@@ -70,7 +70,7 @@ export class EpochTransitionCoordinator {
     if (current !== undefined && current !== fromKeyEpoch) {
       throw new Error('epoch transition fromKeyEpoch mismatch');
     }
-    this.deps.stopCoordinator();
+    await this.deps.stopCoordinator();
 
     await this.writeIntent({ fromKeyEpoch, toKeyEpoch });
     if (newDek) await this.deps.dekStore.store(this.deps.userId, BigInt(toKeyEpoch), newDek);

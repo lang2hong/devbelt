@@ -160,6 +160,9 @@ interface PullPage {
 }
 
 const MAX_PAGES = 1000;
+
+/** 被 `cancel()` 中止的运行的固定 reason：调用方据此区分「被取消」与真正的失败（不计失败、不退避）。 */
+export const SYNC_CANCELLED_REASON = 'sync cancelled';
 const STALL_THRESHOLD = 5;
 const MAX_RECORD_CIPHERTEXT_BYTES = 256 * 1024;
 
@@ -260,6 +263,18 @@ class UnsupportedEntityTypeError extends Error {
 
 export class SyncEngine {
   private inflight?: Promise<SyncRunResult>;
+  /** 取消标志：epoch 切换要停掉在途轮次，否则它会在清理之后继续往旧 epoch 写入。 */
+  private cancelled = false;
+
+  /** 请求中止在途运行：在下一个检查点（每条出站/每页/每条入站记录之间）返回。 */
+  cancel(): void {
+    this.cancelled = true;
+  }
+
+  /** 清除取消标志（协调器重新 start 时调用）。 */
+  resume(): void {
+    this.cancelled = false;
+  }
 
   constructor(private readonly deps: SyncEngineDeps) {
     if (deps.mapStore.userId !== deps.userId) throw new Error('mapStore userId mismatch');
@@ -639,6 +654,9 @@ export class SyncEngine {
       return r;
     };
     for (const m of (phase === 'pull' ? [] : this.deps.outbox.list())) {
+      if (this.cancelled) {
+        return { stage: 'error', conflicts, applied: 0, pushed, changeSequence: lastCommitted, reason: SYNC_CANCELLED_REASON };
+      }
       // C1：已标记冲突的 mutation 不得再 push（避免每轮重复 409）；把持久化冲突反馈给 UI。
       if (m.conflict) {
         conflicts.push({
@@ -771,6 +789,9 @@ export class SyncEngine {
     let ignoredTombstone = 0;
     let skippedRemote = 0;
 
+    if (this.cancelled) {
+      return { stage: 'error', conflicts, stalled, applied: 0, pushed, changeSequence: lastCommitted, reason: SYNC_CANCELLED_REASON };
+    }
     // 先重放上一轮被权益跳过的记录：升级后无需重拉即可落地。
     try {
       applied += await this.drainDeferred(ctx, conflicts);
@@ -786,6 +807,9 @@ export class SyncEngine {
     }
 
     for (let pages = 0; ; pages++) {
+      if (this.cancelled) {
+        return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: SYNC_CANCELLED_REASON };
+      }
       if (pages >= MAX_PAGES) {
         return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: 'paging exceeded limit' };
       }
@@ -825,6 +849,9 @@ export class SyncEngine {
         }
         typed.sort((a, b) => (a.type === undefined ? 99 : applyOrder(a.type)) - (b.type === undefined ? 99 : applyOrder(b.type)));
         for (const { rec, type } of typed) {
+          if (this.cancelled) {
+            return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: SYNC_CANCELLED_REASON };
+          }
           if (type === undefined) {
             try {
               await this.deps.deferred?.put({

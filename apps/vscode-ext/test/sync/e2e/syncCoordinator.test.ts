@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from '@devbelt/db-host/utils/event';
 import { SyncCoordinator } from '@devbelt/db-host/sync/e2e/syncCoordinator';
+import { SYNC_CANCELLED_REASON } from '@devbelt/db-host/sync/e2e/syncEngine';
 import type { SyncEngine } from '@devbelt/db-host/sync/e2e/syncEngine';
 import type { SyncMutator } from '@devbelt/db-host/sync/e2e/syncMutator';
 import type { ConnectionStore } from '@devbelt/db-host/connection/connectionStore';
@@ -416,5 +417,85 @@ describe('SyncCoordinator', () => {
     await coordinator.pullNow();
     await coordinator.pushNow();
     expect(starts).toEqual(['pull', 'push']);
+  });
+
+  describe('stopAndDrain / 取消', () => {
+    it('等在途轮次真正结束后才返回，并先取消引擎', async () => {
+      const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const events: string[] = [];
+      const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
+      const sync = vi.fn(async () => { await gate; events.push('sync-finished'); return { stage: 'ok' as const, conflicts: [], applied: 0 }; });
+      const cancel = vi.fn(() => { events.push('cancel'); });
+      const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync, cancel, resume: vi.fn() } as unknown as SyncEngine);
+      coordinator.start();
+      coordinator.scheduleNow();
+      await vi.waitFor(() => expect(sync).toHaveBeenCalled());
+
+      const drained = coordinator.stopAndDrain().then(() => events.push('drained'));
+      await Promise.resolve();
+      expect(events).toEqual(['cancel']);
+      release();
+      await drained;
+      expect(events).toEqual(['cancel', 'sync-finished', 'drained']);
+    });
+
+    it('网络卡死时按超时放弃等待，不拖死 destroy/reset', async () => {
+      vi.useFakeTimers();
+      const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+      const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
+      const sync = vi.fn(() => new Promise<never>(() => {}));
+      const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync, cancel: vi.fn(), resume: vi.fn() } as unknown as SyncEngine);
+      coordinator.start();
+      coordinator.scheduleNow();
+      await vi.advanceTimersByTimeAsync(0);
+
+      let done = false;
+      void coordinator.stopAndDrain(5_000).then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(done).toBe(true);
+    });
+
+    it('被取消的轮次不记为失败：不排退避重试，不覆盖 lastRun', async () => {
+      vi.useFakeTimers();
+      const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+      const reconcile = vi.fn(async () => ({ generated: 0, pendingSkipped: [], skipped: [] }));
+      const sync = vi.fn()
+        .mockResolvedValueOnce({ stage: 'ok' as const, conflicts: [], applied: 1 })
+        .mockResolvedValue({ stage: 'error' as const, conflicts: [], applied: 0, reason: SYNC_CANCELLED_REASON });
+      const coordinator = new SyncCoordinator(store, { reconcile } as unknown as SyncMutator, { sync, cancel: vi.fn(), resume: vi.fn() } as unknown as SyncEngine);
+      coordinator.start();
+
+      coordinator.scheduleNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(coordinator.lastRun?.stage).toBe('ok');
+
+      coordinator.scheduleNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(coordinator.lastRun?.stage).toBe('ok');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(sync).toHaveBeenCalledTimes(2);
+      expect(coordinator.stalled).toBe(false);
+
+      coordinator.stop();
+    });
+
+    it('start() 放开引擎的取消标志（lock → unlock 复用同一引擎）', () => {
+      const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+      const resume = vi.fn();
+      const coordinator = new SyncCoordinator(store, {} as unknown as SyncMutator, { resume } as unknown as SyncEngine);
+      coordinator.start();
+      expect(resume).toHaveBeenCalledTimes(1);
+    });
+
+    it('引擎没有 cancel/resume（旧替身）时不抛', async () => {
+      const store = { onChanged: () => ({ dispose: () => {} }) } as unknown as ConnectionStore;
+      const coordinator = new SyncCoordinator(store, {} as unknown as SyncMutator, {} as unknown as SyncEngine);
+      coordinator.start();
+      await expect(coordinator.stopAndDrain(10)).resolves.toBeUndefined();
+    });
   });
 });

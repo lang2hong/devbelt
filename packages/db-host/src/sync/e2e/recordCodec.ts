@@ -77,6 +77,15 @@ const SQLITE_FORBIDDEN_FIELDS = [
 
 export const SQL_MAX_BYTES = 64 * 1024;
 
+/**
+ * 该引擎的连接里真正参与同步的字段（引擎白名单 + 路径字段）。
+ * 不在此集合内的本地字段（如 MySQL/PG 的 color、连接/请求超时）是「本机独有」，
+ * 远端版本落地时必须保留，不能被整条覆盖丢掉。
+ */
+export function syncedConnectionFields(dbType: DatabaseType): readonly string[] {
+  return [...payloadFieldsFor(dbType), ...CONNECTION_PATH_FIELDS];
+}
+
 function payloadFieldsFor(dbType: DatabaseType): readonly string[] {
   if (dbType === DatabaseType.SQLITE) return SQLITE_PAYLOAD_FIELDS;
   if (dbType === DatabaseType.REDIS) return REDIS_PAYLOAD_FIELDS;

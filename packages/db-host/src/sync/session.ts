@@ -109,7 +109,7 @@ export class PersonalSyncSession {
       stateStore: this.stateStore,
       entities: this.entities,
       currentEpoch: () => this.keyEpoch,
-      stopCoordinator: () => this.coordinator?.stop(),
+      stopCoordinator: () => this.coordinator?.stopAndDrain(),
       resetRuntime: () => this.resetRuntime(),
     });
     this.keyOps = new KeyLifecycleOps({

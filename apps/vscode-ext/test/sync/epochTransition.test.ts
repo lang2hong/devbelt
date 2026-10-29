@@ -47,6 +47,28 @@ describe('EpochTransitionCoordinator', () => {
     expect(resetRuntime).toHaveBeenCalledTimes(1);
   });
 
+  it('reconcile：先等协调器真正停稳，再写 intent 与清旧 epoch（否则在途轮次会往旧 epoch 复活数据）', async () => {
+    const order: string[] = [];
+    let finishStop!: () => void;
+    const stopped = new Promise<void>((resolve) => { finishStop = resolve; });
+    const { tx, deps } = makeCoordinator();
+    deps.stopCoordinator.mockImplementation(async () => { order.push('stop-begin'); await stopped; order.push('stop-done'); });
+    deps.entities.remove = vi.fn(async () => { order.push('clear'); });
+    deps.dekStore.delete.mockImplementation(async () => { order.push('dek-delete'); });
+
+    const running = tx.reconcile('1', '2', snapshot('2'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(['stop-begin']);
+    expect(tx.pending).toBeUndefined(); // 还没停稳：连 intent 都不能写
+
+    finishStop();
+    await running;
+    expect(order[0]).toBe('stop-begin');
+    expect(order[1]).toBe('stop-done');
+    expect(order.indexOf('dek-delete')).toBeGreaterThan(order.indexOf('stop-done'));
+  });
+
   it('reconcile 失败中途：intent 先落盘，resume(新 epoch) 幂等收敛并返回 true', async () => {
     let fail = true;
     const { tx } = makeCoordinator({

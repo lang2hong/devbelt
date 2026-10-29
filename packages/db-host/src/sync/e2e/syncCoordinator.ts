@@ -1,5 +1,6 @@
 import type { Disposable } from '../../utils/event.js';
 import type { ConnectionStore } from '../../connection/connectionStore.js';
+import { SYNC_CANCELLED_REASON } from './syncEngine.js';
 import type { SyncEngine, SyncRunResult, RepairOutcome, FindingsReport } from './syncEngine.js';
 import type { SyncMutator } from './syncMutator.js';
 
@@ -80,6 +81,8 @@ export class SyncCoordinator {
     this._lastError = undefined;
     this.retryDelay = SyncCoordinator.RETRY_BASE_MS;
     this.clearRetry();
+    // 上一次 stopAndDrain 取消过引擎：重新启动时必须放开，否则之后每一轮都立刻被取消。
+    this.engine.resume?.();
     this.subscription = this.store.onChanged((source) => {
       if (source !== 'user') return;
       if (!this.autoSyncOn()) return;
@@ -108,6 +111,28 @@ export class SyncCoordinator {
     this.subscription = undefined;
   }
 
+  /**
+   * 停止并等待在途轮次真正结束（epoch 切换用）。
+   *
+   * 单独的 `stop()` 只清定时器和订阅，已经在跑的一轮会继续往本地写；epoch 清理之后它还在
+   * 应用旧 epoch 的记录，会把刚清掉的实体建回来。这里先取消引擎，再等当前链收尾，
+   * 最多等 `timeoutMs`：网络卡死时不能把 destroy/reset 一起拖死。
+   */
+  async stopAndDrain(timeoutMs = 15_000): Promise<void> {
+    this.stop();
+    this.engine.cancel?.();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+      timer.unref?.();
+    });
+    try {
+      await Promise.race([this.chain, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   /** 用户显式请求的同步：复用同一串行链，避免和 debounce 轮次并发。失败返回调用方。 */
   async runNow(): Promise<SyncRunResult | undefined> {
     let failure: unknown;
@@ -116,7 +141,7 @@ export class SyncCoordinator {
       return this.drain()
         .then((result) => {
           this.notify(result);
-          this.maybeRetry(result);
+          if (!isCancelled(result)) this.maybeRetry(result);
         })
         .catch((err) => {
           failure = err;
@@ -172,11 +197,12 @@ export class SyncCoordinator {
           result.skippedOutbound = skippedOutbound;
           if (skippedOutboundReason) result.skippedOutboundReason = skippedOutboundReason;
         }
-        this._lastRun = result;
+        // 被取消的运行不是结果：不覆盖 lastRun、不改 stalled/退避（但仍通知，好让界面清掉转圈）。
+        if (!isCancelled(result)) this._lastRun = result;
         this.notify(result);
         // 显式 pull/push 是独立动作：**只更新状态、不排后台重试**（避免重试走 drain() 的 both
         // 全量而隐式触发对方动作）。成功清 stalled/退避、冲突置 stalled 仍要执行。
-        this.updateRunState(result);
+        if (!isCancelled(result)) this.updateRunState(result);
       } catch (err) {
         failure = err;
         this._lastError = describe(err);
@@ -216,7 +242,7 @@ export class SyncCoordinator {
     try {
       const result = await this.drain();
       this.notify(result);
-      this.maybeRetry(result);
+      if (!isCancelled(result)) this.maybeRetry(result);
     } catch (err) {
       this._lastError = describe(err);
       this.notify(undefined);
@@ -260,7 +286,7 @@ export class SyncCoordinator {
       acc.skippedUnsupported += result.skippedUnsupported ?? 0;
       acc.skippedDisabled += result.skippedDisabled ?? 0;
       const merged = merge(result);
-      this._lastRun = merged;
+      if (!isCancelled(result)) this._lastRun = merged;
       last = merged;
       if (result.stage !== 'ok') return merged;
       if (generated === 0) return merged;
@@ -316,6 +342,10 @@ export class SyncCoordinator {
       // 上层回调异常不阻断同步链
     }
   }
+}
+
+function isCancelled(result: SyncRunResult | undefined): boolean {
+  return result?.reason === SYNC_CANCELLED_REASON;
 }
 
 function describe(err: unknown): string {

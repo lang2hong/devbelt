@@ -176,6 +176,81 @@ describe('applyRecord（连接）', () => {
   });
 });
 
+describe('applyRecord（连接）：新建不凭空多字段', () => {
+  it('新建（本机没有该实体）不凭空多出字段', async () => {
+    const s = setup();
+    await applyRecord({ recordId: 'C'.repeat(22), version: '1', tombstone: false, payload: connPayload }, { ...s, entitlement: undefined });
+    const created = [...s.connections.values()][0] as unknown as Record<string, unknown>;
+    expect(created.color).toBeUndefined();
+    expect(created.connectTimeout).toBeUndefined();
+  });
+
+});
+
+describe('applyRecord（连接）：传给 store 的对象', () => {
+  /** 捕获 save 入参的 store：证明保留/覆盖发生在同步层，而不是靠测试 store 的合并语义。 */
+  function capturing() {
+    const s = setup();
+    const saved: SavedConnection[] = [];
+    const original = (s.store as unknown as { save: (c: SavedConnection) => Promise<void> }).save;
+    (s.store as unknown as { save: (c: SavedConnection) => Promise<void> }).save = async (c) => { saved.push(c); await original(c); };
+    return { s, saved };
+  }
+
+  it('保留本机独有字段，同时同步字段以远端为准（含「远端不带 password」）', async () => {
+    const { s, saved } = capturing();
+    await applyRecord({ recordId: 'E'.repeat(22), version: '1', tombstone: false, payload: connPayload }, { ...s, entitlement: undefined });
+    const localId = [...s.connections.keys()][0];
+    s.connections.set(localId, { ...s.connections.get(localId)!, color: 'blue', connectTimeout: 5000, password: 'local-old' } as SavedConnection);
+    await s.mapStore.put('E'.repeat(22), { type: 'connection', localId, recordVersion: '1', revision: s.connections.get(localId)!.updateTime!, status: 'confirmed' });
+    saved.length = 0;
+    const { password: _p, ...noPassword } = connPayload;
+
+    await applyRecord({ recordId: 'E'.repeat(22), version: '2', tombstone: false, payload: { ...noPassword, host: 'h2' } }, { ...s, entitlement: undefined });
+
+    expect(saved).toHaveLength(1);
+    const out = saved[0] as unknown as Record<string, unknown>;
+    expect(out.color).toBe('blue');
+    expect(out.connectTimeout).toBe(5000);
+    expect(out.host).toBe('h2');
+    // password 是同步字段：远端没带，就不能由本机旧值顶上
+    expect(out.password).toBeUndefined();
+  });
+
+  it('身份/生命周期字段不被搬运：id 取新的、deleted 与时间戳由 store 管理', async () => {
+    const { s, saved } = capturing();
+    await applyRecord({ recordId: 'F'.repeat(22), version: '1', tombstone: false, payload: connPayload }, { ...s, entitlement: undefined });
+    const localId = [...s.connections.keys()][0];
+    s.connections.set(localId, { ...s.connections.get(localId)!, color: 'green', deleted: false, createTime: 1, updateTime: 5 } as SavedConnection);
+    await s.mapStore.put('F'.repeat(22), { type: 'connection', localId, recordVersion: '1', revision: 5, status: 'confirmed' });
+    saved.length = 0;
+
+    await applyRecord({ recordId: 'F'.repeat(22), version: '2', tombstone: false, payload: connPayload }, { ...s, entitlement: undefined, force: true } as never);
+
+    const out = saved[0] as unknown as Record<string, unknown>;
+    expect(out.id).toBe(localId);
+    expect(out.color).toBe('green');
+    expect(out).not.toHaveProperty('createTime');
+    expect(out).not.toHaveProperty('updateTime');
+  });
+
+  it('引擎类型变了不搬运旧引擎字段', async () => {
+    const { s, saved } = capturing();
+    await applyRecord({ recordId: 'G'.repeat(22), version: '1', tombstone: false, payload: connPayload }, { ...s, entitlement: undefined });
+    const localId = [...s.connections.keys()][0];
+    s.connections.set(localId, { ...s.connections.get(localId)!, connectTimeout: 7000, color: 'x' } as SavedConnection);
+    await s.mapStore.put('G'.repeat(22), { type: 'connection', localId, recordVersion: '1', revision: s.connections.get(localId)!.updateTime!, status: 'confirmed' });
+    saved.length = 0;
+
+    await applyRecord({ recordId: 'G'.repeat(22), version: '2', tombstone: false, payload: { type: 'connection', name: 'n', dbType: 'redis', host: 'h', port: 6379, user: '' } }, { ...s, entitlement: undefined });
+
+    const out = saved[0] as unknown as Record<string, unknown>;
+    expect(out.dbType).toBe(DatabaseType.REDIS);
+    expect(out.connectTimeout).toBeUndefined();
+    expect(out.color).toBeUndefined();
+  });
+});
+
 describe('applyRecord（四类型 + 引用 + unresolved + 环检测）', () => {
   it('group → connection 引用正常解析（同批拓扑序）', async () => {
     const s = setup();

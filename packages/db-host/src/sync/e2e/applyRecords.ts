@@ -2,7 +2,7 @@ import type { SavedConnection, ConnectionGroup } from '../../connection/connecti
 import type { QueryFolder } from '../../connection/queryStore.js';
 import type { SavedQuery } from '@devbelt/db-core';
 import { DatabaseType, databaseTypeFromEngine } from '@devbelt/db-core';
-import { decodeEntityPayload, type DecodedEntityPayload } from './recordCodec.js';
+import { decodeEntityPayload, syncedConnectionFields, type DecodedEntityPayload } from './recordCodec.js';
 import { assertRecordId, assertU64Decimal } from './types.js';
 import { filterPersonalConnectionsByEntitlement } from '../entitlementGate.js';
 import type { CachedEntitlement } from '../entitlementGate.js';
@@ -280,7 +280,9 @@ async function writeEntity(ref: SyncEntityRef, decoded: DecodedEntityPayload, ct
       if (decoded.data.groupId && groupLocalId === undefined) {
         await ctx.unresolved.add({ targetRecordId: decoded.data.groupId, type: ref.type, localId: ref.localId, field: 'groupId' });
       }
-      await ctx.entities.save(ref, buildConnectionFromPayload(decoded.data, ref.localId, groupLocalId), 'sync');
+      const incoming = buildConnectionFromPayload(decoded.data, ref.localId, groupLocalId);
+      const local = ctx.entities.get(ref) as SavedConnection | undefined;
+      await ctx.entities.save(ref, local ? carryLocalOnlyConnectionFields(local, incoming) : incoming, 'sync');
       return;
     }
     case 'group': {
@@ -365,6 +367,29 @@ function collectionOfGroups(entities: EntityStore): ConnectionGroup[] {
     }
   }
   return out;
+}
+
+/** 属于实体身份/生命周期，由 store 或同步自己管理，不当作「本机独有字段」搬运。 */
+const CONNECTION_MANAGED_KEYS: ReadonlySet<string> = new Set(['id', 'groupId', 'type', 'dbType', 'createTime', 'updateTime', 'deleted']);
+
+/**
+ * 远端版本整体重建连接时，保留本机独有的字段。
+ *
+ * 同步载荷是白名单：MySQL/PG 的 `color`、连接/请求超时等字段从不上传。若直接用远端
+ * 载荷覆盖整条连接，另一台设备改一下主机名，本机的颜色标记就静默丢失。
+ * 只搬运「不在该引擎同步字段内」的本地字段；同步字段仍完全以远端为准（远端清空密码就是清空）。
+ * 引擎类型变了就不搬运，避免把旧引擎的专属字段带到新引擎的连接上。
+ */
+function carryLocalOnlyConnectionFields(local: SavedConnection, incoming: SavedConnection): SavedConnection {
+  if (local.dbType !== incoming.dbType) return incoming;
+  const synced = new Set<string>(syncedConnectionFields(incoming.dbType));
+  const carried: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(local as unknown as Record<string, unknown>)) {
+    if (value === undefined) continue;
+    if (CONNECTION_MANAGED_KEYS.has(key) || synced.has(key)) continue;
+    carried[key] = value;
+  }
+  return { ...carried, ...(incoming as unknown as Record<string, unknown>) } as unknown as SavedConnection;
 }
 
 function buildConnectionFromPayload(p: Extract<DecodedEntityPayload, { type: 'connection' }>['data'], id?: string, groupId?: string): SavedConnection {

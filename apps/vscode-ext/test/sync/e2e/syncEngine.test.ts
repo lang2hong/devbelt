@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { sealRecord, encodeRecordPayload } from '@devbelt/db-host/sync/e2e/recordCodec';
 import { DeferredRecordStore } from '@devbelt/db-host/sync/e2e/deferredRecordStore';
-import { SyncEngine } from '@devbelt/db-host/sync/e2e/syncEngine';
+import { SyncEngine, SYNC_CANCELLED_REASON } from '@devbelt/db-host/sync/e2e/syncEngine';
 import { SyncApiError, type PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { RecordMapStore } from '@devbelt/db-host/sync/e2e/recordMapStore';
 import { PendingMutationStore, type PendingDeleteMutation, type PendingPutMutation } from '@devbelt/db-host/sync/e2e/pendingMutationStore';
@@ -2269,5 +2269,100 @@ describe('SyncEngine · 体检在检查失败时不报「一致」', () => {
     const eng = build({ getState: vi.fn(async () => stateDto({ keyEpoch: '9', stateVersion: '1', changeSequence: '1' })) });
     const r = await eng.repairFindings();
     expect(r.aborted).toContain('keyEpoch');
+  });
+});
+
+describe('SyncEngine · 取消（epoch 切换停在途轮次）', () => {
+  function build(over: Partial<PersonalSyncClient>, store = makeStore()) {
+    const setSnapshot = vi.fn(async () => undefined);
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith(over),
+      stateStore: { getSnapshot: () => SNAP, setSnapshot } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      entities: new EntityStore(store),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => `c-${Math.random()}`,
+      seedConflictCarrier: seedConflictStub,
+    });
+    return { eng, setSnapshot, store };
+  }
+
+  it('已取消的引擎：开跑后在第一个检查点返回固定 reason，不拉 feed、不提交游标', async () => {
+    const getRecords = vi.fn(async () => ({ snapshotSequence: '5', records: [] }));
+    const { eng, setSnapshot } = build({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords,
+    });
+    eng.cancel();
+    const r = await eng.sync();
+    expect(r.reason).toBe(SYNC_CANCELLED_REASON);
+    expect(getRecords).not.toHaveBeenCalled();
+    expect(setSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('翻页中途取消：已提交的页保留，之后的页不再请求也不再应用', async () => {
+    const store = makeStore();
+    const rec1 = sealedRemote('P'.repeat(22), { type: 'connection', name: 'page-1', dbType: 'mysql', host: 'h', port: 3306, user: 'u', password: 'p' }, '1');
+    const rec2 = sealedRemote('Q'.repeat(22), { type: 'connection', name: 'page-2', dbType: 'mysql', host: 'h', port: 3306, user: 'u', password: 'p' }, '2');
+    let eng!: SyncEngine;
+    const getRecords = vi.fn()
+      .mockImplementationOnce(async () => { return { snapshotSequence: '2', nextAfter: '1', records: [rec1] }; })
+      .mockImplementation(async () => ({ snapshotSequence: '2', records: [rec2] }));
+    const built = build({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '2' })),
+      getRecords,
+    }, store);
+    eng = built.eng;
+    // 第一页提交游标后立刻取消（模拟 destroy/reset 在两页之间到达）
+    built.setSnapshot.mockImplementationOnce(async () => { eng.cancel(); });
+
+    const r = await eng.sync();
+
+    expect(r.reason).toBe(SYNC_CANCELLED_REASON);
+    expect(getRecords).toHaveBeenCalledTimes(1);
+    const names = store.listForSync().map((c) => (c as unknown as { name?: string }).name);
+    expect(names).toContain('page-1');
+    expect(names).not.toContain('page-2');
+  });
+
+  it('页内取消：未处理的记录不应用', async () => {
+    const store = makeStore();
+    const rec1 = sealedRemote('P'.repeat(22), { type: 'connection', name: 'first', dbType: 'mysql', host: 'h', port: 3306, user: 'u', password: 'p' }, '1');
+    const rec2 = sealedRemote('Q'.repeat(22), { type: 'connection', name: 'second', dbType: 'mysql', host: 'h', port: 3306, user: 'u', password: 'p' }, '2');
+    const { eng } = build({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '2' })),
+      getRecords: vi.fn(async () => ({ snapshotSequence: '2', records: [rec1, rec2] })),
+    }, store);
+    // 第一条应用后取消：用 save 钩子在首次落盘后触发
+    const originalSave = (store as unknown as { save: (c: unknown) => Promise<void> }).save;
+    (store as unknown as { save: (c: unknown) => Promise<void> }).save = async (c) => { await originalSave(c); eng.cancel(); };
+
+    const r = await eng.sync();
+
+    expect(r.reason).toBe(SYNC_CANCELLED_REASON);
+    const names = store.listForSync().map((c) => (c as unknown as { name?: string }).name);
+    expect(names).toEqual(['first']);
+  });
+
+  it('resume() 之后恢复正常同步', async () => {
+    const { eng } = build({});
+    eng.cancel();
+    expect((await eng.sync()).reason).toBe(SYNC_CANCELLED_REASON);
+    eng.resume();
+    expect((await eng.sync()).stage).toBe('ok');
+  });
+
+  it('出站循环里取消：不再推送后面的 mutation', async () => {
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(putMutation());
+    const putRecordSigned = vi.fn(async () => ({ version: '1', changeSequence: '1' }));
+    const eng = engine({ client: clientWith({ putRecordSigned }), snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    eng.cancel();
+    const r = await eng.sync();
+    expect(r.reason).toBe(SYNC_CANCELLED_REASON);
+    expect(putRecordSigned).not.toHaveBeenCalled();
+    expect(outbox.list()).toHaveLength(1);
   });
 });
