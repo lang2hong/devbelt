@@ -23,6 +23,7 @@ function fb(id: string, status: AdminFeedback['status']): AdminFeedback {
   return {
     id,
     userId: null,
+    userEmail: null,
     installId: `inst-${id}`,
     hasReplyKey: true,
     category: 'bug',
@@ -50,6 +51,23 @@ beforeEach(() => {
     kind: 'ok',
     value: detailOf(fb(id, 'new')),
   }));
+});
+
+describe('AdminFeedbackView 用户列邮箱', () => {
+  it('有账号邮箱时显示，匿名反馈不显示', async () => {
+    const withEmail = { ...fb('7', 'new'), userId: '9', userEmail: 'owner@example.test' };
+    const anonymous = fb('6', 'new');
+    vi.mocked(queryFeedback).mockResolvedValue({ kind: 'ok', value: { items: [withEmail, anonymous], nextCursor: null, total: 2 } });
+
+    const wrapper = mount(AdminFeedbackView);
+    await flushPromises();
+
+    const rows = wrapper.findAll('tbody tr');
+    expect(rows[0]!.findAll('td')[3]!.text()).toContain('owner@example.test');
+    expect(rows[1]!.findAll('td')[3]!.text()).not.toContain('@');
+    expect(wrapper.text()).toContain('用户 / 邮箱');
+    wrapper.unmount();
+  });
 });
 
 describe('AdminFeedbackView 操作列', () => {

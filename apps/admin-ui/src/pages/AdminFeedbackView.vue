@@ -241,7 +241,7 @@ onMounted(load);
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>ID</th><th>分类</th><th>内容</th><th>用户</th><th>版本 / OS</th><th>状态</th><th>提交时间</th><th></th></tr>
+        <tr><th>ID</th><th>分类</th><th>内容</th><th>用户 / 邮箱</th><th>版本 / OS</th><th>状态</th><th>提交时间</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="f in items" :key="f.id">
@@ -251,6 +251,7 @@ onMounted(load);
           <td class="mono">
             <a v-if="f.userId" class="user-link" href="#" @click.prevent="goUser(f.userId)">{{ f.userId }}</a>
             <span v-else class="muted">匿名</span>
+            <div v-if="f.userEmail" class="small email-line">{{ f.userEmail }}</div>
           </td>
           <td class="muted small">{{ f.appVersion ?? '—' }}<br />{{ f.os ?? '—' }}</td>
           <td><span class="badge" :class="f.status">{{ STATUS_LABEL[f.status] ?? f.status }}</span></td>
@@ -394,6 +395,7 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .btn.ghost { background: transparent; border: 1px solid var(--c-border-strong); color: var(--c-text); }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .user-link { color: var(--c-accent); }
+.email-line { margin-top: 1px; color: var(--c-text-muted); word-break: break-all; }
 .kv { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
 .kv th { text-align: left; width: 110px; color: var(--c-text-muted); font-weight: 500; padding: 4px 0; font-size: 12px; }
 .kv td { padding: 4px 0; font-size: 13px; }

@@ -185,10 +185,11 @@ function openDetail(u: AdminUser): void {
 
     <table v-if="state === 'ready'" class="table">
       <thead>
-        <tr><th>邮箱</th><th>状态</th><th>角色</th><th>套餐</th><th>设备</th><th></th></tr>
+        <tr><th>ID</th><th>邮箱</th><th>状态</th><th>角色</th><th>套餐</th><th>设备</th><th></th></tr>
       </thead>
       <tbody>
         <tr v-for="u in users" :key="u.userId">
+          <td class="mono small">{{ u.userId }}</td>
           <td><a class="email-link" :href="withBase(`/users/${u.userId}`)" @click.prevent="openDetail(u)">{{ u.email }}</a></td>
           <td><span class="badge" :class="u.status === 'active' ? 'ok' : 'danger'">{{ u.status === 'active' ? '启用' : '禁用' }}</span></td>
           <td><span class="badge" :class="u.role === 'platform_admin' ? 'warn' : ''">{{ u.role === 'platform_admin' ? '管理员' : '用户' }}</span></td>
@@ -200,7 +201,7 @@ function openDetail(u: AdminUser): void {
             <button v-else class="btn small" :disabled="busy" @click="openStatus(u, 'active')">启用</button>
           </td>
         </tr>
-        <tr v-if="users.length === 0"><td colspan="6" class="muted">无匹配用户。</td></tr>
+        <tr v-if="users.length === 0"><td colspan="7" class="muted">无匹配用户。</td></tr>
       </tbody>
     </table>
 
@@ -233,5 +234,7 @@ function openDetail(u: AdminUser): void {
 <style scoped>
 .email-link { color: var(--c-accent); text-decoration: none; }
 .email-link:hover { text-decoration: underline; }
+.mono { font-family: var(--c-font-mono, monospace); }
+.small { font-size: 12px; }
 .range { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--c-text-muted); }
 </style>

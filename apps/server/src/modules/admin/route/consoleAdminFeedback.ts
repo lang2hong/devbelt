@@ -63,6 +63,7 @@ function dto(r: FeedbackRow) {
   return {
     id: String(r.id),
     userId: r.userId === null ? null : String(r.userId),
+    userEmail: r.userEmail,
     installId: r.installId,
     hasReplyKey: r.hasReplyKey,
     category: r.category,

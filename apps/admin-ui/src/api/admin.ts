@@ -1056,6 +1056,7 @@ export async function setUserRole(
 export interface AdminFeedback {
   id: string;
   userId: string | null;
+  userEmail: string | null;
   installId: string | null;
   hasReplyKey: boolean;
   category: 'bug' | 'feature' | 'other';

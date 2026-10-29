@@ -10,6 +10,8 @@ export type FeedbackEmailTarget = 'none' | 'account' | 'contact';
 export interface FeedbackRow {
   id: number;
   userId: number | null;
+  /** 关联账号邮箱（LEFT JOIN users；匿名反馈为 null）。 */
+  userEmail: string | null;
   installId: string | null;
   /** 是否带 replyKey 哈希（可站内送达给匿名安装）；哈希本身不出仓储。 */
   hasReplyKey: boolean;

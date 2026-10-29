@@ -65,6 +65,8 @@ describe('AdminUsersView 筛选', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('第 1 页');
     expect(wrapper.text()).toContain('共 2 条');
+    expect(wrapper.find('thead th').text()).toBe('ID');
+    expect(wrapper.find('tbody tr td').text()).toBe('1');
 
     await wrapper.findAll('button').find((b) => b.text().trim() === '下一页')!.trigger('click');
     await flushPromises();

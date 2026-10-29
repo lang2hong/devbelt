@@ -42,6 +42,7 @@ class MemFeedbackRepo {
   seed(row: Partial<FeedbackRow> & { id: number }): void {
     this.rows.set(row.id, {
       userId: null,
+      userEmail: null,
       installId: 'inst-1',
       hasReplyKey: true,
       category: 'bug',

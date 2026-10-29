@@ -28,6 +28,7 @@ function toRow(r: Rec): FeedbackRow {
   return {
     id: Number(r.id),
     userId: r.user_id === null || r.user_id === undefined ? null : Number(r.user_id),
+    userEmail: (r.user_email as string | null) ?? null,
     installId: (r.install_id as string | null) ?? null,
     hasReplyKey: Number(r.has_reply_key ?? 0) === 1,
     category: r.category as FeedbackRow['category'],
@@ -103,8 +104,9 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
     const limit = Math.min(Math.max(filter.limit, 1), 100);
 
     const res = await this.db().query(
-      `SELECT ${ROW_COLUMNS}
+      `SELECT ${ROW_COLUMNS}, u.email AS user_email
          FROM user_feedback f
+         LEFT JOIN users u ON u.id = f.user_id
          ${whereSql}
         ORDER BY f.id DESC
         LIMIT ?`,
