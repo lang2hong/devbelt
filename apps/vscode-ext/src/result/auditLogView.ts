@@ -23,6 +23,12 @@ export class AuditLogView extends BaseWebView {
     AuditLogView.current = new AuditLogView(logger);
   }
 
+  /** 账号切换：审计日志按账号隔离，旧账号的流水不能留在打开的面板里。 */
+  static closeAll(): void {
+    AuditLogView.current?.dispose();
+    AuditLogView.current = undefined;
+  }
+
   protected async handleMessage(msg: any): Promise<void> {
     switch (msg?.type) {
       case 'ready':

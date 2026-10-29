@@ -11,7 +11,13 @@ import { getOrCreateReplyKey, readReplyKey, type SecretStoreLike } from './reply
  * 本文件不依赖 `vscode`，便于单测。
  */
 
-/** 已读到的最大回复 id 的本地存储键（沿用旧键，升级后不会把旧回复重新标成未读）。 */
+/**
+ * 已读到的最大回复 id 的本地存储键。
+ *
+ * 走 `lastSeenState`（账号作用域）时同一键在不同账号下各自记录；local 作用域
+ * 键名不变，升级后不会把旧回复重新标成未读。回复 id 全局自增，若跨账号共享
+ * 一个水位，A 标记已读会把 B 的未读徽标一起压掉。
+ */
 export const LAST_SEEN_REPLY_KEY = 'devbelt.feedback.lastSeenReplyId';
 
 export interface FeedbackThreadReply { id: string; body: string; createTime: string }
@@ -32,6 +38,11 @@ export interface MementoLike {
 export interface FeedbackControllerDeps {
   serverUrl: string;
   globalState: MementoLike;
+  /**
+   * 已读水位的存储（账号作用域 memento）。缺省回退 `globalState`（旧调用方）。
+   * 注意 `installId` 必须留在 `globalState`：匿名安装统计与匿名反馈身份是设备级的。
+   */
+  lastSeenState?: MementoLike;
   secrets: SecretStoreLike;
   extensionVersion: string;
   /** 平台标识（`process.platform/arch`），由调用方注入以便测试。 */
@@ -90,7 +101,21 @@ export class FeedbackController {
   }
 
   lastSeen(): bigint {
-    try { return BigInt(this.deps.globalState.get<string>(LAST_SEEN_REPLY_KEY) ?? '0'); } catch { return 0n; }
+    try { return BigInt(this.seenState.get<string>(LAST_SEEN_REPLY_KEY) ?? '0'); } catch { return 0n; }
+  }
+
+  private get seenState(): MementoLike {
+    return this.deps.lastSeenState ?? this.deps.globalState;
+  }
+
+  /**
+   * 换号：立即清掉上一个账号的线程快照（面板/侧边栏不再显示旧账号的反馈与未读），
+   * 再在后台按当前账号（或匿名凭证）重新拉取；拉取失败保持清空，不回显旧数据。
+   */
+  onAccountScopeChanged(): void {
+    this.items = [];
+    this.emit();
+    void this.refresh();
   }
 
   snapshot(): FeedbackSnapshot {
@@ -182,7 +207,7 @@ export class FeedbackController {
   async markAllRead(): Promise<void> {
     const max = maxReplyId(this.items);
     if (max > this.lastSeen()) {
-      await this.deps.globalState.update(LAST_SEEN_REPLY_KEY, max.toString());
+      await this.seenState.update(LAST_SEEN_REPLY_KEY, max.toString());
       this.emit();
     }
   }

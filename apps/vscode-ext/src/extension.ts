@@ -13,6 +13,7 @@ import { TableQueryView } from './result/tableQueryView';
 import { AuditLogger } from './utils/auditLogger';
 import { ElasticsearchView } from './result/elasticsearchView';
 import { RedisView } from './result/redisView';
+import { AuditLogView } from './result/auditLogView';
 import { clearEsRequestLog } from './result/esRequestLogStore';
 import { EsDslStore } from './result/esDslStore';
 import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
@@ -54,7 +55,7 @@ import { SlowQueryPanel } from './insights/slowQueryPanel';
 import { AuthService, DEFAULT_SERVER_URL } from './sync/authService';
 import { PersonalSyncClient } from '@devbelt/db-host/sync/e2e/client';
 import { eventBus, ConnectionChangedEvent, DataChangeEvent, AuthEvent } from '@devbelt/db-host/utils/event';
-import { accountScope, scopedMemento, setAccountScope } from './sync/accountScope';
+import { accountScope, onAccountScopeChange, scopedMemento, setAccountScope } from './sync/accountScope';
 import { markMigrationAsked, migrateScope, migrationOffer } from './sync/accountMigration';
 import { invalidateLanguage, l10n, LANGUAGE_CONFIG_KEY } from './i18n';
 import { registerCommands } from './commands';
@@ -212,6 +213,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     ElasticsearchView.closeAll();
     // 慢查询面板读的是账号作用域的历史：不关会继续显示上一个账号的 SQL。
     SlowQueryPanel.closeAll();
+    // 审计日志同样按账号隔离：打开的面板会一直显示旧账号的流水。
+    AuditLogView.closeAll();
     // 关闭会话会通知各面板；连接树由返回的 id 逐个清掉「已打开」状态。
     for (const id of manager.closeAllForAccountSwitch()) treeProvider.markClosed(id);
     const scope = accountScope();
@@ -329,7 +332,14 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     extensionVersion: String(context.extension.packageJSON.version ?? ''),
     os: `${process.platform}/${process.arch}`,
     getAccessToken: () => auth.getAccessToken(),
+    // 已读水位按账号存（installId 仍走 globalState，见 FeedbackControllerDeps）。
+    lastSeenState: scopedMemento(context.globalState),
   });
+  // 换号时清掉旧账号的线程快照并按当前账号重拉；面板/侧边栏经 onDidChange 跟随。
+  // 在此订阅而非 onAccountSwitched：feedbackController 在启动期的切号收尾之后才创建。
+  context.subscriptions.push(
+    onAccountScopeChange(() => feedbackController.onAccountScopeChanged()),
+  );
   context.subscriptions.push(
     FeedbackViewProvider.register(feedbackController),
     // 命令名用字面量：commandRegistration 测试按字面量扫描「声明 ↔ 注册」；

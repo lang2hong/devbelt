@@ -43,19 +43,22 @@ function make(over: {
   token?: string;
   secretData?: Record<string, string>;
   state?: Record<string, unknown>;
+  lastSeenState?: Record<string, unknown>;
 } = {}) {
   const state = memento(over.state);
+  const lastSeen = over.lastSeenState ? memento(over.lastSeenState) : undefined;
   const fetchImpl = over.fetchImpl ?? (vi.fn(async () => jsonResponse({ items: [] })) as unknown as typeof fetch);
   const controller = new FeedbackController({
     serverUrl: 'https://example.test',
     globalState: state,
+    ...(lastSeen ? { lastSeenState: lastSeen } : {}),
     secrets: secrets(over.secretData),
     extensionVersion: '0.4.1',
     os: 'linux/x64',
     getAccessToken: () => over.token,
     fetchImpl,
   });
-  return { controller, state, fetchImpl: fetchImpl as unknown as ReturnType<typeof vi.fn> };
+  return { controller, state, lastSeen, fetchImpl: fetchImpl as unknown as ReturnType<typeof vi.fn> };
 }
 
 describe('countUnread', () => {
@@ -220,5 +223,52 @@ describe('FeedbackController.submit', () => {
       .resolves.toBe('failed');
     await expect(mk(async () => { throw new Error('offline'); }).submit({ category: 'bug', content: 'x', contact: '' }))
       .resolves.toBe('failed');
+  });
+});
+
+describe('FeedbackController 账号切换', () => {
+  it('onAccountScopeChanged：立即清空旧账号快照、通知监听方，并按当前凭证重拉', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ items: [entry('1', ['3'])] })) as unknown as typeof fetch;
+    const { controller } = make({ fetchImpl, token: 't1' });
+    await controller.refresh();
+    expect(controller.snapshot().items).toHaveLength(1);
+
+    let notified = 0;
+    controller.onDidChange(() => { notified += 1; });
+    controller.onAccountScopeChanged();
+    expect(controller.snapshot().items).toEqual([]);
+    expect(notified).toBe(1);
+    await controller.refresh(); // 并入同一次在途重拉
+    expect(controller.snapshot().items).toHaveLength(1);
+    expect(notified).toBe(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('重拉失败：保持清空，不回显旧账号数据', async () => {
+    let ok = true;
+    const fetchImpl = vi.fn(async () => (ok
+      ? jsonResponse({ items: [entry('1', ['3'])] })
+      : jsonResponse({}, 500))) as unknown as typeof fetch;
+    const { controller } = make({ fetchImpl, token: 't1' });
+    await controller.refresh();
+    expect(controller.snapshot().items).toHaveLength(1);
+
+    ok = false;
+    controller.onAccountScopeChanged();
+    await expect(controller.refresh()).resolves.toBe(false);
+    expect(controller.snapshot().items).toEqual([]);
+  });
+
+  it('已读水位写 lastSeenState，不落 globalState（installId 仍是设备级）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ items: [entry('1', ['7'])] })) as unknown as typeof fetch;
+    const { controller, state, lastSeen } = make({ fetchImpl, token: 't1', lastSeenState: {} });
+    await controller.refresh();
+    await controller.markAllRead();
+
+    expect(controller.lastSeen()).toBe(7n);
+    expect(lastSeen!.data.get(LAST_SEEN_REPLY_KEY)).toBe('7');
+    expect(state.data.get(LAST_SEEN_REPLY_KEY)).toBeUndefined();
+    // installId 仍走 globalState（设备级匿名身份，不随账号切换）。
+    expect([...state.data.keys()].some((k) => /install/i.test(k))).toBe(true);
   });
 });
