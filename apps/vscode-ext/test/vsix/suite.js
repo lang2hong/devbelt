@@ -23,6 +23,12 @@ const EXPECTED_COMMANDS = [
   // 0.2.0 (P10 Insight)
   'devbelt.slowQueries',
   'devbelt.generateDictionary',
+  // 0.4.2: sync diagnosability. These three are contributed unconditionally in
+  // package.json, so a missing registration is a real regression, not a
+  // signed-out state artifact.
+  'devbelt.showDiagnostics',
+  'devbelt.syncDoctor',
+  'devbelt.toggleAutoSync',
 ];
 
 /** Lazily loaded webview chunks that must ship in the vsix. */
