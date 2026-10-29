@@ -119,16 +119,22 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
     };
     try {
       await dropAll(pool);
-      // 模拟存量库：跑完 013。
-      const legacy = migrations.filter((m) => m.version !== '014_plan_engines_devices');
-      await runMigrations(pool as any, [...legacy], LEGACY_MIGRATION_VERSIONS);
+      // 模拟存量库：只跑 001–013。
+      //
+      // 这里用版本切片而不是「排除 014」：排除法会把**后来新增的**迁移也带进这个
+      // 「存量库」，019 就会提前把 Pro 的 maxDevices 改成 5，使下面的「014 之前为 0」
+      // 断言失败（CI 实测）。切片让用例只依赖它要验证的那一段历史。
+      const before014 = migrations.filter((m) => m.version < '014_plan_engines_devices');
+      await runMigrations(pool as any, [...before014], LEGACY_MIGRATION_VERSIONS);
       const proBefore = await readPlan('pro');
       expect(proBefore.get('allowedDatabaseTypes')).toEqual(['mysql', 'postgresql', 'sqlite', 'redis']);
       expect(proBefore.get('maxDevices')).toBe(0);
       const freeBefore = await readPlan('free');
       expect(freeBefore.get('maxDevices')).toBe(0);
 
-      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+      // 只跑到 014：断言 014 自身的收敛效果，不让后续迁移参与。
+      const through014 = migrations.filter((m) => m.version <= '014_plan_engines_devices');
+      await runMigrations(pool as any, [...through014], LEGACY_MIGRATION_VERSIONS);
       const pro = await readPlan('pro');
       expect(pro.get('allowedDatabaseTypes')).toEqual(['mysql', 'postgresql', 'sqlite', 'redis', 'elasticsearch']);
       expect(pro.get('maxDevices')).toBe(5);

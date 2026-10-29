@@ -93,6 +93,21 @@ async function makeUser(db: MysqlDb, email: string): Promise<number> {
   return Number(r.insertId);
 }
 
+/**
+ * 给测试用户挂一个有效订阅。
+ *
+ * 同步写入按套餐权益校验：没有订阅行的用户回落到 Free，而 Free 现在不具备
+ * 跨设备同步能力（019_plan_boundaries）。并发语义这类用例要的是 Pro 的行为，
+ * 否则两个请求都会先被 PERSONAL_FEATURE_REQUIRED 拒掉，测不到版本冲突。
+ */
+async function grantPlan(db: MysqlDb, userId: number, planCode: 'free' | 'pro'): Promise<void> {
+  await db.query(
+    `INSERT INTO personal_subscriptions (user_id, plan_id, status, period_start_time, period_end_time)
+     SELECT ?, p.id, 'active', NOW(3), NULL FROM plans p WHERE p.code = ?`,
+    [userId, planCode],
+  );
+}
+
 function uniqueEmail(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.com`;
 }
@@ -132,6 +147,7 @@ describe.skipIf(!URL)('sync concurrency (real MySQL)', () => {
 
   it('concurrent create of the same recordId yields exactly one winner (version conflict)', async () => {
     const userId = await makeUser(db, uniqueEmail('scc-put'));
+    await grantPlan(db, userId, 'pro');
     const keys = makeKeys();
     const stateRepo = new MysqlSyncStateRepo(() => db);
     await withTransaction(db, (tx) => stateRepo.create(tx, makeState(userId, keys)));
@@ -156,6 +172,27 @@ describe.skipIf(!URL)('sync concurrency (real MySQL)', () => {
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'SYNC_VERSION_CONFLICT' });
+  });
+
+  it('Free 不具备跨设备同步：putRecord 被 PERSONAL_FEATURE_REQUIRED 拒绝', async () => {
+    const userId = await makeUser(db, uniqueEmail('scc-free'));
+    await grantPlan(db, userId, 'free');
+    const keys = makeKeys();
+    const stateRepo = new MysqlSyncStateRepo(() => db);
+    await withTransaction(db, (tx) => stateRepo.create(tx, makeState(userId, keys)));
+
+    const recordId = buf(16, 71).toString('base64url');
+    const mutationId = buf(16, 72).toString('base64url');
+    const requestDigest = buf(32, 72).toString('base64url');
+    const put = recordSvc().putRecord(userId, {
+      keyEpoch: '1', mutationId,
+      signature: signRecord(keys.signPriv, userId, 'record.put', { keyEpoch: '1', baseVersion: '0', recordId, mutationId, requestDigest }),
+      baseVersion: '0', requestDigest, recordId,
+      cipherSuite: 'AES-256-GCM' as const, formatVersion: 1 as const,
+      nonce: buf(12, 73), ciphertext: buf(50, 74), tag: buf(16, 75),
+    });
+
+    await expect(put).rejects.toMatchObject({ code: 'PERSONAL_FEATURE_REQUIRED' });
   });
 
   it('concurrent destroy yields exactly one winner (epoch stale)', async () => {
