@@ -3,6 +3,8 @@ import { createHash } from 'crypto';
 import type { AuthService } from '../sync/authService';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import { l10n } from '../i18n';
+import { diagError } from '../utils/diagnostics';
+import { errorDetail } from '../sync/syncFailure';
 
 /**
  * B5 生命周期命令：换钥 / 恢复码恢复 / 销毁同步数据 / 丢失口令重置。
@@ -64,7 +66,8 @@ async function getSession(deps: SyncLifecycleCommandDeps): Promise<SyncLifecycle
   await deps.auth.refreshEntitlement();
   try {
     return await deps.factory.ensureSession();
-  } catch {
+  } catch (err) {
+    diagError('sync lifecycle failed', { op: 'sync.sessionUnavailable', ...errorDetail(err) });
     deps.ui.error(l10n('sync.sessionUnavailable'));
     return undefined;
   }
@@ -106,7 +109,8 @@ export async function changeSyncPassword(deps: SyncLifecycleCommandDeps): Promis
   if (!newSmp) return;
   try {
     await session.changeSyncPassword(oldSmp, newSmp);
-  } catch {
+  } catch (err) {
+    diagError('sync lifecycle failed', { op: 'sync.changePassphraseFailed', ...errorDetail(err) });
     deps.ui.error(l10n('sync.changePassphraseFailed'));
     return;
   }
@@ -128,7 +132,8 @@ export async function recoverSync(deps: SyncLifecycleCommandDeps): Promise<void>
   let newRecovery: string;
   try {
     newRecovery = await session.recoverSync(code, newSmp);
-  } catch {
+  } catch (err) {
+    diagError('sync lifecycle failed', { op: 'sync.recoverFailed', ...errorDetail(err) });
     deps.ui.error(l10n('sync.recoverFailed'));
     return;
   }
@@ -156,7 +161,8 @@ export async function recoverByAccountCommand(deps: SyncLifecycleCommandDeps): P
   let newRecovery: string;
   try {
     newRecovery = await session.recoverByAccount(accountPassword, newSmp);
-  } catch {
+  } catch (err) {
+    diagError('sync lifecycle failed', { op: 'sync.recoverByAccountFailed', ...errorDetail(err) });
     deps.ui.error(l10n('sync.recoverByAccountFailed'));
     return;
   }
@@ -178,7 +184,8 @@ export async function destroySync(deps: SyncLifecycleCommandDeps): Promise<void>
   let newRecovery: string;
   try {
     newRecovery = await session.destroySync(smp);
-  } catch {
+  } catch (err) {
+    diagError('sync lifecycle failed', { op: 'sync.destroyFailed', ...errorDetail(err) });
     deps.ui.error(l10n('sync.destroyFailed'));
     return;
   }
@@ -204,7 +211,8 @@ export async function resetSync(deps: SyncLifecycleCommandDeps): Promise<void> {
   if (!(await deps.ui.confirmIrreversible(l10n('sync.resetConfirm'), l10n('sync.resetConfirmButton')))) return;
   try {
     await session.requestResetChallenge();
-  } catch {
+  } catch (err) {
+    diagError('sync lifecycle failed', { op: 'sync.resetChallengeFailed', ...errorDetail(err) });
     deps.ui.error(l10n('sync.resetChallengeFailed'));
     return;
   }
@@ -232,7 +240,9 @@ export async function resetSyncFromHandoff(deps: SyncLifecycleCommandDeps, hando
   let newRecovery: string;
   try {
     newRecovery = await session.resetSyncAfterLoss(handoffTicket, newSmp);
-  } catch {
+  } catch (err) {
+    // handoffTicket 不得进日志：这一条只记错误名/码/状态，不记消息。
+    diagError('sync lifecycle failed', { op: 'sync.resetHandoffFailed', ...errorDetail(err, false) });
     deps.ui.error(l10n('sync.resetHandoffFailed'));
     return;
   }

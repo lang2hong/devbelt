@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
+import { diagError } from '../utils/diagnostics';
+import { errorDetail } from './syncFailure';
 import { DEFAULT_SERVER_URL, type AuthService } from './authService';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import type { HubTab } from '../result/protocol';
@@ -114,7 +116,8 @@ export class AccountHubView extends BaseWebView {
         await this.auth.client.revokeDevice(String(msg.deviceId));
         await this.sendSession();
       } catch (e) {
-        this.post({ type: 'error', message: (e as Error).message });
+        diagError('account hub request failed', { op: 'revokeDevice', ...errorDetail(e) });
+        this.post({ type: 'error', message: l10n('account.loadFailed') });
       }
       return;
     }
@@ -141,7 +144,8 @@ export class AccountHubView extends BaseWebView {
       const me = await this.auth.getMe();
       this.post({ type: 'me', me });
     } catch (e) {
-      this.post({ type: 'error', message: (e as Error).message });
+      diagError('account hub request failed', { op: 'getMe', ...errorDetail(e) });
+      this.post({ type: 'error', message: l10n('account.loadFailed') });
     }
     this.post({ type: 'syncStatus', status: this.syncSummary() });
   }
@@ -164,7 +168,8 @@ export class AccountHubView extends BaseWebView {
       const { devices } = await this.auth.client.listDevices();
       this.post({ type: 'devices', devices, canRevoke: true, currentDeviceId: this.auth.currentDeviceId() });
     } catch (e) {
-      this.post({ type: 'error', message: (e as Error).message });
+      diagError('account hub request failed', { op: 'listDevices', ...errorDetail(e) });
+      this.post({ type: 'error', message: l10n('account.loadFailed') });
     }
   }
 
@@ -187,7 +192,8 @@ export class AccountHubView extends BaseWebView {
       const plans = await this.auth.client.getPlans();
       this.post({ type: 'plans', plans, current, periodEndTime, loggedIn: true });
     } catch (e) {
-      this.post({ type: 'error', message: (e as Error).message });
+      diagError('account hub request failed', { op: 'getPlans', ...errorDetail(e) });
+      this.post({ type: 'error', message: l10n('account.loadFailed') });
     }
   }
 

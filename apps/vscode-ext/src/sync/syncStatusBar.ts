@@ -3,6 +3,7 @@ import { deriveSyncStatus } from '@devbelt/db-host/sync/syncStatus';
 import type { SyncRunResult } from '@devbelt/db-host/sync/e2e/syncEngine';
 import type { AuthService } from './authService';
 import { l10n } from '../i18n';
+import { describeSyncFailure, failureInputOf } from './syncFailure';
 
 /** 状态栏所需的会话最小结构（避免依赖具体类）。 */
 export interface SyncStatusSession {
@@ -101,7 +102,9 @@ export function createSyncStatusBar(
     setReady(true);
     setUnlocked(session?.isUnlocked ?? false);
     item.show();
-    const reason = session!.lastError ?? session!.lastRun?.reason;
+    // 原始英文 reason 只进诊断日志；tooltip 给本地化、可操作的说明，并指向日志入口。
+    const failure = describeSyncFailure(failureInputOf(session!.lastRun, session!.lastError));
+    const logsHint = l10n('sync.viewLogsHint');
     // 自动同步开/关状态随 tooltip 呈现（关闭时点击仍是手动「立即同步」）。
     const autoNote = isAutoSyncEnabled() ? l10n('sync.autoOn') : l10n('sync.autoOff');
     item.command = 'devbelt.syncNow';
@@ -120,15 +123,17 @@ export function createSyncStatusBar(
           break;
         }
         item.text = `$(warning) ${l10n('sync.statusLabel')}`;
-        item.tooltip = `${l10n('sync.statusStalled')}\n${autoNote}`;
+        item.tooltip = session!.lastRun?.terminal || session!.lastRun?.reason
+          ? `${l10n('sync.statusStalled')}\n${failure}\n${logsHint}\n${autoNote}`
+          : `${l10n('sync.statusStalled')}\n${logsHint}\n${autoNote}`;
         break;
       case 'retrying':
         item.text = `$(sync~spin) ${l10n('sync.statusLabel')}`;
-        item.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}\n${autoNote}`;
+        item.tooltip = `${l10n('sync.statusError')}: ${failure}\n${logsHint}\n${autoNote}`;
         break;
       case 'error':
         item.text = `$(error) ${l10n('sync.statusLabel')}`;
-        item.tooltip = `${l10n('sync.statusError')}: ${reason ?? ''}\n${autoNote}`;
+        item.tooltip = `${l10n('sync.statusError')}: ${failure}\n${logsHint}\n${autoNote}`;
         break;
       default:
         item.text = `$(sync) ${l10n('sync.statusLabel')}`;

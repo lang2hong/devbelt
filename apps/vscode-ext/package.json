@@ -238,6 +238,11 @@
         "category": "DevBelt"
       },
       {
+        "command": "devbelt.showDiagnostics",
+        "title": "%cmd.showDiagnostics%",
+        "category": "DevBelt"
+      },
+      {
         "command": "devbelt.addIndex",
         "title": "%cmd.addIndex%",
         "category": "DevBelt",
@@ -1104,11 +1109,11 @@
         },
         {
           "command": "devbelt.toggleAutoSync",
-          "when": "devbelt.sync.unlocked"
+          "when": "devbelt.loggedIn"
         },
         {
           "command": "devbelt.syncDoctor",
-          "when": "devbelt.sync.ready"
+          "when": "devbelt.loggedIn"
         },
         {
           "command": "devbelt.fixConnectionPaths",

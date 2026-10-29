@@ -16,6 +16,7 @@ const { post, onMessage } = useVsCode();
 const checking = ref(false);
 const locked = ref(false);
 const incomplete = ref(false);
+const checkError = ref<string | undefined>();
 const findings = ref<SyncFindingView[]>([]);
 const conflicts = ref<SyncConflictView[]>([]);
 const lastCheckAt = ref<number | undefined>();
@@ -32,6 +33,7 @@ onMounted(() => {
       checking.value = snap.checking;
       locked.value = !!snap.locked;
       incomplete.value = snap.incomplete;
+      checkError.value = snap.checkError;
       findings.value = snap.findings ?? [];
       conflicts.value = snap.conflicts ?? [];
       lastCheckAt.value = snap.lastCheckAt;
@@ -50,7 +52,10 @@ onMounted(() => {
         ));
       }
       if (r.failed > 0) bits.push(t('sync.doctorFailed', { count: r.failed }));
-      resultBanner.value = bits.length > 0 ? bits.join(' ') : t('sync.doctorResult', { repaired: r.repaired });
+      // 修复根本没开始（断网/密钥世代不一致）：必须明说，不能像「修了 0 条」那样沉默。
+      resultBanner.value = r.aborted
+        ? t('sync.doctorAborted', { detail: r.aborted })
+        : bits.length > 0 ? bits.join(' ') : t('sync.doctorResult', { repaired: r.repaired });
     }
   });
   post({ type: 'ready' });
@@ -153,6 +158,7 @@ function formatCheckTime(at?: number): string {
 
     <p v-if="locked" class="state locked">{{ t('sync.requiresUnlock') }}</p>
     <p v-else-if="checking" class="state">{{ t('sync.doctorChecking') }}</p>
+    <p v-else-if="incomplete && checkError" class="state warn">{{ t('sync.doctorCheckFailed', { detail: checkError }) }}</p>
     <p v-else-if="incomplete" class="state warn">{{ t('sync.doctorIncomplete') }}</p>
     <p v-else-if="consistent" class="state ok">{{ t('sync.doctorConsistent') }}</p>
     <p v-else class="state warn">{{ t('sync.doctorFound', { count: total }) }}</p>

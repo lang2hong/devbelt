@@ -50,7 +50,7 @@ onUnmounted(() => { __offMsg?.(); });
     </header>
 
     <div class="err" v-if="errorMsg">{{ errorMsg }}</div>
-    <div class="loading" v-else-if="!loaded">…</div>
+    <div class="loading" v-else-if="!loaded">{{ t('common.loading') }}</div>
     <div class="loading" v-else-if="!status">{{ t('account.loginRequired') }}</div>
 
     <template v-else>
@@ -59,7 +59,7 @@ onUnmounted(() => { __offMsg?.(); });
           <li><span>{{ t('account.sync.state') }}</span><b>{{ stateLabel(status) }}</b></li>
           <li><span>{{ t('account.sync.epoch') }}</span><b>{{ status.keyEpoch ?? '—' }}</b></li>
           <li><span>{{ t('account.sync.conflicts') }}</span><b>{{ status.conflicts }}</b></li>
-          <li v-if="status.pendingCleanup"><span>{{ t('account.sync.pendingCleanup') }}</span><b>是</b></li>
+          <li v-if="status.pendingCleanup"><span>{{ t('account.sync.pendingCleanup') }}</span><b>{{ t('dict.yes') }}</b></li>
         </ul>
 
         <div class="primary-row">

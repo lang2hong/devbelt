@@ -16,7 +16,9 @@ import { RedisView } from './result/redisView';
 import { AuditLogView } from './result/auditLogView';
 import { clearEsRequestLog } from './result/esRequestLogStore';
 import { EsDslStore } from './result/esDslStore';
-import { diagDispose, diagInfo, diagWarn, diagError } from './utils/diagnostics';
+import { diagDispose, diagInfo, diagWarn, diagError, diagShow } from './utils/diagnostics';
+import { SyncFailureNotifier } from './sync/syncFailureNotifier';
+import { errorDetail } from './sync/syncFailure';
 import { installUnhandledRejectionGuard } from './utils/unhandledRejectionGuard';
 import { createUnmappedNodeReporter, type UnmappedNodeReporter } from './connection/redisTopology';
 import { purgeLegacyOrgCredentials } from './utils/legacyOrgCleanup';
@@ -378,6 +380,14 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     typeEnabledOf(readSyncItems(vscode.workspace.getConfiguration('devbelt')), type);
 
   const syncStatusBar = createSyncStatusBar(context, auth, () => syncFactory.current, isAutoSyncEnabled);
+  // 后台同步失败提醒：状态栏图标不打扰用户，连续失败或进入终态时弹一次带操作的警告。
+  const syncFailureNotifier = new SyncFailureNotifier({
+    warn: (message, ...actions) => vscode.window.showWarningMessage(message, ...actions),
+    run: (command) => { void vscode.commands.executeCommand(command); },
+  });
+  context.subscriptions.push(
+    vscode.commands.registerCommand('devbelt.showDiagnostics', () => diagShow()),
+  );
   const authStatusBar = createAuthStatusBar(context, auth);
 
   // P9 S7f：AI 上下文的连接级存储在同步工厂之前建好（schemaNotes 实体后端与 AI 面板共用同一实例）。
@@ -413,7 +423,15 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
         skippedUnsupported: result?.skippedUnsupported,
         skippedDisabled: result?.skippedDisabled,
         skippedOutbound: result?.skippedOutbound,
+        // terminal / stalled / conflict 的细节：此前只有 stage，配额、签名、协议类终态无从追查。
+        terminalCode: result?.terminal?.code,
+        terminalMutationId: result?.terminal?.mutationId,
+        stalledMutationId: result?.stalled?.mutationId,
+        conflicts: result?.conflicts?.length,
+        changeSequence: result?.changeSequence,
+        lastError: syncFactory.current?.lastError,
       });
+      syncFailureNotifier.onResult(result, syncFactory.current?.lastError);
       // 入站 pull 应用了变更才刷树（避免每次空同步都整树刷新），并重算路径 warning；
       // 其余情况仅刷新状态栏。
       if (result && result.applied > 0) void treeProvider.refreshPathIssues();
@@ -477,6 +495,11 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
       const config = vscode.workspace.getConfiguration();
       const next = !config.get<boolean>(SYNC_AUTO_SYNC_KEY, false);
       await config.update(SYNC_AUTO_SYNC_KEY, next, vscode.ConfigurationTarget.Global);
+      // 此前切换后毫无反馈，只有状态栏 tooltip 悄悄变化。
+      const unlocked = syncFactory.current?.isUnlocked ?? false;
+      void vscode.window.showInformationMessage(
+        l10n(next ? (unlocked ? 'sync.autoToggledOn' : 'sync.autoToggledOnLocked') : 'sync.autoToggledOff'),
+      );
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration(SYNC_AUTO_SYNC_KEY)) return;
@@ -488,13 +511,32 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     }),
   );
   // B1 是用户显式入口；注册本身不建 session，命令执行前才刷新权益并懒建。
-  registerPersonalSyncCommands(context, auth, syncFactory);
+  registerPersonalSyncCommands(context, auth, syncFactory, {
+    begin: () => syncFailureNotifier.beginManual(),
+    end: () => syncFailureNotifier.endManual(),
+  });
   // S7k.8「数据体检」面板（发现 → 用户选择修复；conflict 阶段与通知按钮都进这个面板）。
   SyncDoctorView.register(context, syncFactory, () => auth.refreshEntitlement());
   // B5 生命周期：换钥 / 恢复 / 销毁 / 重置。
   registerSyncLifecycleCommands(context, auth, syncFactory);
   // 切片 5：sync-reset 深链 UriHandler（浏览器 handoff → 扩展最终 reset）。
   registerSyncResetUriHandler(context, auth, syncFactory);
+  // 启动时静默恢复解锁：此前每次重启窗口都得手动点锁图标，自动同步也因此一直不生效。
+  // 只在已登录且开启了自动同步时做（关闭时不增加启动联网）；本机有 DEK 才会成功，
+  // 失败（断网/无 DEK/密钥世代已变）一律静默，保持锁定态，由状态栏锁图标引导。
+  if (auth.isLoggedIn() && isAutoSyncEnabled()) {
+    void (async () => {
+      try {
+        const session = await syncFactory.ensureSession();
+        if (!session || session.isUnlocked) return;
+        const restored = await session.tryRestoreUnlock();
+        diagInfo('sync startup restore', { restored });
+        syncStatusBar.refresh();
+      } catch (err) {
+        diagInfo('sync startup restore skipped', errorDetail(err));
+      }
+    })();
+  }
   // 这里原先用 onDidChangeSelection 往 `devbelt.dbType` / `devbelt.has*` 写
   // context key，供菜单 when 判断数据库类型。那是竞态的：右键未选中项、或右键
   // 与当前选中项不同时，键里还是上一个节点的值 —— 在 SQLite 表上会看到 MySQL

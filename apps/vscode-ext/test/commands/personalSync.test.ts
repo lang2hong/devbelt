@@ -13,7 +13,7 @@ vi.mock('vscode', () => ({
 vi.mock('../../src/utils/diagnostics', () => ({ diagInfo: vi.fn(), diagWarn: vi.fn(), diagError: vi.fn() }));
 
 import { initializePersonalSync, unlockPersonalSync, syncEntry, pullPersonalSync, pushPersonalSync, syncNowPersonalSync, resetLocalSync, type PersonalSyncCommandDeps, type SyncSessionPort, type SyncUi } from '../../src/commands/personalSync';
-import { diagError } from '../../src/utils/diagnostics';
+import { diagError, diagWarn } from '../../src/utils/diagnostics';
 import { SyncApiError } from '@devbelt/db-host/sync/e2e/client';
 import type { InitialSyncMaterial } from '@devbelt/db-host/sync/keyLifecycle';
 import type { StateDto } from '@devbelt/db-host/sync/e2e/types';
@@ -490,6 +490,70 @@ describe('personal sync B1 commands', () => {
     expect(mocks.executeCommand).toHaveBeenCalledTimes(2);
     expect(mocks.executeCommand).toHaveBeenCalledWith('devbelt.syncDoctor');
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('手动同步终态：提示带本地化原因，原始 reason 与终态码进诊断日志', async () => {
+    const session = makeSession({
+      isUnlocked: true,
+      syncNow: vi.fn(async () => ({
+        stage: 'terminal', reason: 'push rejected: quota exceeded',
+        terminal: { code: 'SYNC_QUOTA_EXCEEDED', mutationId: 'M'.repeat(22) },
+      })),
+    });
+    const { deps, warn } = makeDeps(session, []);
+    vi.mocked(diagWarn).mockClear();
+
+    await syncNowPersonalSync(deps);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const text = String(warn.mock.calls[0][0]);
+    expect(text).toContain('Sync incomplete');
+    expect(text).toContain('quota is full');
+    expect(text).not.toContain('push rejected');
+    expect(diagWarn).toHaveBeenCalledWith('sync manual not ok', expect.objectContaining({
+      op: 'sync', stage: 'terminal', terminalCode: 'SYNC_QUOTA_EXCEEDED', reason: 'push rejected: quota exceeded',
+    }));
+  });
+
+  it('手动同步抛异常：错误落诊断日志，提示带原因（此前整个错误被吞）', async () => {
+    const session = makeSession({
+      isUnlocked: true,
+      syncPull: vi.fn(async () => { throw new Error('getState failed: fetch failed'); }),
+    });
+    const { deps, warn } = makeDeps(session, []);
+    vi.mocked(diagError).mockClear();
+
+    await pullPersonalSync(deps);
+
+    expect(diagError).toHaveBeenCalledWith('sync manual failed', expect.objectContaining({ op: 'pull', message: 'getState failed: fetch failed' }));
+    const text = String(warn.mock.calls[0][0]);
+    expect(text).toContain('Pull incomplete');
+    expect(text).toContain('network');
+  });
+
+  it('手动同步包裹 manualHook（成功/失败都要配对 begin/end）', async () => {
+    const hook = { begin: vi.fn(), end: vi.fn() };
+    const ok = makeSession({ isUnlocked: true });
+    const a = makeDeps(ok, []);
+    a.deps.manualHook = hook;
+    await syncNowPersonalSync(a.deps);
+    const bad = makeSession({ isUnlocked: true, syncPush: vi.fn(async () => { throw new Error('x'); }) });
+    const b = makeDeps(bad, []);
+    b.deps.manualHook = hook;
+    await pushPersonalSync(b.deps);
+    expect(hook.begin).toHaveBeenCalledTimes(2);
+    expect(hook.end).toHaveBeenCalledTimes(2);
+  });
+
+  it('同步成功但有 skippedDisabled：不再谎报「已完成」，明确告知暂存条数', async () => {
+    const session = makeSession({
+      isUnlocked: true,
+      syncNow: vi.fn(async () => ({ stage: 'ok', skippedDisabled: 4 })),
+    });
+    const { deps, warn, info } = makeDeps(session, []);
+    await syncNowPersonalSync(deps);
+    expect(info).not.toHaveBeenCalled();
+    expect(String(warn.mock.calls[0][0])).toContain('4 record(s) parked');
   });
 
   it('resetLocalSync: confirms locally, clears local state, and makes zero sync requests', async () => {

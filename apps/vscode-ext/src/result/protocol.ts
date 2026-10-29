@@ -243,6 +243,8 @@ export interface SyncDoctorSnapshotMessage extends WebviewMessage {
   findings: SyncFindingView[];
   conflicts: SyncConflictView[];
   incomplete: boolean;
+  /** 检查根本没跑成时的本地化说明（此时 incomplete 必为 true）；原始原因只进日志。 */
+  checkError?: string;
 }
 
 /** 修复完成回执：repaired=按云端修复+合并+清理数；pushed=已定向推送到云端的「使用本机/合并」数；pending=入出站但推送失败（留待同步）数。 */
@@ -256,6 +258,8 @@ export interface SyncDoctorResultMessage extends WebviewMessage {
   blocked?: number;
   /** 阻止原因，用于选择提示文案。 */
   blockedBy?: 'entitlement' | 'unsupported';
+  /** 修复没有开始的本地化说明（断网/密钥世代不一致）。 */
+  aborted?: string;
 }
 
 // ────────────────────────── P5：2FA/TOTP 验证器协议 ──────────────────────────

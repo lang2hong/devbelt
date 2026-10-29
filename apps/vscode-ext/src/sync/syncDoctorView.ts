@@ -5,6 +5,7 @@ import type { FindingsReport, RepairOutcome } from '@devbelt/db-host/sync/e2e/sy
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
 import { diagError, diagInfo } from '../utils/diagnostics';
+import { describeSyncFailure } from './syncFailure';
 import type {
   SyncConflictView,
   SyncDoctorSnapshotMessage,
@@ -106,7 +107,7 @@ export class SyncDoctorView extends BaseWebView {
     findings: SyncFindingView[],
     conflicts: SyncConflictView[],
     incomplete: boolean,
-    extra: { checking: boolean; locked?: boolean },
+    extra: { checking: boolean; locked?: boolean; checkError?: string },
   ): SyncDoctorSnapshotMessage {
     return {
       type: 'syncDoctorSnapshot',
@@ -116,6 +117,7 @@ export class SyncDoctorView extends BaseWebView {
       findings,
       conflicts,
       incomplete,
+      ...(extra.checkError ? { checkError: extra.checkError } : {}),
     };
   }
 
@@ -137,12 +139,20 @@ export class SyncDoctorView extends BaseWebView {
         count: report.findings.length,
         conflicts: conflicts.length,
         incomplete: report.incomplete,
+        error: report.error,
         kinds: report.findings.map((f) => f.kind),
       });
-      this.post(this.snapshotMessage(report.findings, conflicts, report.incomplete, { checking: false }));
+      this.post(this.snapshotMessage(report.findings, conflicts, report.incomplete, {
+        checking: false,
+        ...(report.error ? { checkError: describeSyncFailure({ reason: report.error }) } : {}),
+      }));
     } catch (err) {
       diagError('sync doctor check failed', String(err));
-      this.post(this.snapshotMessage([], [], false, { checking: false }));
+      // 检查没跑成 ≠ 没有不一致：必须标 incomplete，否则面板会报「与云端一致」。
+      this.post(this.snapshotMessage([], [], true, {
+        checking: false,
+        checkError: describeSyncFailure({ reason: err instanceof Error ? err.message : String(err) }),
+      }));
     } finally {
       this.checking = false;
     }
@@ -164,6 +174,7 @@ export class SyncDoctorView extends BaseWebView {
         pending: result.pending,
         blocked: result.blocked,
         ...(result.blockedBy ? { blockedBy: result.blockedBy } : {}),
+        ...(result.aborted ? { aborted: describeSyncFailure({ reason: result.aborted }) } : {}),
       });
       // 定向推送在引擎内完成（只发本次点选的 mutation，不动 outbox 其它积压）。
     } catch (err) {

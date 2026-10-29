@@ -8,9 +8,10 @@ import { encodeBase64Url } from '@devbelt/db-host/sync/crypto/recoveryCode';
 import type { SyncSessionFactory } from '@devbelt/db-host/sync/sessionFactory';
 import type { FindingsReport } from '@devbelt/db-host/sync/e2e/syncEngine';
 import { l10n } from '../i18n';
-import { diagError, diagInfo } from '../utils/diagnostics';
+import { diagError, diagInfo, diagWarn } from '../utils/diagnostics';
+import { describeSyncFailure, errorDetail, failureInputOf } from '../sync/syncFailure';
 
-type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedOutbound?: number; skippedOutboundReason?: string } | undefined;
+type SyncRun = { stage: string; applied?: number; pushed?: number; changes?: number; skippedEntitlement?: number; skippedUnsupported?: number; skippedDisabled?: number; skippedOutbound?: number; skippedOutboundReason?: string; terminal?: { code?: string; mutationId?: string }; reason?: string } | undefined;
 
 interface SyncSessionPort {
   readonly uid: string;
@@ -50,7 +51,14 @@ interface SyncUi {
   errorAction?(message: string, actions: string[]): PromiseLike<string | undefined>;
 }
 
+/** 手动同步期间通知后台失败提醒器：手动同步自己会反馈结果，不应再弹一次。 */
+export interface ManualSyncHook {
+  begin(): void;
+  end(): void;
+}
+
 export interface PersonalSyncCommandDeps {
+  manualHook?: ManualSyncHook;
   auth: Pick<AuthService, 'isLoggedIn' | 'refreshEntitlement' | 'getCachedEntitlement'>;
   factory: SyncFactoryPort;
   ui: SyncUi;
@@ -165,6 +173,7 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
     const parts: string[] = [];
     if (result.skippedEntitlement) parts.push(l10n('sync.skippedEntitlement', { count: String(result.skippedEntitlement) }));
     if (result.skippedUnsupported) parts.push(l10n('sync.skippedUnsupported', { count: String(result.skippedUnsupported) }));
+    if (result.skippedDisabled) parts.push(l10n('sync.skippedDisabled', { count: String(result.skippedDisabled) }));
     if (result.skippedOutbound) {
       parts.push(l10n('sync.skippedOutbound', {
         count: String(result.skippedOutbound),
@@ -179,7 +188,15 @@ function reportInitialRun(ui: SyncUi, result: SyncRun, op: SyncOp): void {
       ui.info(l10n(`sync.doneUpToDate.${op}`));
     } else ui.info(l10n(`sync.done.${op}`));
   } else {
-    ui.warn(l10n(`sync.pending.${op}`));
+    // 失败/终态：给出本地化原因（原始 reason 与 terminal 码进诊断日志），不再只说「稍后重试」。
+    diagWarn('sync manual not ok', {
+      op,
+      stage: result?.stage,
+      terminalCode: result?.terminal?.code,
+      mutationId: result?.terminal?.mutationId,
+      reason: result?.reason,
+    });
+    ui.warn(`${l10n(`sync.pending.${op}`)} ${describeSyncFailure(failureInputOf(result))}`);
   }
 }
 
@@ -404,6 +421,7 @@ async function runExplicitSync(
     return;
   }
   diagInfo('sync trigger', { trigger: `manual-${op}`, autoSync: false });
+  deps.manualHook?.begin();
   try {
     const result = await run(session);
     reportInitialRun(deps.ui, result, op);
@@ -411,8 +429,13 @@ async function runExplicitSync(
     if (result?.stage === 'ok') {
       await notifyFindings(deps, session);
     }
-  } catch {
-    deps.ui.warn(l10n(`sync.pending.${op}`));
+  } catch (err) {
+    // 此前错误被整个吞掉：用户只看到「稍后重试」，日志里也没有任何线索。
+    diagError('sync manual failed', { op, ...errorDetail(err) });
+    const message = err instanceof Error ? err.message : String(err);
+    deps.ui.warn(`${l10n(`sync.pending.${op}`)} ${describeSyncFailure({ reason: message })}`);
+  } finally {
+    deps.manualHook?.end();
   }
 }
 
@@ -474,8 +497,9 @@ export function registerPersonalSyncCommands(
   context: vscode.ExtensionContext,
   auth: AuthService,
   factory: SyncSessionFactory,
+  manualHook?: ManualSyncHook,
 ): void {
-  const deps: PersonalSyncCommandDeps = { auth, factory, ui: vscodeUi() };
+  const deps: PersonalSyncCommandDeps = { auth, factory, ui: vscodeUi(), ...(manualHook ? { manualHook } : {}) };
   context.subscriptions.push(
     vscode.commands.registerCommand('devbelt.initializePersonalSync', () => initializePersonalSync(deps)),
     vscode.commands.registerCommand('devbelt.unlockPersonalSync', () => unlockPersonalSync(deps)),

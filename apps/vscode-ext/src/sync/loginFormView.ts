@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
 import { diagError } from '../utils/diagnostics';
+import { looksLikeNetworkError } from './syncFailure';
 import type { AuthService } from './authService';
 
 /**
@@ -123,6 +124,12 @@ export class LoginFormView extends BaseWebView {
     const m = e.message || l10n('login.fail');
     // 内部原因只进诊断通道，弹窗只给用户可理解的失败文案。
     if (cause) diagError(`login failed: ${m} (${cause})`);
+    // 网络层故障（fetch failed / ECONN* / 超时）是英文技术串，用户无从下手：换成本地化说明。
+    // 服务端给出的业务错误文案（密码错误等）保持原样。
+    if (looksLikeNetworkError(m, e.cause?.code, e.cause?.message)) {
+      this.post({ type: 'error', message: l10n('login.networkError') });
+      return;
+    }
     this.post({ type: 'error', message: m });
   }
 

@@ -21,9 +21,11 @@ vi.mock('../../src/result/baseWebView', () => ({
 }));
 
 vi.mock('../../src/sync/authService', () => ({ DEFAULT_SERVER_URL: 'http://server' }));
+vi.mock('../../src/utils/diagnostics', () => ({ diagInfo: vi.fn(), diagWarn: vi.fn(), diagError: vi.fn() }));
 
 import * as vscode from 'vscode';
 import { AccountHubView } from '../../src/sync/accountHubView';
+import { diagError } from '../../src/utils/diagnostics';
 
 const CATALOG = {
   personal: [{ code: 'pro', name: 'Pro', billing: { unit: 'month', priceCents: 9900 }, features: [] }],
@@ -131,6 +133,33 @@ describe('AccountHubView', () => {
     await view.handleMessage({ type: 'revoke', deviceId: 'd1' });
     expect((auth as any).client.revokeDevice).toHaveBeenCalledWith('d1');
     expect((auth as any).client.listDevices).toHaveBeenCalledTimes(1);
+  });
+
+  it('请求失败：webview 只收到本地化通用文案，原始英文错误进诊断日志', async () => {
+    const auth = makeAuth({
+      getMe: vi.fn(async () => { throw new Error('Get me failed: 500'); }),
+    });
+    (auth as any).client.listDevices = vi.fn(async () => { throw new Error('List devices failed: 403'); });
+    (auth as any).client.getPlans = vi.fn(async () => { throw new Error('Get plans failed: 500'); });
+    (auth as any).client.revokeDevice = vi.fn(async () => { throw new Error('Revoke failed: 500'); });
+    const view = makeView('account', auth);
+    vi.mocked(diagError).mockClear();
+
+    await view.handleMessage({ type: 'ready' });
+    await view.handleMessage({ type: 'ready', view: 'account' });
+    await view.handleMessage({ type: 'ready', view: 'session' });
+    await view.handleMessage({ type: 'ready', view: 'plans' });
+    await view.handleMessage({ type: 'revoke', deviceId: 'd1' });
+
+    const errors = view.post.mock.calls.map((c: any[]) => c[0]).filter((m: any) => m.type === 'error');
+    expect(errors).toHaveLength(4);
+    for (const m of errors) {
+      expect(m.message).toContain('Failed to load');
+      expect(m.message).not.toMatch(/failed: \d{3}/);
+    }
+    const ops = vi.mocked(diagError).mock.calls.map((c) => (c[1] as { op: string }).op);
+    expect(ops).toEqual(expect.arrayContaining(['getMe', 'listDevices', 'getPlans', 'revokeDevice']));
+    expect(JSON.stringify(vi.mocked(diagError).mock.calls)).toContain('Get me failed: 500');
   });
 
   it('opens the browser console only for whitelisted paths', async () => {

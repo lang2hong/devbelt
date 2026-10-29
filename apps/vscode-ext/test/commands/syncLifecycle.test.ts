@@ -14,6 +14,9 @@ vi.mock('vscode', () => ({
   commands: {},
 }));
 
+vi.mock('../../src/utils/diagnostics', () => ({ diagInfo: vi.fn(), diagWarn: vi.fn(), diagError: vi.fn() }));
+
+import { diagError } from '../../src/utils/diagnostics';
 import {
   changeSyncPassword,
   recoverSync,
@@ -102,6 +105,30 @@ describe('syncLifecycle 命令（B5）', () => {
     ui.promptSmp.mockResolvedValueOnce('old').mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
     await changeSyncPassword(deps);
     expect(ui.error).toHaveBeenCalled();
+  });
+
+  it('生命周期失败：错误落诊断日志（此前整个文件的 catch 都不留痕迹）', async () => {
+    vi.mocked(diagError).mockClear();
+    const boom = Object.assign(new Error('Request failed: 500'), { name: 'SyncApiError', status: 500 });
+    const session = makeSession({ isUnlocked: true, changeSyncPassword: vi.fn(async () => { throw boom; }) });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('old').mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await changeSyncPassword(deps);
+    expect(diagError).toHaveBeenCalledWith(
+      'sync lifecycle failed',
+      expect.objectContaining({ op: 'sync.changePassphraseFailed', name: 'SyncApiError', status: 500 }),
+    );
+  });
+
+  it('日志不含口令：失败日志只记操作名与错误元信息', async () => {
+    vi.mocked(diagError).mockClear();
+    const session = makeSession({ isUnlocked: true, changeSyncPassword: vi.fn(async () => { throw new Error('x'); }) });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('old-secret-pass').mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await changeSyncPassword(deps);
+    const logged = JSON.stringify(vi.mocked(diagError).mock.calls);
+    expect(logged).not.toContain('old-secret-pass');
+    expect(logged).not.toContain('new-passphrase-123');
   });
 
   it('recoverSync：成功 → 展示新恢复码并确认后解锁提示', async () => {
@@ -233,6 +260,19 @@ describe('syncLifecycle 命令（B5）', () => {
     await resetSyncFromHandoff(deps, 'HANDOFF-TICKET');
     expect(ui.error).toHaveBeenCalled();
     expect(ui.confirmRecoveryCode).not.toHaveBeenCalled();
+  });
+
+  it('resetSyncFromHandoff：失败日志不含 ticket，也不记错误消息（消息可能回显 ticket）', async () => {
+    vi.mocked(diagError).mockClear();
+    const session = makeSession({
+      isUnlocked: false,
+      resetSyncAfterLoss: vi.fn(async () => { throw new Error('bad ticket HANDOFF-TICKET'); }),
+    });
+    const { deps, ui } = makeDeps(session);
+    ui.promptSmp.mockResolvedValueOnce('new-passphrase-123').mockResolvedValueOnce('new-passphrase-123');
+    await resetSyncFromHandoff(deps, 'HANDOFF-TICKET');
+    expect(diagError).toHaveBeenCalledWith('sync lifecycle failed', expect.objectContaining({ op: 'sync.resetHandoffFailed' }));
+    expect(JSON.stringify(vi.mocked(diagError).mock.calls)).not.toContain('HANDOFF-TICKET');
   });
 
   it('resetSyncFromHandoff：未登录 → 告警且不消费 ticket', async () => {
