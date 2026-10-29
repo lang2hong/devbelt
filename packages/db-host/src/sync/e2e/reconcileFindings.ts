@@ -47,6 +47,8 @@ export interface FindingsReport {
   findings: SyncFinding[];
   /** 扫描提前中断（分页截断等）：发现可能未穷尽，面板应提示重试。 */
   incomplete: boolean;
+  /** 检查根本没跑成（断网/epoch 不一致）时的原因；此时 `incomplete` 必为 true。不含秘密。 */
+  error?: string;
 }
 
 /** 修复原语（由引擎机制层执行；每条发现按矩阵解析出 0..1 个原语）。 */

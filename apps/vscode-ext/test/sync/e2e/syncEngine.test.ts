@@ -1248,7 +1248,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     expect((store.get('c-lost') as unknown as { deleted?: boolean } | undefined)?.deleted).toBe(true);
   });
 
-  it('repairFindings：远端 epoch 前进 → 空结果（不误报 failed）', async () => {
+  it('repairFindings：远端 epoch 前进 → 零计数且带 aborted（不误报 failed，也不冒充「修了 0 条」）', async () => {
     const id = 'A'.repeat(22);
     const mapStore = new RecordMapStore(makeMemento(), '7', '1');
     await mapStore.put(id, { type: 'connection', localId: 'c-lost', recordVersion: '1', revision: 0, status: 'confirmed' });
@@ -1258,7 +1258,7 @@ describe('SyncEngine 本地缺失修复（S7k）', () => {
     const eng = engine({ client, snap: SNAP, mapStore, outbox: new PendingMutationStore(makeMemento(), '7', '1'), store: makeStore() });
 
     const r = await eng.repairFindings();
-    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 });
+    expect(r).toEqual({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0, aborted: 'remote keyEpoch differs from local' });
     expect(client.getRecords).not.toHaveBeenCalled();
   });
 
@@ -2072,5 +2072,202 @@ describe('SyncEngine · 选择性同步（类型停用，按机器）', () => {
     const findings = (await enabled.inspectFindings()).findings;
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ kind: 'missing', type: 'connection' });
+  });
+});
+
+/** 构造一条用测试 DEK 加密的远端 put 记录；payload 可任意（含未来才有的实体类型）。 */
+function sealedRemote(recordId: string, payload: Record<string, unknown>, changeSequence = '5') {
+  const dek = new Uint8Array(32);
+  const nonce = new Uint8Array(12).fill(3);
+  const plaintext = Buffer.from(JSON.stringify(payload), 'utf8');
+  const box = sealRecord(dek, nonce, plaintext, { userId: '7', keyEpoch: '1', recordId, recordVersion: '1' });
+  return {
+    recordId, version: '1', changeSequence, deleteTime: null, cipherSuite: 'AES-256-GCM', formatVersion: 1,
+    nonce: Buffer.from(nonce).toString('base64url'),
+    ciphertext: Buffer.from(box.ciphertext).toString('base64url'),
+    tag: Buffer.from(box.tag).toString('base64url'),
+  };
+}
+
+describe('SyncEngine · 配额超限不冻结入站', () => {
+  it('SYNC_QUOTA_EXCEEDED：被拒条目留在 outbox，仍然 pull 入站，最终以 terminal 收尾', async () => {
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    const m = putMutation();
+    await outbox.put(m);
+    const getRecords = vi.fn(async () => ({ snapshotSequence: '5', records: [] }));
+    const client = clientWith({
+      getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+      getRecords,
+      putRecordSigned: vi.fn(async () => { throw new SyncApiError(409, 'SYNC_QUOTA_EXCEEDED'); }),
+    });
+    const rejected: Array<{ type: string; localId: string }> = [];
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox, onQuotaRejected: (ref) => { rejected.push(ref); } });
+
+    const r = await eng.sync();
+
+    expect(getRecords).toHaveBeenCalled();
+    expect(r.stage).toBe('terminal');
+    expect(r.terminal).toMatchObject({ mutationId: m.mutationId, code: 'SYNC_QUOTA_EXCEEDED' });
+    expect(r.reason).toContain('quota');
+    expect(rejected).toEqual([{ type: 'connection', localId: 'c-1' }]);
+    expect(outbox.list()).toHaveLength(1);
+  });
+
+  it('配额超限的同时，入站新记录真的落地（以前整个入站被冻结）', async () => {
+    const store = makeStore();
+    const entities = new EntityStore(store);
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(putMutation());
+    const rec = sealedRemote('R'.repeat(22), { type: 'connection', name: 'from-cloud', dbType: 'mysql', host: 'h', port: 3306, user: 'u', password: 'p' });
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith({
+        getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+        getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+        putRecordSigned: vi.fn(async () => { throw new SyncApiError(409, 'SYNC_QUOTA_EXCEEDED'); }),
+      }),
+      stateStore: makeStateStore(SNAP) as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox, entities,
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-cloud-1',
+      seedConflictCarrier: seedConflictStub,
+    });
+
+    const r = await eng.sync();
+
+    expect(r.stage).toBe('terminal');
+    expect(r.terminal?.code).toBe('SYNC_QUOTA_EXCEEDED');
+    expect(r.changes).toBe(1);
+    const names = store.listForSync().map((c) => (c as unknown as { name?: string }).name);
+    expect(names).toContain('from-cloud');
+  });
+
+  it('非配额的终态（签名无效）仍立即返回，不进入 pull', async () => {
+    const outbox = new PendingMutationStore(makeMemento(), '7', '1');
+    await outbox.put(putMutation());
+    const getRecords = vi.fn(async () => ({ snapshotSequence: '0', records: [] }));
+    const client = clientWith({
+      getRecords,
+      putRecordSigned: vi.fn(async () => { throw new SyncApiError(403, 'SYNC_SIGNATURE_INVALID'); }),
+    });
+    const eng = engine({ client, snap: SNAP, mapStore: new RecordMapStore(makeMemento(), '7', '1'), outbox });
+    const r = await eng.sync();
+    expect(r.stage).toBe('terminal');
+    expect(r.terminal?.code).toBe('SYNC_SIGNATURE_INVALID');
+    expect(getRecords).not.toHaveBeenCalled();
+  });
+});
+
+describe('SyncEngine · 未知实体类型前向兼容', () => {
+  function build(rec: ReturnType<typeof sealedRemote>, snap = SNAP) {
+    const memento = makeMemento();
+    const deferred = new DeferredRecordStore(memento, '7', '1');
+    const setSnapshot = vi.fn(async () => undefined);
+    const eng = new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith({
+        getState: vi.fn(async () => stateDto({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' })),
+        getRecords: vi.fn(async () => ({ snapshotSequence: '5', records: [rec] })),
+      }),
+      stateStore: { getSnapshot: () => snap, setSnapshot } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(memento, '7', '1'),
+      deferred,
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-x',
+      seedConflictCarrier: seedConflictStub,
+    });
+    return { eng, deferred, setSnapshot };
+  }
+
+  it('未来才有的实体类型：入 deferred、计 skippedUnsupported、游标前进（不再无限重试卡死）', async () => {
+    const rec = sealedRemote('Z'.repeat(22), { type: 'dashboardLayout', name: 'future' });
+    const { eng, deferred, setSnapshot } = build(rec);
+
+    const r = await eng.sync();
+
+    expect(r.stage).toBe('ok');
+    expect(r.skippedUnsupported).toBe(1);
+    expect(deferred.list()).toHaveLength(1);
+    expect(setSnapshot).toHaveBeenCalledWith({ keyEpoch: '1', stateVersion: '1', changeSequence: '5' });
+  });
+
+  it('下一轮 drain 遇到仍不认识的类型：保留条目，不丢也不报错', async () => {
+    const rec = sealedRemote('Z'.repeat(22), { type: 'dashboardLayout', name: 'future' });
+    const { eng, deferred } = build(rec);
+    await eng.sync();
+    const r2 = await eng.sync();
+    expect(r2.stage).toBe('ok');
+    expect(deferred.list()).toHaveLength(1);
+  });
+
+  it('payload 缺 type（真正的协议违规）仍然是 error，不被当成未知类型吞掉', async () => {
+    const rec = sealedRemote('Z'.repeat(22), { name: 'no-type' });
+    const { eng, deferred } = build(rec);
+    const r = await eng.sync();
+    expect(r.stage).toBe('error');
+    expect(r.reason).toContain('apply failed');
+    expect(deferred.list()).toHaveLength(0);
+  });
+});
+
+describe('SyncEngine · 体检在检查失败时不报「一致」', () => {
+  // null = 本地没有快照（用 undefined 会触发参数默认值而误取 SNAP）。
+  function build(over: Partial<PersonalSyncClient>, snap: SyncStateSnapshot | null = SNAP) {
+    return new SyncEngine({
+      userId: '7', keyEpoch: '1',
+      client: clientWith(over),
+      stateStore: { getSnapshot: () => snap ?? undefined, setSnapshot: vi.fn() } as never,
+      mapStore: new RecordMapStore(makeMemento(), '7', '1'),
+      outbox: new PendingMutationStore(makeMemento(), '7', '1'),
+      entities: new EntityStore(makeStore()),
+      unresolved: new UnresolvedRefStore(makeMemento(), '7', '1'),
+      dek: () => new Uint8Array(32), signSeed: () => new Uint8Array(32), uniqueId: () => 'c-x',
+      seedConflictCarrier: seedConflictStub,
+    });
+  }
+
+  it('getState 失败（断网）→ incomplete + error，而不是空且完整', async () => {
+    const eng = build({ getState: vi.fn(async () => { throw new Error('fetch failed'); }) });
+    const r = await eng.inspectFindings();
+    expect(r.incomplete).toBe(true);
+    expect(r.findings).toEqual([]);
+    expect(r.error).toContain('getState failed');
+    expect(r.error).toContain('fetch failed');
+  });
+
+  it('远端 epoch 不一致 → incomplete + error', async () => {
+    const eng = build({ getState: vi.fn(async () => stateDto({ keyEpoch: '2', stateVersion: '1', changeSequence: '1' })) });
+    const r = await eng.inspectFindings();
+    expect(r.incomplete).toBe(true);
+    expect(r.error).toContain('keyEpoch');
+  });
+
+  it('本地没有同步快照 → incomplete + error', async () => {
+    const eng = build({}, null);
+    const r = await eng.inspectFindings();
+    expect(r.incomplete).toBe(true);
+    expect(r.error).toContain('no local sync state');
+  });
+
+  it('检查正常且无差异 → incomplete=false 且无 error（仍能报「一致」）', async () => {
+    const eng = build({});
+    const r = await eng.inspectFindings();
+    expect(r.incomplete).toBe(false);
+    expect(r.error).toBeUndefined();
+  });
+
+  it('repairFindings：getState 失败 → aborted 原因，而不是全零「修复了 0 条」', async () => {
+    const eng = build({ getState: vi.fn(async () => { throw new Error('fetch failed'); }) });
+    const r = await eng.repairFindings();
+    expect(r.aborted).toContain('getState failed');
+    expect(r.cloud + r.local + r.merged + r.swept + r.failed).toBe(0);
+  });
+
+  it('repairFindings：epoch 不一致 → aborted', async () => {
+    const eng = build({ getState: vi.fn(async () => stateDto({ keyEpoch: '9', stateVersion: '1', changeSequence: '1' })) });
+    const r = await eng.repairFindings();
+    expect(r.aborted).toContain('keyEpoch');
   });
 });

@@ -133,6 +133,8 @@ export interface RepairOutcome {
   blocked: number;
   /** blocked 的原因（多条合并时按 entitlement > unsupported 取首个）。 */
   blockedBy?: 'entitlement' | 'unsupported';
+  /** 修复根本没有开始（断网/epoch 不一致等）：与「修复了 0 条」区分。不含秘密。 */
+  aborted?: string;
 }
 
 interface RemoteState {
@@ -245,6 +247,17 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * 载荷自带 `type` 字符串但本客户端不认识（未来版本新增的实体类型）。
+ * 与未知引擎同策略：入 deferred、游标前进，升级后重放；而不是当作协议违规卡死整个 feed。
+ */
+class UnsupportedEntityTypeError extends Error {
+  constructor(readonly entityType: string) {
+    super('record payload has unsupported entity type');
+    this.name = 'UnsupportedEntityTypeError';
+  }
+}
+
 export class SyncEngine {
   private inflight?: Promise<SyncRunResult>;
 
@@ -347,16 +360,19 @@ export class SyncEngine {
    * 孤儿空分组），供「同步体检」面板展示并由用户选择修复。需已解锁；分页只读拉取不动游标。
    */
   async inspectFindings(): Promise<FindingsReport> {
-    const empty: FindingsReport = { findings: [], incomplete: false };
+    // 检查本身没跑成（断网/epoch 不一致）≠「没有不一致」：必须标 incomplete 并带原因，
+    // 否则面板会对断网或密钥过期的用户报「与云端一致」。
+    const aborted = (error: string): FindingsReport => ({ findings: [], incomplete: true, error });
     let remoteState: RemoteState;
     try {
       remoteState = this.parseState(await this.deps.client.getState());
-    } catch {
-      return empty;
+    } catch (err) {
+      return aborted(`getState failed: ${describe(err)}`);
     }
     const local = this.deps.stateStore.getSnapshot();
-    if (!local || BigInt(local.keyEpoch) !== BigInt(this.deps.keyEpoch)) return empty;
-    if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) return empty;
+    if (!local) return aborted('no local sync state');
+    if (BigInt(local.keyEpoch) !== BigInt(this.deps.keyEpoch)) return aborted('engine keyEpoch mismatch with local state');
+    if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) return aborted('remote keyEpoch differs from local');
 
     const detected = await this.collectFindings(remoteState);
     return { findings: detected.findings, incomplete: !detected.scanComplete };
@@ -417,17 +433,19 @@ export class SyncEngine {
    * （失败可重入，writeEntity 自带回滚）。写入全部由用户在体检面板选择触发。
    */
   async repairFindings(ids?: string[], direction: RepairDirection = 'cloud'): Promise<RepairOutcome> {
-    const empty: RepairOutcome = { cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0 };
+    // 没能开始修复时带 `aborted` 原因：全零结果与「修了 0 条」无法区分，面板会像成功一样沉默。
+    const aborted = (reason: string): RepairOutcome => ({ cloud: 0, local: 0, merged: 0, swept: 0, failed: 0, notFound: 0, pending: 0, blocked: 0, aborted: reason });
     let remoteState: RemoteState;
     try {
       remoteState = this.parseState(await this.deps.client.getState());
-    } catch {
-      return empty;
+    } catch (err) {
+      return aborted(`getState failed: ${describe(err)}`);
     }
     const local = this.deps.stateStore.getSnapshot();
-    if (!local || BigInt(local.keyEpoch) !== BigInt(this.deps.keyEpoch)) return empty;
-    // 远端 epoch 对账：epoch 前进后旧密钥解不开新 epoch 记录 → 空结果（不误报 failed）。
-    if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) return empty;
+    if (!local) return aborted('no local sync state');
+    if (BigInt(local.keyEpoch) !== BigInt(this.deps.keyEpoch)) return aborted('engine keyEpoch mismatch with local state');
+    // 远端 epoch 对账：epoch 前进后旧密钥解不开新 epoch 记录，不能修复。
+    if (BigInt(remoteState.keyEpoch) !== BigInt(local.keyEpoch)) return aborted('remote keyEpoch differs from local');
 
     const detected = await this.collectFindings(remoteState);
     const selected = (ids ? detected.findings.filter((f) => ids.includes(f.id)) : detected.findings)
@@ -610,6 +628,16 @@ export class SyncEngine {
     let stalled: SyncStalledEntry | undefined;
     let lastCommitted = local.changeSequence;
     let pushed = 0;
+    // 配额超限只影响被拒的那一条：其余出站与整个入站照常进行，最后再以 terminal 收尾
+    // （让 coordinator 停止自动重试、状态栏如实显示），而不是让一条超额记录冻结全部入站。
+    let quotaRejected: SyncTerminalEntry | undefined;
+    const withQuota = (r: SyncRunResult): SyncRunResult => {
+      if (!quotaRejected) return r;
+      if (r.stage === 'ok') return { ...r, stage: 'terminal', terminal: quotaRejected, reason: 'push rejected: quota exceeded' };
+      // conflict 优先作为 stage（要引导到体检面板），仍带上 terminal 供日志与状态栏。
+      if (r.stage === 'conflict') return { ...r, terminal: r.terminal ?? quotaRejected };
+      return r;
+    };
     for (const m of (phase === 'pull' ? [] : this.deps.outbox.list())) {
       // C1：已标记冲突的 mutation 不得再 push（避免每轮重复 409）；把持久化冲突反馈给 UI。
       if (m.conflict) {
@@ -634,6 +662,9 @@ export class SyncEngine {
             if (err.code === 'SYNC_QUOTA_EXCEEDED') {
               // P6 §六：按类型配额拒绝 → 标记本地实体 localOnly/quota（不静默循环；终态已停重试）。
               try { await this.deps.onQuotaRejected?.({ type: m.type, localId: m.localId }); } catch { /* 回调失败不改变终态 */ }
+              // 条目保留在 outbox；继续处理其余出站与入站，最后统一以 terminal 收尾。
+              quotaRejected ??= { mutationId: m.mutationId, code: err.code, currentKeyEpoch: err.currentKeyEpoch };
+              continue;
             }
             return {
               stage: 'terminal', conflicts, applied: 0,
@@ -717,7 +748,7 @@ export class SyncEngine {
     // push-only：出站重放完成即返回，不进入 feed 拉取。
     if (phase === 'push') {
       this.emitProgress({ phase, applied: 0, changes: 0, pushed, pages: 0 });
-      return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied: 0, pushed, changeSequence: lastCommitted };
+      return withQuota({ stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied: 0, pushed, changeSequence: lastCommitted });
     }
 
     // 3. 分页 feed + 解密 + 应用 + 逐页 cursor
@@ -778,14 +809,41 @@ export class SyncEngine {
       if (page.records.length > 0) {
         // 先解密得到 type，按 applyOrder 排序后应用，保证批内引用先于被依赖者到达时立即翻译（N2）。
         // 解密失败（含 lock 后 thunk throw）归入结构化 error，不使 sync() 整体 reject。
-        let typed: { rec: RemoteRecord; type: import('./syncEntity').SyncEntityType }[];
+        // type 为 undefined = 本客户端不认识的实体类型，见下方 deferred 分支。
+        let typed: { rec: RemoteRecord; type: import('./syncEntity').SyncEntityType | undefined }[];
         try {
-          typed = page.records.map((rec) => ({ rec, type: this.typeOfRemote(rec) }));
+          typed = page.records.map((rec) => {
+            try {
+              return { rec, type: this.typeOfRemote(rec) };
+            } catch (err) {
+              if (err instanceof UnsupportedEntityTypeError) return { rec, type: undefined };
+              throw err;
+            }
+          });
         } catch (err) {
           return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
         }
-        typed.sort((a, b) => applyOrder(a.type) - applyOrder(b.type));
+        typed.sort((a, b) => (a.type === undefined ? 99 : applyOrder(a.type)) - (b.type === undefined ? 99 : applyOrder(b.type)));
         for (const { rec, type } of typed) {
+          if (type === undefined) {
+            try {
+              await this.deps.deferred?.put({
+                recordId: rec.recordId,
+                version: rec.version,
+                changeSequence: rec.changeSequence,
+                deleteTime: rec.deleteTime,
+                nonce: rec.nonce,
+                ciphertext: rec.ciphertext,
+                tag: rec.tag,
+              });
+            } catch (err) {
+              // 游标一旦越过就无法再拉：暂存失败必须报错，不能静默丢弃。
+              return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
+            }
+            skippedUnsupported += 1;
+            applied += 1;
+            continue;
+          }
           // 选择性同步：本机关闭的类型不应用（不覆盖本机）、入 deferred 暂存、游标前进——
           // 重新打开后 drainDeferred 重放，无需重拉 feed。
           if (this.typeDisabled(type)) {
@@ -845,7 +903,7 @@ export class SyncEngine {
                 remoteVersion: rec.version,
               });
               await this.persistConflict(rec, err);
-              return { stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, skippedDisabled, changeSequence: lastCommitted };
+              return withQuota({ stage: 'conflict', conflicts, stalled, applied, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, skippedDisabled, changeSequence: lastCommitted });
             }
             return { stage: 'error', conflicts, stalled, applied, changeSequence: lastCommitted, reason: `apply failed: ${describe(err)}` };
           }
@@ -884,7 +942,7 @@ export class SyncEngine {
 
     // C2：本轮收集到冲突（出站 version 冲突未在本轮 pull 命中远端时仍属冲突）→ 以 conflict 收尾，
     // 让 coordinator 进入 stalled，不再自动重放同一条冲突 mutation。
-    return { stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, skippedDisabled, changeSequence: lastCommitted };
+    return withQuota({ stage: conflicts.length > 0 ? 'conflict' : 'ok', conflicts, stalled, applied, pushed, changes, ignoredTombstone, skippedRemote, skippedEntitlement, skippedUnsupported, skippedDisabled, changeSequence: lastCommitted });
   }
 
   private parseState(raw: unknown): RemoteState {
@@ -1059,6 +1117,11 @@ export class SyncEngine {
       || payload.type === 'schemaNotes' || payload.type === 'aiModelAccess') {
       return payload.type;
     }
+    // 有 type 字符串但不认识 = 更新版本客户端写入的新实体类型（前向兼容）；
+    // 缺失/非字符串仍是协议违规。
+    if (typeof payload.type === 'string' && payload.type.length > 0) {
+      throw new UnsupportedEntityTypeError(payload.type);
+    }
     throw new FeedProtocolError('record payload missing valid type');
   }
 
@@ -1105,6 +1168,8 @@ export class SyncEngine {
         await deferred.delete(entry.recordId);
         drained += 1;
       } catch (err) {
+        // 仍不认识的实体类型：保留待升级后重放。
+        if (err instanceof UnsupportedEntityTypeError) continue;
         if (err instanceof RecordConflictError) {
           conflicts.push({
             recordId: rec.recordId,
