@@ -9,9 +9,11 @@ import type { Migration } from '../migrate.js';
  * - `maxConnectionMetas` 的标签改为「云端同步记录数」：该计数覆盖所有同步记录
  *   （连接、分组、查询、文件夹、验证器、注记、AI 配置），不只是连接。
  *
- * Free 的 `maxDevices`（1）、`maxConnectionMetas`（5）、`syncStorageBytes`（1 MiB）保持不变。
- * 同步关闭后 Free 写不了任何云端记录，这两项配额不再生效。切勿把配额写成 0：
- * 服务端把 0 当「不限」（quotaEnabled 为 n > 0）。
+ * 本迁移同时把新库种子对齐到生产长期运行的实际值（见 TARGETS 里的注释）。
+ * 这些在已部署的生产上是空操作，只影响新库与测试库。
+ *
+ * 同步关闭后 Free 写不了任何云端记录，所以 Free 的云端配额不再生效。
+ * 切勿把配额写成 0：服务端把 0 当「不限」（quotaEnabled 为 n > 0）。
  *
  * 与 014 不同，这里是**显式收敛到目标值**，会覆盖运营在后台对这三个值做过的手工调整。
  * 部署前请确认后台没有对它们做过有意的修改。
@@ -39,9 +41,21 @@ import type { Migration } from '../migrate.js';
  * ```
  */
 const TARGETS: ReadonlyArray<[planCode: string, featureKey: string, value: unknown]> = [
+  // 边界决策
   ['free', 'allowDataSync', false],
   ['free', 'allowConnectionImport', true],
   ['pro', 'maxDevices', 5],
+  // 种子对齐：下面这些值在 001/014/002 里种下的默认值与生产长期运行的
+  // 实际值不一致（Free 设备 2 对 1、Free 云端 500/32MiB 对 5/1MiB、Pro
+  // 5000/256MiB 对 500/100MiB、Free 引擎缺 postgresql、Free 并发 0 对 2）。
+  // 生产上是空操作，作用是让新库、测试库和线上一致。
+  ['free', 'maxDevices', 1],
+  ['free', 'maxConnectionMetas', 5],
+  ['free', 'syncStorageBytes', 1048576],
+  ['free', 'allowedDatabaseTypes', ['mysql', 'sqlite', 'redis', 'postgresql']],
+  ['free', 'maxConcurrentConnections', 2],
+  ['pro', 'maxConnectionMetas', 500],
+  ['pro', 'syncStorageBytes', 104857600],
 ];
 
 export const planBoundariesMigration: Migration = {

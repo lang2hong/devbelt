@@ -220,11 +220,18 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(pro.get('allowDataSync')).toBe(true);
       expect(pro.get('allowConnectionImport')).toBe(true);
       expect(pro.get('maxDevices')).toBe(5);
+      // 种子对齐：新库的默认值收敛到生产实际值
+      expect(free.get('maxDevices')).toBe(1);
+      expect(free.get('maxConnectionMetas')).toBe(5);
+      expect(free.get('syncStorageBytes')).toBe(1048576);
+      expect(free.get('allowedDatabaseTypes')).toEqual(['mysql', 'sqlite', 'redis', 'postgresql']);
+      expect(free.get('maxConcurrentConnections')).toBe(2);
+      expect(pro.get('maxConnectionMetas')).toBe(500);
+      expect(pro.get('syncStorageBytes')).toBe(104857600);
       // 不在本迁移范围内的值保持原样
-      for (const key of ['maxDevices', 'maxConnectionMetas', 'syncStorageBytes', 'maxSavedConnections', 'maxAuthenticatorEntries']) {
+      for (const key of ['maxSavedConnections', 'maxAuthenticatorEntries']) {
         expect(free.get(key)).toBe(freeBefore.get(key));
       }
-      expect(free.get('allowedDatabaseTypes')).toEqual(freeBefore.get('allowedDatabaseTypes'));
       expect(await readLabel()).toEqual({ en: 'Cloud sync records', zh: '云端同步记录数' });
 
       // 幂等
