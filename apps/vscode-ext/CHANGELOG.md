@@ -4,6 +4,46 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.5.0] - 2026-10-29
+
+### English
+
+#### Added
+
+- **Screenshot attachments in feedback.** You can attach up to three PNG/JPEG/WebP/GIF images (2 MB each, 6 MB total) to a feedback entry. Files are validated by their magic bytes, stored outside the web root, and readable only by the team in the admin console. The admin feedback detail shows the attachments with a click-to-open action.
+- **Feedback entries are listed side by side in the sidebar.** Send feedback / View replies (with the unread badge), Bug report, Feature request, Docs and Review are now separate entries instead of hiding the external links at the bottom of the panel.
+
+#### Changed
+
+- **The feedback panel is a single column.** The form and "My feedback & replies" are stacked vertically instead of a left/right split, so the form is readable in narrow editor groups.
+- Free-tier engine fallback now includes PostgreSQL, matching the server's Free plan.
+- Import/export and authenticator-quota messages no longer hard-code "Pro" or "Free plan"; they read the current plan.
+- The feedback failure notice now offers **View plans** in addition to **View logs**.
+- Offline import no longer assumes the Free plan forbids it (importing is free).
+
+#### Fixed
+
+- Importing connections while the entitlement cache is empty no longer requires a Pro plan.
+
+### 中文
+
+#### 新增
+
+- **反馈支持截图附件**：最多 3 张 PNG/JPEG/WebP/GIF（每张 2 MB，合计 6 MB）。服务端按文件头校验类型，文件存放在站点目录之外，只有团队能在管理后台查看；后台反馈详情里可直接打开附件。
+- **侧边栏反馈入口并列展示**：「写反馈 / 查看回复」（带未读徽标）、Bug 报告、功能建议、文档、评价各自独立，不再把外链藏在面板底部。
+
+#### 变更
+
+- **反馈面板改为单列**：表单与「我的反馈与回复」上下排列，窄编辑器分组下不再左右挤压。
+- Free 的引擎兜底补上 PostgreSQL，与服务端 Free 套餐一致。
+- 导入/导出与验证器配额提示不再写死「Pro」「免费套餐」，改为按当前套餐表述。
+- 反馈失败提示增加「查看套餐」动作（原来只有「查看日志」）。
+- 离线时导入连接不再按「Free 禁止导入」处理（导入本身免费）。
+
+#### 修复
+
+- 权益缓存为空时导入连接不再被误判为需要 Pro。
+
 ## [0.4.2] - 2026-10-29
 
 ### English

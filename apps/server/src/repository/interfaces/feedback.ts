@@ -67,11 +67,36 @@ export interface FeedbackReply {
   createTime: Date;
 }
 
-/** 后台详情：反馈 + 关联账号邮箱 + 回复历史。 */
+/** 反馈附件（021）：图片元数据，文件本体在服务端磁盘。 */
+export type FeedbackAttachmentMime = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+
+export interface FeedbackAttachment {
+  id: number;
+  feedbackId: number;
+  fileName: string;
+  mime: FeedbackAttachmentMime;
+  sizeBytes: number;
+  createTime: Date;
+}
+
+/** 仓储读取附件时额外带出磁盘文件名（不下发给客户端）。 */
+export interface FeedbackAttachmentFile extends FeedbackAttachment {
+  storageName: string;
+}
+
+export interface NewFeedbackAttachment {
+  storageName: string;
+  fileName: string;
+  mime: FeedbackAttachmentMime;
+  sizeBytes: number;
+}
+
+/** 后台详情：反馈 + 关联账号邮箱 + 回复历史 + 附件。 */
 export interface FeedbackDetail {
   feedback: FeedbackRow;
   userEmail: string | null;
   replies: FeedbackReply[];
+  attachments: FeedbackAttachment[];
 }
 
 /** 回复前在事务内锁定读取的最小字段。 */
@@ -156,6 +181,12 @@ type Exec = { query(sql: string, params?: unknown[]): Promise<unknown> };
 
 export interface IFeedbackRepo {
   create(input: NewFeedback): Promise<number>;
+  /** 附件元数据批量写入（文件已落盘；失败由调用方补偿删除）。 */
+  createAttachments(feedbackId: number, items: readonly NewFeedbackAttachment[]): Promise<void>;
+  /** 按反馈 + 附件 id 读取，避免跨反馈越权。 */
+  findAttachment(feedbackId: number, attachmentId: number): Promise<FeedbackAttachmentFile | undefined>;
+  /** 附件写入失败时的补偿：删除反馈行（级联删除附件行）。 */
+  deleteFeedback(id: number): Promise<void>;
   list(filter: FeedbackFilter): Promise<FeedbackPage>;
   updateStatusInTx(tx: Exec, id: number, status: FeedbackStatus, adminNote: string | null): Promise<boolean>;
   overview(): Promise<FeedbackOverview>;

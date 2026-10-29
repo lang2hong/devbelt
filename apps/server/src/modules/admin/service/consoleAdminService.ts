@@ -13,6 +13,7 @@ import type {
 } from '../../../repository/interfaces.js';
 import type { Queryable } from '../../../repository/mysql/db.js';
 import type { AuditEvent, Plan, PlanFeatureDef, Order, Invoice } from '../../../domain/entities.js';
+import type { AttachmentStore } from '../../feedback/service/attachmentStore.js';
 import type { UserStatus, InvoiceStatus } from '../../../domain/enums.js';
 import {
   EntityNotFoundError,
@@ -89,6 +90,8 @@ export interface ConsoleAdminDeps {
   telemetryRepo: ITelemetryRepo;
   /** 反馈回复邮件（017）；缺省时选择发邮件会记为 failed。 */
   emailSender?: EmailSender;
+  /** 反馈附件存储（021）；缺省时后台无法读取附件。 */
+  feedbackAttachments?: AttachmentStore;
 }
 
 /** 管理员回复正文上限（与 feedback_replies.body 列宽一致）。 */
@@ -132,6 +135,7 @@ export class ConsoleAdminService {
   private readonly feedbackRepo: IFeedbackRepo;
   private readonly telemetryRepo: ITelemetryRepo;
   private readonly emailSender?: EmailSender;
+  private readonly feedbackAttachments?: AttachmentStore;
 
   constructor(deps: ConsoleAdminDeps) {
     this.userRepo = deps.userRepo;
@@ -149,6 +153,7 @@ export class ConsoleAdminService {
     this.feedbackRepo = deps.feedbackRepo;
     this.telemetryRepo = deps.telemetryRepo;
     this.emailSender = deps.emailSender;
+    this.feedbackAttachments = deps.feedbackAttachments;
   }
 
   // ── 用户 ──
@@ -612,6 +617,20 @@ export class ConsoleAdminService {
       });
     }
     return ok;
+  }
+
+  /** 读取反馈附件（管理后台，鉴权后调用）；按 feedbackId + attachmentId 限定范围。 */
+  async getFeedbackAttachment(
+    actorUserId: number,
+    feedbackId: number,
+    attachmentId: number,
+  ): Promise<{ fileName: string; mime: string; data: Buffer }> {
+    void actorUserId;
+    const meta = await this.feedbackRepo.findAttachment(feedbackId, attachmentId);
+    if (!meta) throw new EntityNotFoundError('feedback attachment', attachmentId);
+    if (!this.feedbackAttachments) throw new Error('feedback attachment store is not configured');
+    const data = await this.feedbackAttachments.read(meta.storageName);
+    return { fileName: meta.fileName, mime: meta.mime, data };
   }
 
   async getFeedbackDetail(actorUserId: number, id: number): Promise<FeedbackDetail> {

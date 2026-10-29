@@ -37,6 +37,20 @@ const submitBody = {
     replyKey: REPLY_KEY_SCHEMA,
     appVersion: { type: 'string', maxLength: 64 },
     os: { type: 'string', maxLength: 100 },
+    // 图片：最多 3 张、每张 base64 后 ≤ ~2.8 MB（原图 2 MiB）。mime 由服务端按魔数判定。
+    images: {
+      type: 'array',
+      maxItems: 3,
+      items: {
+        type: 'object',
+        required: ['dataBase64'],
+        additionalProperties: false,
+        properties: {
+          fileName: { type: 'string', maxLength: 200 },
+          dataBase64: { type: 'string', minLength: 4, maxLength: 2_800_000 },
+        },
+      },
+    },
   },
 } as const;
 
@@ -59,7 +73,7 @@ export async function publicFeedbackRoutes(app: FastifyInstance, opts: PublicFee
       getSessionActive: opts.getSessionActive,
     });
 
-  app.post('/api/db/feedback', { schema: { body: submitBody } }, async (req, reply) => {
+  app.post('/api/db/feedback', { schema: { body: submitBody }, bodyLimit: 8 * 1024 * 1024 }, async (req, reply) => {
     const body = req.body as {
       category: 'bug' | 'feature' | 'other';
       content: string;
@@ -68,6 +82,7 @@ export async function publicFeedbackRoutes(app: FastifyInstance, opts: PublicFee
       replyKey?: string;
       appVersion?: string;
       os?: string;
+      images?: Array<{ fileName?: string; dataBase64: string }>;
     };
     await opts.rateLimiter.hit(`feedback:ip:${req.ip ?? 'unknown'}`, 3600, 20);
     if (body.installId) {
@@ -84,6 +99,7 @@ export async function publicFeedbackRoutes(app: FastifyInstance, opts: PublicFee
       appVersion: body.appVersion,
       os: body.os,
       sourceIp: req.ip,
+      images: body.images,
     });
     reply.code(201).send({ id: r.id });
   });

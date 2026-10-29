@@ -62,6 +62,9 @@ class MemFeedbackRepo {
   repo(): IFeedbackRepo {
     return {
       create: async () => 0,
+      createAttachments: async () => undefined,
+      findAttachment: async () => undefined,
+      deleteFeedback: async () => undefined,
       list: async () => ({ items: [], nextId: null, total: 0 }),
       updateStatusInTx: async () => false,
       overview: async () => { throw new Error('unused'); },
@@ -73,6 +76,7 @@ class MemFeedbackRepo {
           feedback: f,
           userEmail: f.userId !== null ? this.emailByUser.get(f.userId) ?? null : null,
           replies: this.replies.filter((r) => r.feedbackId === id),
+          attachments: [],
         };
       },
       findForReplyInTx: async (_tx, id) => {

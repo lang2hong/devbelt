@@ -69,7 +69,10 @@ function makeMemento() {
 const proSub = {
   planCode: 'pro',
   status: 'active',
-  entitlement: { allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true },
+  entitlement: {
+    allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'], maxDevices: 5, maxSavedConnections: 100, allowConnectionImport: true,
+    allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxConcurrentConnections: 0,
+  },
   periodStartTime: null,
   periodEndTime: null,
 };
@@ -151,7 +154,7 @@ describe('AuthService.refreshEntitlement', () => {
     expect(auth.getCachedEntitlement()?.maxAiTokensMonthly).toBe(2_000_000);
   });
 
-  it('无订阅时降级到 Free（mysql/sqlite/redis）', async () => {
+  it('无订阅时降级到 Free（mysql/sqlite/redis/postgresql）', async () => {
     const secrets = makeSecrets();
     const memento = makeMemento();
     await secrets.store(ACCESS_KEY, 'A1');
@@ -162,7 +165,7 @@ describe('AuthService.refreshEntitlement', () => {
     await auth.init();
     await auth.refreshEntitlement();
 
-    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis'], maxDevices: 0, maxSavedConnections: 10, allowConnectionImport: false, maxConcurrentConnections: 0, allowConnectionExport: true, allowErDiagram: true, allowDataSync: true, maxAuthenticatorEntries: 10, maxAiTokensMonthly: 0 });
+    expect(auth.getCachedEntitlement()).toEqual({ planCode: 'free', allowedDatabaseTypes: ['mysql', 'sqlite', 'redis', 'postgresql'], maxDevices: 1, maxSavedConnections: 10, allowConnectionImport: true, maxConcurrentConnections: 2, allowConnectionExport: false, allowErDiagram: false, allowDataSync: false, maxAuthenticatorEntries: 10, maxAiTokensMonthly: 0 });
   });
 
   it('getMe 失败静默降级：不抛、不写缓存', async () => {

@@ -40,7 +40,7 @@ function fb(id: string, status: AdminFeedback['status']): AdminFeedback {
 }
 
 function detailOf(f: AdminFeedback): AdminFeedbackDetail {
-  return { feedback: f, userEmail: null, inAppDeliverable: true, replies: [] };
+  return { feedback: f, userEmail: null, inAppDeliverable: true, replies: [], attachments: [] };
 }
 
 beforeEach(() => {

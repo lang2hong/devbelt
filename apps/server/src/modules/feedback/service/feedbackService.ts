@@ -5,7 +5,17 @@ import type {
   FeedbackStatus,
   FeedbackThreadItem,
   IFeedbackRepo,
+  NewFeedbackAttachment,
 } from '../../../repository/interfaces/feedback.js';
+import {
+  AttachmentStore,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENTS_TOTAL_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  decodeImageBase64,
+  sanitizeFileName,
+  sniffImageMime,
+} from './attachmentStore.js';
 
 export const MAX_FEEDBACK_CONTENT = 4000;
 export const MAX_FEEDBACK_CONTACT = 200;
@@ -21,6 +31,12 @@ export const REPLY_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CATEGORIES: readonly FeedbackCategory[] = ['bug', 'feature', 'other'];
 const STATUSES: readonly FeedbackStatus[] = ['new', 'triaged', 'done', 'rejected'];
 
+/** 插件提交的图片：只信任内容，mime 由服务端按文件头判定。 */
+export interface SubmitFeedbackImage {
+  fileName?: string;
+  dataBase64: string;
+}
+
 export interface SubmitFeedbackInput {
   userId: number | null;
   installId?: string;
@@ -31,6 +47,7 @@ export interface SubmitFeedbackInput {
   appVersion?: string;
   os?: string;
   sourceIp?: string;
+  images?: SubmitFeedbackImage[];
 }
 
 export interface ThreadInput {
@@ -47,7 +64,11 @@ export function hashReplyKey(replyKey: string): string {
 
 /** 用户反馈：校验、裁剪与落库。路由负责限流与身份解析，本层只做纯校验。 */
 export class FeedbackService {
-  constructor(private readonly repo: IFeedbackRepo) {}
+  constructor(
+    private readonly repo: IFeedbackRepo,
+    /** 图片存储；未注入时带图提交会被拒绝（测试与不需要图片的部署）。 */
+    private readonly attachments?: AttachmentStore,
+  ) {}
 
   async submit(input: SubmitFeedbackInput): Promise<{ id: number }> {
     if (!CATEGORIES.includes(input.category as FeedbackCategory)) {
@@ -76,6 +97,8 @@ export class FeedbackService {
     const os = trimmed(input.os);
     if (os && os.length > MAX_FEEDBACK_OS) throw new ValidationError('os is too long');
 
+    const images = this.prepareImages(input.images);
+
     const id = await this.repo.create({
       userId: input.userId,
       installId: installId ?? null,
@@ -87,7 +110,55 @@ export class FeedbackService {
       os: os ?? null,
       sourceIp: input.sourceIp ?? null,
     });
-    return { id };
+
+    if (images.length === 0) return { id };
+    if (!this.attachments) {
+      // 配置缺失不能静默丢图：删掉刚写入的反馈，让调用方看到失败。
+      await this.repo.deleteFeedback(id).catch(() => undefined);
+      throw new ValidationError('image upload is not configured');
+    }
+
+    const saved: string[] = [];
+    try {
+      const rows: NewFeedbackAttachment[] = [];
+      for (const img of images) {
+        const storageName = await this.attachments.save(img.data, img.mime);
+        saved.push(storageName);
+        rows.push({
+          storageName,
+          fileName: img.fileName,
+          mime: img.mime,
+          sizeBytes: img.data.length,
+        });
+      }
+      await this.repo.createAttachments(id, rows);
+      return { id };
+    } catch (err) {
+      // 文件系统与数据库无法同事务：补偿删除已写文件与反馈行（级联删附件行）。
+      await this.attachments.remove(saved);
+      await this.repo.deleteFeedback(id).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  /** 校验并解码图片：数量、单张/总量、类型（魔数）、文件名。 */
+  private prepareImages(images: SubmitFeedbackImage[] | undefined): Array<{ data: Buffer; mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; fileName: string }> {
+    if (!images || images.length === 0) return [];
+    if (images.length > MAX_ATTACHMENTS) throw new ValidationError(`at most ${MAX_ATTACHMENTS} images`);
+
+    const out: Array<{ data: Buffer; mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'; fileName: string }> = [];
+    let total = 0;
+    for (const [i, img] of images.entries()) {
+      const data = decodeImageBase64(img.dataBase64);
+      if (data.length > MAX_ATTACHMENT_BYTES) throw new ValidationError(`image exceeds ${MAX_ATTACHMENT_BYTES} bytes`);
+      total += data.length;
+      if (total > MAX_ATTACHMENTS_TOTAL_BYTES) throw new ValidationError('images exceed the total size limit');
+      const mime = sniffImageMime(data);
+      if (!mime) throw new ValidationError('unsupported image type (png, jpeg, webp, gif only)');
+      const fallback = `image-${i + 1}.${mime === 'image/jpeg' ? 'jpg' : mime.slice('image/'.length)}`;
+      out.push({ data, mime, fileName: sanitizeFileName(img.fileName, fallback) });
+    }
+    return out;
   }
 
   /**

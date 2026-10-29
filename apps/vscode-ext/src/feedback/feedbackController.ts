@@ -52,7 +52,7 @@ export interface FeedbackControllerDeps {
   fetchImpl?: typeof fetch;
 }
 
-export type SubmitOutcome = 'ok' | 'rateLimited' | 'failed';
+export type SubmitOutcome = 'ok' | 'rateLimited' | 'tooLarge' | 'failed';
 
 export interface FeedbackSnapshot {
   items: FeedbackThreadEntry[];
@@ -128,7 +128,13 @@ export class FeedbackController {
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  async submit(input: { category: string; content: string; contact: string }): Promise<SubmitOutcome> {
+  async submit(input: {
+    category: string;
+    content: string;
+    contact: string;
+    /** 截图：服务端按文件头校验类型，客户端只负责读文件。 */
+    images?: Array<{ fileName: string; dataBase64: string }>;
+  }): Promise<SubmitOutcome> {
     const category = input.category === 'bug' || input.category === 'feature' || input.category === 'other' ? input.category : 'other';
     const content = input.content.trim();
     const contact = input.contact.trim().slice(0, 200);
@@ -148,11 +154,13 @@ export class FeedbackController {
           ...(replyKey ? { replyKey } : {}),
           appVersion: this.deps.extensionVersion,
           os: this.deps.os,
+          ...(input.images && input.images.length > 0 ? { images: input.images } : {}),
         }),
         signal: controller.signal,
       });
       if (res.status === 201) return 'ok';
       if (res.status === 429) return 'rateLimited';
+      if (res.status === 413) return 'tooLarge';
       return 'failed';
     } catch {
       return 'failed';

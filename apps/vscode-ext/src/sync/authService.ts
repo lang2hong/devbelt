@@ -4,7 +4,13 @@ import { readFileSync } from 'fs';
 import { hostname, platform, arch, release } from 'os';
 import { SyncClient, AuthResult, DeviceInfo, MeResponse } from '@devbelt/db-host/sync/syncClient';
 import { eventBus, AuthEvent } from '@devbelt/db-host/utils/event';
-import { DEFAULT_FREE_ENGINES, DEFAULT_FREE_MAX_CONNECTIONS, DEFAULT_FREE_MAX_AUTH_ENTRIES } from '@devbelt/db-host/sync/entitlementGate';
+import {
+  DEFAULT_FREE_ENGINES,
+  DEFAULT_FREE_MAX_CONNECTIONS,
+  DEFAULT_FREE_MAX_AUTH_ENTRIES,
+  DEFAULT_FREE_MAX_DEVICES,
+  DEFAULT_FREE_MAX_CONCURRENT_CONNECTIONS,
+} from '@devbelt/db-host/sync/entitlementGate';
 
 // 由 esbuild 构建时从 .env / .env.production 注入（见 esbuild.js 的 define）；测试环境由 vitest.config.ts 提供同名字段
 declare const __SYNC_SERVER_URL__: string;
@@ -225,13 +231,15 @@ export class AuthService {
     this.setCachedEntitlement({
       planCode: sub?.planCode ?? 'free',
       allowedDatabaseTypes: sub?.entitlement?.allowedDatabaseTypes ?? Array.from(DEFAULT_FREE_ENGINES),
-      maxDevices: sub?.entitlement?.maxDevices ?? 0,
+      // 缺省一律按 **Free 套餐**（未登录/权益缺失）：Pro 能力 fail-closed，
+      // Free 能力按允许；不要沿用「0 = 不限」的旧默认，否则会反向放开。
+      maxDevices: sub?.entitlement?.maxDevices ?? DEFAULT_FREE_MAX_DEVICES,
       maxSavedConnections: sub?.entitlement?.maxSavedConnections ?? DEFAULT_FREE_MAX_CONNECTIONS,
-      allowConnectionImport: sub?.entitlement?.allowConnectionImport === true,
-      maxConcurrentConnections: sub?.entitlement?.maxConcurrentConnections ?? 0,
-      allowConnectionExport: sub?.entitlement?.allowConnectionExport !== false,
-      allowErDiagram: sub?.entitlement?.allowErDiagram !== false,
-      allowDataSync: sub?.entitlement?.allowDataSync !== false,
+      allowConnectionImport: sub?.entitlement?.allowConnectionImport !== false,
+      maxConcurrentConnections: sub?.entitlement?.maxConcurrentConnections ?? DEFAULT_FREE_MAX_CONCURRENT_CONNECTIONS,
+      allowConnectionExport: sub?.entitlement?.allowConnectionExport === true,
+      allowErDiagram: sub?.entitlement?.allowErDiagram === true,
+      allowDataSync: sub?.entitlement?.allowDataSync === true,
       maxAuthenticatorEntries: sub?.entitlement?.maxAuthenticatorEntries ?? DEFAULT_FREE_MAX_AUTH_ENTRIES,
       // P9：AI 月额度（0 = 拒绝，无"不限"档）；缺省 fail-closed 0。
       maxAiTokensMonthly: sub?.entitlement?.maxAiTokensMonthly ?? 0,

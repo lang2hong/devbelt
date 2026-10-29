@@ -83,7 +83,10 @@ export class FeedbackPanel {
   }
 
   private async onMessage(raw: unknown): Promise<void> {
-    const msg = raw as { type?: string; id?: string; category?: string; content?: string; contact?: string };
+    const msg = raw as {
+      type?: string; id?: string; category?: string; content?: string; contact?: string;
+      images?: Array<{ fileName?: string; dataBase64?: string }>;
+    };
     switch (msg?.type) {
       case 'ready':
       case 'refresh':
@@ -103,7 +106,10 @@ export class FeedbackPanel {
     }
   }
 
-  private async submit(msg: { category?: string; content?: string; contact?: string }): Promise<void> {
+  private async submit(msg: {
+    category?: string; content?: string; contact?: string;
+    images?: Array<{ fileName?: string; dataBase64?: string }>;
+  }): Promise<void> {
     const content = (msg.content ?? '').trim();
     if (!content) {
       void this.panel.webview.postMessage({ type: 'submitResult', ok: false, message: l10n('feedback.form.empty') });
@@ -113,14 +119,40 @@ export class FeedbackPanel {
       void this.panel.webview.postMessage({ type: 'submitResult', ok: false, message: l10n('feedback.form.tooLong') });
       return;
     }
+    // 服务端还会再校验一次；这里先挡明显超限，避免把几 MB 的 payload 发出去。
+    const rawImages = Array.isArray(msg.images) ? msg.images : [];
+    if (rawImages.length > 3) {
+      void this.panel.webview.postMessage({ type: 'submitResult', ok: false, message: l10n('feedback.form.images.tooMany') });
+      return;
+    }
+    const images: Array<{ fileName: string; dataBase64: string }> = [];
+    let total = 0;
+    for (const img of rawImages) {
+      const dataBase64 = typeof img?.dataBase64 === 'string' ? img.dataBase64 : '';
+      // base64 长度 × 3/4 ≈ 原始字节数；用长度先挡，避免在 host 侧再解码一次大字符串。
+      const approxBytes = Math.floor((dataBase64.length * 3) / 4);
+      if (approxBytes > 2 * 1024 * 1024) {
+        void this.panel.webview.postMessage({ type: 'submitResult', ok: false, message: l10n('feedback.form.images.tooLarge') });
+        return;
+      }
+      total += approxBytes;
+      if (total > 6 * 1024 * 1024) {
+        void this.panel.webview.postMessage({ type: 'submitResult', ok: false, message: l10n('feedback.form.images.totalTooLarge') });
+        return;
+      }
+      images.push({ fileName: typeof img?.fileName === 'string' ? img.fileName : '', dataBase64 });
+    }
+
     const outcome = await this.controller.submit({
       category: msg.category ?? 'other',
       content,
       contact: msg.contact ?? '',
+      ...(images.length > 0 ? { images } : {}),
     });
     const message =
       outcome === 'ok' ? l10n('feedback.form.ok')
       : outcome === 'rateLimited' ? l10n('feedback.form.rateLimited')
+      : outcome === 'tooLarge' ? l10n('feedback.form.images.totalTooLarge')
       : l10n('feedback.form.failed');
     void this.panel.webview.postMessage({ type: 'submitResult', ok: outcome === 'ok', message });
     if (outcome === 'ok') void this.refresh();
@@ -139,13 +171,16 @@ export class FeedbackPanel {
 
   private renderHtml(): string {
     const nonce = getNonce();
-    const links = FEEDBACK_ITEMS
-      .map((t) => `<li><button class="feedback-item" data-id="${t.id}">${l10n(t.labelKey)}</button></li>`)
-      .join('');
     const i18n = {
       empty: l10n('feedback.form.empty'),
       sending: l10n('feedback.form.sending'),
       threadEmpty: l10n('feedback.thread.empty'),
+      imgTooMany: l10n('feedback.form.images.tooMany'),
+      imgTooLarge: l10n('feedback.form.images.tooLarge'),
+      imgType: l10n('feedback.form.images.type'),
+      imgTotal: l10n('feedback.form.images.totalTooLarge'),
+      imgRemove: l10n('feedback.form.images.remove'),
+      imgAdd: l10n('feedback.form.images.add'),
       threadLoading: l10n('feedback.thread.loading'),
       noReply: l10n('feedback.thread.noReply'),
       reply: l10n('feedback.thread.reply'),
@@ -165,8 +200,8 @@ export class FeedbackPanel {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   body { margin: 0; padding: 20px 24px 32px; font-family: var(--vscode-font-family); color: var(--vscode-foreground); line-height: 1.5; }
-  .layout { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 32px; max-width: 1100px; margin: 0 auto; align-items: start; }
-  @media (max-width: 720px) { .layout { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+  .layout { display: flex; flex-direction: column; gap: 32px; max-width: 780px; margin: 0 auto; }
+  section + section { border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); padding-top: 24px; }
   h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   label { display: block; margin: 12px 0 4px; font-size: 12px; color: var(--vscode-descriptionForeground); }
@@ -191,7 +226,13 @@ export class FeedbackPanel {
   ul.links { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
   button.feedback-item { background: transparent; color: var(--vscode-textLink-foreground); border: none; padding: 4px 0; cursor: pointer; font-size: 13px; }
   button.feedback-item:hover { text-decoration: underline; }
-  .more { margin-top: 28px; }
+  .images { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .thumb { position: relative; width: 96px; height: 96px; border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.25)); border-radius: 4px; overflow: hidden; background: var(--vscode-input-background); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb button { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; line-height: 1; padding: 0; border: none; border-radius: 50%; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+  .img-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  input[type=file] { display: none; }
+  button.secondary { background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); border: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35)); border-radius: 3px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -208,13 +249,16 @@ export class FeedbackPanel {
     <textarea id="content" maxlength="4000" placeholder="${l10n('feedback.form.placeholder')}"></textarea>
     <label for="contact">${l10n('feedback.form.contact')}</label>
     <input id="contact" type="text" maxlength="200" />
+    <label>${l10n('feedback.form.images.label')}</label>
+    <div class="img-row">
+      <button class="secondary" id="pickImages" type="button">${l10n('feedback.form.images.add')}</button>
+      <span class="muted">${l10n('feedback.form.images.hint')}</span>
+    </div>
+    <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple />
+    <div class="images" id="images"></div>
     <button class="submit" id="send">${l10n('feedback.form.submit')}</button>
     <p class="hint">${l10n('feedback.form.hint')}</p>
     <div class="status" id="status" role="status" aria-live="polite"></div>
-    <div class="more">
-      <h2>${l10n('feedback.more')}</h2>
-      <ul class="links">${links}</ul>
-    </div>
   </section>
   <section aria-labelledby="thread-title">
     <div class="row">
@@ -234,6 +278,58 @@ export class FeedbackPanel {
   const send = document.getElementById('send');
   const status = document.getElementById('status');
   const content = document.getElementById('content');
+  const imageInput = document.getElementById('imageInput');
+  const imagesBox = document.getElementById('images');
+  const MAX_IMAGES = 3, MAX_IMAGE_BYTES = 2 * 1024 * 1024, MAX_TOTAL_BYTES = 6 * 1024 * 1024;
+  const ALLOWED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+  let images = [];
+
+  function setStatus(text, ok) {
+    status.className = ok === undefined ? 'status' : (ok ? 'status ok' : 'status err');
+    status.textContent = text;
+  }
+  function renderImages() {
+    imagesBox.replaceChildren();
+    images.forEach((img, i) => {
+      const box = document.createElement('div');
+      box.className = 'thumb';
+      const el = document.createElement('img');
+      el.src = img.dataUrl;
+      el.alt = img.fileName;
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.textContent = '×';
+      rm.title = I18N.imgRemove;
+      rm.addEventListener('click', () => { images.splice(i, 1); renderImages(); });
+      box.append(el, rm);
+      imagesBox.append(box);
+    });
+  }
+  function readFile(file) {
+    return new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const dataUrl = String(r.result || '');
+        resolve({ fileName: file.name, dataUrl, dataBase64: dataUrl.split(',')[1] || '' });
+      };
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(file);
+    });
+  }
+  document.getElementById('pickImages').addEventListener('click', () => imageInput.click());
+  imageInput.addEventListener('change', async () => {
+    for (const file of Array.from(imageInput.files || [])) {
+      if (images.length >= MAX_IMAGES) { setStatus(I18N.imgTooMany, false); break; }
+      if (!ALLOWED.includes(file.type)) { setStatus(I18N.imgType, false); continue; }
+      if (file.size > MAX_IMAGE_BYTES) { setStatus(I18N.imgTooLarge, false); continue; }
+      const total = images.reduce((n, x) => n + x.size, 0) + file.size;
+      if (total > MAX_TOTAL_BYTES) { setStatus(I18N.imgTotal, false); break; }
+      const img = await readFile(file);
+      if (img) { img.size = file.size; images.push(img); }
+    }
+    imageInput.value = '';
+    renderImages();
+  });
   const refresh = document.getElementById('refresh');
   const thread = document.getElementById('thread');
   const threadStatus = document.getElementById('threadStatus');
@@ -249,6 +345,7 @@ export class FeedbackPanel {
       category: document.getElementById('category').value,
       content: text,
       contact: document.getElementById('contact').value,
+      images: images.map((x) => ({ fileName: x.fileName, dataBase64: x.dataBase64 })),
     });
   });
   refresh.addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
@@ -300,7 +397,7 @@ export class FeedbackPanel {
       send.disabled = false;
       status.className = m.ok ? 'status ok' : 'status err';
       status.textContent = m.message;
-      if (m.ok) { content.value = ''; document.getElementById('contact').value = ''; }
+      if (m.ok) { content.value = ''; document.getElementById('contact').value = ''; images = []; renderImages(); }
       return;
     }
     if (m?.type === 'threadLoading') { refresh.disabled = true; threadStatus.textContent = I18N.threadLoading; return; }

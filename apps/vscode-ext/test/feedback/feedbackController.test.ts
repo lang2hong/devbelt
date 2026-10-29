@@ -215,6 +215,25 @@ describe('FeedbackController.submit', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
   });
 
+  it('带图提交：images 原样进入请求体；无图时不发该字段', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ id: 1 }, 201)) as unknown as typeof fetch;
+    const { controller } = make({ fetchImpl });
+    const images = [{ fileName: 'shot.png', dataBase64: 'AAAA' }];
+    await expect(controller.submit({ category: 'bug', content: 'x', contact: '', images })).resolves.toBe('ok');
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect((JSON.parse(String(init.body)) as { images?: unknown }).images).toEqual(images);
+
+    await controller.submit({ category: 'bug', content: 'x', contact: '' });
+    const [, init2] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(String(init2.body))).not.toHaveProperty('images');
+  });
+
+  it('413 → tooLarge（服务端 body 上限）', async () => {
+    const fetchImpl = vi.fn(async () => new Response('', { status: 413 })) as unknown as typeof fetch;
+    const { controller } = make({ fetchImpl });
+    await expect(controller.submit({ category: 'bug', content: 'x', contact: '' })).resolves.toBe('tooLarge');
+  });
+
   it('429 → rateLimited；其它状态与网络错误 → failed', async () => {
     const mk = (impl: () => Promise<Response>) => make({ fetchImpl: vi.fn(impl) as unknown as typeof fetch }).controller;
     await expect(mk(async () => new Response('', { status: 429 })).submit({ category: 'bug', content: 'x', contact: '' }))

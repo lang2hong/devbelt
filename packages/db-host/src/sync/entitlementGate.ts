@@ -52,13 +52,19 @@ export interface CachedEntitlement {
  * 本文件零 vscode 依赖，纯函数可单测。
  */
 
-export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite', 'redis'];
+export const DEFAULT_FREE_ENGINES: readonly string[] = ['mysql', 'sqlite', 'redis', 'postgresql'];
 
 /** free 档本机可保存连接数上限（连接资产差异点）。 */
 export const DEFAULT_FREE_MAX_CONNECTIONS = 10;
 
 /** free 档可保存验证器条目上限（P5 新增）。 */
 export const DEFAULT_FREE_MAX_AUTH_ENTRIES = 10;
+
+/** free 档设备数（019 对齐生产值）。 */
+export const DEFAULT_FREE_MAX_DEVICES = 1;
+
+/** free 档并发连接数（020）。 */
+export const DEFAULT_FREE_MAX_CONCURRENT_CONNECTIONS = 2;
 
 /** 当前允许的引擎集合：有缓存用缓存值，无缓存 fail-closed 到 Free。 */
 export function allowedEngines(entitlement?: CachedEntitlement | null): readonly string[] {
@@ -75,9 +81,15 @@ export function maxSavedConnections(entitlement?: CachedEntitlement | null): num
   return typeof v === 'number' && v >= 0 ? v : DEFAULT_FREE_MAX_CONNECTIONS;
 }
 
-/** 是否允许导入连接配置；无缓存 fail-closed 到 free（禁止）。导出恒允许，无需此函数。 */
+/**
+ * 是否允许导入连接配置。
+ *
+ * 导入是 **Free 能力**（迁移入口，限制它只会挡住新用户），所以缺省按允许处理，
+ * 只有服务端明确下发 false 才禁用。注意这与 Pro 能力（ER 图/导出连接）的
+ * fail-closed 方向相反：那些能力未登录时应视为 Free。
+ */
 export function canImportConnections(entitlement?: CachedEntitlement | null): boolean {
-  return entitlement?.allowConnectionImport === true;
+  return entitlement?.allowConnectionImport !== false;
 }
 
 export interface SkippedPersonalConnection {

@@ -28,7 +28,7 @@ describe('db-host 端口注入', () => {
   });
 
   it('权益门禁 fail-closed（无权益仅放行 free 引擎）', () => {
-    expect(allowedEngines(undefined)).toEqual(['mysql', 'sqlite', 'redis']);
+    expect(allowedEngines(undefined)).toEqual(['mysql', 'sqlite', 'redis', 'postgresql']);
     const pro: CachedEntitlement = {
       planCode: 'pro',
       allowedDatabaseTypes: ['mysql', 'postgresql', 'sqlite'],

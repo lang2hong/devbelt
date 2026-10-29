@@ -24,7 +24,10 @@ const ACTIONS: Record<SyncFailureKind, Array<{ labelKey: string; command: string
   auth: [{ labelKey: 'sync.action.login', command: 'devbelt.login' }],
   quota: [{ labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' }],
   signature: [{ labelKey: 'sync.action.unlock', command: 'devbelt.unlockPersonalSync' }, { labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' }],
-  featureRequired: [{ labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' }],
+  featureRequired: [
+    { labelKey: 'plan.action.viewPlans', command: 'devbelt.plans' },
+    { labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' },
+  ],
   protocol: [{ labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' }],
   notInitialized: [{ labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' }],
   network: [{ labelKey: 'sync.action.syncNow', command: 'devbelt.syncNow' }, { labelKey: 'sync.action.viewLogs', command: 'devbelt.showDiagnostics' }],

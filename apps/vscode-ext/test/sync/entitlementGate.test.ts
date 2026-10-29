@@ -75,11 +75,11 @@ describe('filterPersonalConnectionsByEntitlement', () => {
   });
 });
 describe('连接资产门禁 (maxSavedConnections / canImportConnections)', () => {
-  it('无权益时 fail-closed：连接上限 10、禁止导入', () => {
+  it('无权益时：连接上限 10；导入是 Free 能力，缺省允许', () => {
     expect(maxSavedConnections(undefined)).toBe(10);
     expect(maxSavedConnections(null)).toBe(10);
-    expect(canImportConnections(undefined)).toBe(false);
-    expect(canImportConnections(null)).toBe(false);
+    expect(canImportConnections(undefined)).toBe(true);
+    expect(canImportConnections(null)).toBe(true);
   });
 
   it('free 档：10 条、禁止导入', () => {

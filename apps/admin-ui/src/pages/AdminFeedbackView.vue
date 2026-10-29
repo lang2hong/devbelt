@@ -3,10 +3,12 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { navigate } from '../lib/router';
 import {
   getFeedbackDetail,
+  getFeedbackAttachmentBlob,
   queryFeedback,
   replyFeedback,
   setFeedbackStatus,
   type AdminFeedback,
+  type AdminFeedbackAttachment,
   type AdminFeedbackDetail,
   type FeedbackEmailTarget,
 } from '../api/admin';
@@ -99,6 +101,28 @@ const replyOk = ref('');
 const replying = ref(false);
 
 const contactIsEmail = computed(() => EMAIL_RE.test((detail.value?.contact ?? '').trim()));
+
+const attachmentError = ref('');
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function openAttachment(a: AdminFeedbackAttachment): Promise<void> {
+  if (!detail.value) return;
+  attachmentError.value = '';
+  const r = await getFeedbackAttachmentBlob(detail.value.id, a.id);
+  if (r.kind === 'ok') {
+    const url = URL.createObjectURL(r.value);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  if (r.kind === 'unauthorized') { relogin(); return; }
+  attachmentError.value = '附件打开失败。';
+}
 
 async function loadExtra(id: string): Promise<void> {
   extraState.value = 'loading';
@@ -301,6 +325,17 @@ onMounted(load);
       </table>
       <label>内容</label>
       <pre class="content-box content-full">{{ detail.content }}</pre>
+
+      <label>附件</label>
+      <p v-if="extraState === 'loading'" class="muted">加载中…</p>
+      <p v-else-if="!extra?.attachments?.length" class="muted">无附件。</p>
+      <ul v-else class="attachments">
+        <li v-for="a in extra.attachments" :key="a.id">
+          <button class="btn small ghost" @click="openAttachment(a)">{{ a.fileName }}</button>
+          <span class="small muted">{{ formatBytes(a.sizeBytes) }}</span>
+        </li>
+      </ul>
+      <p v-if="attachmentError" class="small error">{{ attachmentError }}</p>
 
       <label>状态</label>
       <select v-model="editStatus">

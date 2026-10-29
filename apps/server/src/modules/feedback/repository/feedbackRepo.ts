@@ -1,6 +1,9 @@
 import type { MysqlDb, Queryable } from '../../../repository/mysql/db.js';
 import { dayKey, lastDaysUtc } from '../../../repository/mysql/dailySeries.js';
 import type {
+  FeedbackAttachment,
+  FeedbackAttachmentFile,
+  FeedbackAttachmentMime,
   FeedbackDetail,
   FeedbackEmailStatus,
   FeedbackFilter,
@@ -14,6 +17,7 @@ import type {
   FeedbackThreadQuery,
   IFeedbackRepo,
   NewFeedback,
+  NewFeedbackAttachment,
 } from '../../../repository/interfaces/feedback.js';
 
 type Exec = Pick<Queryable, 'query'>;
@@ -41,6 +45,17 @@ function toRow(r: Rec): FeedbackRow {
     sourceIp: (r.source_ip as string | null) ?? null,
     createTime: r.create_time as Date,
     updateTime: r.update_time as Date,
+  };
+}
+
+function toAttachment(r: Rec): FeedbackAttachment {
+  return {
+    id: Number(r.id),
+    feedbackId: Number(r.feedback_id),
+    fileName: String(r.file_name ?? ''),
+    mime: r.mime as FeedbackAttachmentMime,
+    sizeBytes: Number(r.size_bytes ?? 0),
+    createTime: r.create_time as Date,
   };
 }
 
@@ -91,6 +106,34 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
       ],
     );
     return Number(headerOf(res)?.insertId ?? 0);
+  }
+
+  async createAttachments(feedbackId: number, items: readonly NewFeedbackAttachment[]): Promise<void> {
+    if (items.length === 0) return;
+    const values = items.map(() => '(?, ?, ?, ?, ?)').join(', ');
+    const params: unknown[] = [];
+    for (const a of items) {
+      params.push(feedbackId, a.storageName, a.fileName, a.mime, a.sizeBytes);
+    }
+    await this.db().query(
+      `INSERT INTO feedback_attachments (feedback_id, storage_name, file_name, mime, size_bytes) VALUES ${values}`,
+      params,
+    );
+  }
+
+  async findAttachment(feedbackId: number, attachmentId: number): Promise<FeedbackAttachmentFile | undefined> {
+    const res = await this.db().query(
+      `SELECT id, feedback_id, storage_name, file_name, mime, size_bytes, create_time
+         FROM feedback_attachments WHERE feedback_id = ? AND id = ? LIMIT 1`,
+      [feedbackId, attachmentId],
+    );
+    const row = rowsOf(res)[0];
+    if (!row) return undefined;
+    return { ...toAttachment(row), storageName: String(row.storage_name ?? '') };
+  }
+
+  async deleteFeedback(id: number): Promise<void> {
+    await this.db().query('DELETE FROM user_feedback WHERE id = ?', [id]);
   }
 
   async list(filter: FeedbackFilter): Promise<FeedbackPage> {
@@ -145,10 +188,18 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
         ORDER BY id ASC`,
       [id],
     );
+    const attachmentsRes = await this.db().query(
+      `SELECT id, feedback_id, file_name, mime, size_bytes, create_time
+         FROM feedback_attachments
+        WHERE feedback_id = ?
+        ORDER BY id ASC`,
+      [id],
+    );
     return {
       feedback: toRow(row),
       userEmail: (row.user_email as string | null) ?? null,
       replies: rowsOf(repliesRes).map(toReply),
+      attachments: rowsOf(attachmentsRes).map(toAttachment),
     };
   }
 

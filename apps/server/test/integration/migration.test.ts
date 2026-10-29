@@ -172,7 +172,7 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       expect(tableNames).toContain('extension_installs');
 
       const [ledger] = (await pool.query('SELECT version FROM schema_migrations')) as [Array<{ version: string }>, unknown];
-      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies', '018_extension_active_days', '019_plan_boundaries', '020_plan_capabilities']);
+      expect(ledger.map((r) => r.version)).toEqual(['001_baseline', '002_plan_features_v2', '003_plan_ordering', '004_authenticator_quota', '005_sync_entity_kind', '006_redis_engine', '007_audit_query_indexes', '008_ai_quota', '009_ai_topup', '010_ai_providers', '011_ai_model_pricing', '012_ai_credits_billing', '013_ai_credit_tiers', '014_plan_engines_devices', '015_user_feedback', '016_extension_telemetry', '017_feedback_replies', '018_extension_active_days', '019_plan_boundaries', '020_plan_capabilities', '021_feedback_attachments']);
     } finally {
       await pool.end();
     }
@@ -290,6 +290,31 @@ describe.skipIf(!URL)('baseline migration (real MySQL)', () => {
       await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
       expect(view(await readPlan('free'), 'allowErDiagram')).toBe(false);
       expect(view(await readPlan('pro'), 'maxConcurrentConnections')).toBe(0);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('021_feedback_attachments：建表、外键与 mime 约束', async () => {
+    const pool = createTestPool();
+    try {
+      await dropAll(pool);
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
+
+      const [cols] = (await pool.query(`SHOW COLUMNS FROM feedback_attachments`)) as [Array<{ Field: string }>, unknown];
+      const fields = cols.map((c) => c.Field);
+      for (const f of ['id', 'feedback_id', 'storage_name', 'file_name', 'mime', 'size_bytes', 'create_time']) {
+        expect(fields).toContain(f);
+      }
+
+      // 外键：不存在的 feedback_id 必须被拒绝（错误码 1452）。
+      await expect(pool.query(
+        `INSERT INTO feedback_attachments (feedback_id, storage_name, file_name, mime, size_bytes)
+         VALUES (999999, 'x.png', 'x.png', 'image/png', 10)`,
+      )).rejects.toMatchObject({ errno: 1452 });
+
+      // 幂等：重复执行不报错。
+      await runMigrations(pool as any, [...migrations], LEGACY_MIGRATION_VERSIONS);
     } finally {
       await pool.end();
     }

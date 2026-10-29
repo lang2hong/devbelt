@@ -1083,11 +1083,20 @@ export interface AdminFeedbackReply {
   createTime: string;
 }
 
+export interface AdminFeedbackAttachment {
+  id: string;
+  fileName: string;
+  mime: string;
+  sizeBytes: number;
+  createTime: string;
+}
+
 export interface AdminFeedbackDetail {
   feedback: AdminFeedback;
   userEmail: string | null;
   inAppDeliverable: boolean;
   replies: AdminFeedbackReply[];
+  attachments: AdminFeedbackAttachment[];
 }
 
 export interface FeedbackFilters {
@@ -1179,6 +1188,26 @@ export async function getFeedbackDetail(
   try {
     const res = await authedFetch(`/api/admin/feedback/${encodeURIComponent(id)}`, { headers: auth(token) }, fetchImpl);
     if (res.ok) return { kind: 'ok', value: (await res.json()) as AdminFeedbackDetail };
+    return failure(res);
+  } catch {
+    return { kind: 'failure' };
+  }
+}
+
+export async function getFeedbackAttachmentBlob(
+  feedbackId: string,
+  attachmentId: string,
+  token: string | null = getAccessToken(),
+  fetchImpl: FetchLike = fetch,
+): Promise<Result<Blob>> {
+  if (!token) return { kind: 'unauthorized' };
+  try {
+    const res = await authedFetch(
+      `/api/admin/feedback/${encodeURIComponent(feedbackId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { headers: auth(token) },
+      fetchImpl,
+    );
+    if (res.ok) return { kind: 'ok', value: await res.blob() };
     return failure(res);
   } catch {
     return { kind: 'failure' };

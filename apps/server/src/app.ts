@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import path from 'node:path';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import mysql from '@fastify/mysql';
@@ -66,6 +67,7 @@ import { consoleDataRoutes } from './modules/db/route/consoleData.js';
 import { consoleAdminRoutes } from './modules/admin/route/consoleAdmin.js';
 import { MysqlFeedbackRepo } from './modules/feedback/repository/feedbackRepo.js';
 import { FeedbackService } from './modules/feedback/service/feedbackService.js';
+import { AttachmentStore } from './modules/feedback/service/attachmentStore.js';
 import { publicFeedbackRoutes } from './modules/feedback/route/publicFeedback.js';
 import { MysqlTelemetryRepo } from './modules/telemetry/repository/telemetryRepo.js';
 import { TelemetryService } from './modules/telemetry/service/telemetryService.js';
@@ -286,7 +288,11 @@ export async function createApp() {
     auditWriter,
   );
   const feedbackRepo = new MysqlFeedbackRepo(getMysql);
-  const feedbackService = new FeedbackService(feedbackRepo);
+  // 反馈截图：默认落在进程工作目录的 uploads/feedback（生产 = /usr/local/l2h/devbelt/server/uploads/feedback）。
+  const feedbackUploadDir = process.env.DEVBELT_DB_FEEDBACK_UPLOAD_DIR?.trim()
+    || path.join(process.cwd(), 'uploads', 'feedback');
+  const feedbackAttachments = new AttachmentStore(feedbackUploadDir);
+  const feedbackService = new FeedbackService(feedbackRepo, feedbackAttachments);
   const telemetryRepo = new MysqlTelemetryRepo(getMysql);
   const telemetryService = new TelemetryService(telemetryRepo);
   const adminService = new ConsoleAdminService({
@@ -305,6 +311,7 @@ export async function createApp() {
     feedbackRepo,
     telemetryRepo,
     emailSender,
+    feedbackAttachments,
   });
   const cursorService = new CursorService(deriveCursorKey());
 
