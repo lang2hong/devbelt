@@ -44,10 +44,11 @@ export class QueryExecutor {
     const start = Date.now();
     // 含明文口令的语句绝不落历史/审计（与 QueryHistoryRecorder 共用同一判定）。
     const secret = containsSecretSql(sql);
-    await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error) => {
-      // 历史记录回调
+    await TableQueryView.openForQuery(conn, this.manager, sql, database, async (result, error, execMs) => {
+      // 历史记录回调。耗时取驱动实测值：`start` 早于面板创建与确认弹窗，
+      // 含用户等待时间，只在拿不到驱动耗时时兜底。
       if (result) {
-        const costTime = Date.now() - start;
+        const costTime = execMs ?? Date.now() - start;
         const rowCount = result.rows?.length ?? 0;
         if (!secret) {
           await this.history?.add({
@@ -75,7 +76,7 @@ export class QueryExecutor {
         // QueryExecutedEvent 此前只有类型定义、从无发布点
         void eventBus.publish(new QueryExecutedEvent(conn.id, sql, costTime, rowCount));
       } else if (error) {
-        const costTime = Date.now() - start;
+        const costTime = execMs ?? Date.now() - start;
         if (!secret) {
           await this.history?.add({
             sql,
@@ -105,6 +106,7 @@ export class QueryExecutor {
     const secret = containsSecretSql(sql);
     let called = false;
     let captured: { result?: any; error?: Error } = {};
+    let execMs: number | undefined;
     const runner = new QueryRunner(conn, this.manager, undefined, database, () => {});
     // 调用方（AI Chat）可经句柄取消在途查询：dispose 置 disposed（尚未开跑则直接跳过）
     // 并取消当前语句的 token（单查询取消，不牵连会话上其它查询）。
@@ -115,11 +117,14 @@ export class QueryExecutor {
         runner.dispose();
       },
     });
-    await runner.execute(sql, (result, error) => {
+    await runner.execute(sql, (result, error, driverMs) => {
       called = true;
+      execMs = driverMs;
       captured = { ...(result !== undefined ? { result } : {}), ...(error ? { error } : {}) };
     });
-    const costTime = Date.now() - start;
+    const wallMs = Date.now() - start;
+    // 完成的执行用驱动实测耗时（wallMs 含确认弹窗等待）；取消/拒绝没有执行，仍返回墙钟时间。
+    const costTime = called && execMs !== undefined ? execMs : wallMs;
     // 用户主动取消：不记历史/审计（没有完成的执行），与「确认门禁被拒」的 canceled 区分。
     if (userCanceled) return { canceled: true, userCanceled: true, costTime };
     if (!called) {

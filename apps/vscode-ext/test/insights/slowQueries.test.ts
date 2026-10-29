@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateSlowQueries, fingerprintSql } from '../../src/insights/slowQueries';
+import { DatabaseType } from '@devbelt/db-core';
+import { aggregateSlowQueries, aggregateSlowQueriesWithStats, fingerprintSql } from '../../src/insights/slowQueries';
+import { dialectScanOptions } from '../../src/utils/sqlDialectOptions';
 import type { QueryHistoryEntry } from '../../src/history/historyStore';
 import { formatDuration, relativeAge, sqlPreview } from '../../webview/src/components/insights/types';
 
@@ -34,6 +36,15 @@ describe('fingerprintSql', () => {
 
   it('treats negative and decimal numbers as literals', () => {
     expect(fingerprintSql('SELECT * FROM t WHERE a > -1.5e3')).toBe('SELECT * FROM t WHERE a > ?');
+  });
+
+  it('follows the dialect: MySQL # comments and --N arithmetic', () => {
+    const mysql = dialectScanOptions(DatabaseType.MYSQL);
+    const pg = dialectScanOptions(DatabaseType.PG);
+    expect(fingerprintSql("SELECT * FROM t WHERE a = 'x' # note", mysql)).toBe('SELECT * FROM t WHERE a = ?');
+    expect(fingerprintSql("SELECT * FROM t WHERE a = 'x' # note", pg)).toBe('SELECT * FROM t WHERE a = ? # note');
+    expect(fingerprintSql('SELECT 1--2', mysql)).toBe('SELECT ?-?');
+    expect(fingerprintSql('SELECT 1--2', pg)).toBe('SELECT ?');
   });
 });
 
@@ -88,7 +99,7 @@ describe('aggregateSlowQueries', () => {
     expect(aggregateSlowQueries(entries, { keyword: 'ORDERS' }, NOW).map((g) => g.fingerprint)).toEqual(['SELECT * FROM orders']);
   });
 
-  it('drops a duplicate record of the same run within one second', () => {
+  it('drops an identical record logged twice within one second', () => {
     const groups = aggregateSlowQueries([
       entry('UPDATE t SET a = 1', 40, { time: NOW - 5_000 }),
       entry('UPDATE t SET a = 1', 40, { time: NOW - 5_400 }),
@@ -96,6 +107,39 @@ describe('aggregateSlowQueries', () => {
     ], {}, NOW);
     expect(groups[0].count).toBe(2);
     expect(groups[0].totalMs).toBe(80);
+  });
+
+  it('keeps real repeated runs that differ in cost, outcome or literals', () => {
+    const groups = aggregateSlowQueries([
+      entry('SELECT * FROM t WHERE id = 1', 40, { time: NOW - 5_000 }),
+      entry('SELECT * FROM t WHERE id = 1', 55, { time: NOW - 5_200 }),
+      entry('SELECT * FROM t WHERE id = 1', 55, { time: NOW - 5_300, failed: true }),
+      entry('SELECT * FROM t WHERE id = 2', 55, { time: NOW - 5_400 }),
+    ], {}, NOW);
+    expect(groups[0]).toMatchObject({ count: 4, totalMs: 205, failed: 1 });
+  });
+
+  it('fingerprints per connection dialect', () => {
+    const entries = [
+      entry("SELECT * FROM t WHERE a = 'x' # one", 10, { connectionId: 'my' }),
+      entry("SELECT * FROM t WHERE a = 'y' # two", 10, { connectionId: 'my' }),
+    ];
+    expect(aggregateSlowQueries(entries, {}, NOW)).toHaveLength(2);
+    const groups = aggregateSlowQueries(entries, {}, NOW, (id) => (id === 'my' ? dialectScanOptions(DatabaseType.MYSQL) : undefined));
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ fingerprint: 'SELECT * FROM t WHERE a = ?', count: 2 });
+  });
+
+  it('reports how many entries took part after filtering', () => {
+    const entries = [
+      entry('SELECT 1', 5, { connectionId: 'c1' }),
+      entry('SELECT 2', 5, { connectionId: 'c1' }),
+      entry('SELECT 3', 5, { connectionId: 'c2' }),
+      entry('-- Imported 3 row(s)', 0, { connectionId: 'c1' }),
+    ];
+    expect(aggregateSlowQueriesWithStats(entries, {}, NOW).scanned).toBe(3);
+    expect(aggregateSlowQueriesWithStats(entries, { connectionId: 'c1' }, NOW).scanned).toBe(2);
+    expect(aggregateSlowQueriesWithStats(entries, { keyword: 'nomatch' }, NOW).scanned).toBe(0);
   });
 
   it('excludes bulk-operation summaries and empty SQL', () => {

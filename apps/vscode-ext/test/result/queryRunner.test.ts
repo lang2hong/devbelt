@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QueryRunner } from '../../src/result/queryRunner';
 
-vi.mock('vscode', () => ({ window: { showErrorMessage: () => {}, showWarningMessage: async () => 'Run SQL' } }));
+vi.mock('vscode', () => ({
+  workspace: { getConfiguration: () => ({ get: (_k: string, d: unknown) => d }) },
+  env: { language: 'en' },
+  window: {
+    showInformationMessage: () => {},
+    showErrorMessage: () => {},
+    showWarningMessage: async () => 'Run SQL',
+    createOutputChannel: () => ({ info: () => {}, warn: () => {}, error: () => {}, dispose: () => {} }),
+  },
+}));
 
 const conn: any = { id: 'c1', database: 'test', dbType: 'MYSQL', host: 'h', name: 'n', readOnly: false, environment: 'development' };
 
@@ -162,5 +171,41 @@ describe('QueryRunner 多结果集', () => {
     expect(results).toBeDefined();
     expect(results.results).toHaveLength(2);
     expect(posted.some((m) => m.type === 'result')).toBe(false);
+  });
+});
+
+describe('QueryRunner 驱动耗时上报', () => {
+  function setupCost(queryImpl: (sql: string) => Promise<any>) {
+    const query = { query: queryImpl, wrap: (id: string) => `\`${id}\``, cancel: () => true };
+    const manager: any = { connectSql: async () => ({ query, metadata: { getColumns: async () => [] } }), disposeConn: () => {} };
+    return new QueryRunner(conn, manager, undefined, 'test', () => {});
+  }
+
+  it('多语句：onExecuted 的 execMs 是各语句驱动耗时之和', async () => {
+    const runner = setupCost(async (sql) => ({ rows: [], fields: [], affectedRows: 1, costTime: /UPDATE/.test(sql) ? 30 : 12, sql }));
+    const cb = vi.fn();
+    await runner.execute('UPDATE a SET x = 1; UPDATE b SET x = 2; SELECT 1', cb);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb.mock.calls[0][2]).toBe(72);
+  });
+
+  it('失败：execMs 为已完成语句耗时加失败语句的 QueryError.costTime', async () => {
+    const runner = setupCost(async (sql) => {
+      if (/bad/.test(sql)) throw Object.assign(new Error('boom'), { costTime: 9 });
+      return { rows: [], fields: [], affectedRows: 1, costTime: 20, sql };
+    });
+    const cb = vi.fn();
+    await runner.execute('UPDATE a SET x = 1; SELECT bad', cb);
+    const [result, error, execMs] = cb.mock.calls[0];
+    expect(result).toBeUndefined();
+    expect(error?.message).toBe('boom');
+    expect(execMs).toBe(29);
+  });
+
+  it('驱动没给耗时：execMs 为 undefined，由调用方兜底', async () => {
+    const runner = setupCost(async () => ({ rows: [{ n: 1 }], fields: [{ name: 'n' }] }));
+    const cb = vi.fn();
+    await runner.execute('SELECT 1', cb);
+    expect(cb.mock.calls[0][2]).toBeUndefined();
   });
 });

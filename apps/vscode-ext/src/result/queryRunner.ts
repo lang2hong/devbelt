@@ -12,6 +12,16 @@ import { containsSecretSql } from '../utils/sqlSecret';
 import { AiSqlRegistry } from '../ai/aiSqlRegistry';
 
 /**
+ * 执行完成回调。`execMs` 是各语句的驱动实测耗时之和（不含面板启动、确认弹窗等待、
+ * 结果面板的 COUNT 补查），供历史记录使用。
+ */
+export type ExecutedCallback = (result: any, error?: Error, execMs?: number) => void;
+
+function driverMs(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : undefined;
+}
+
+/**
  * 查询执行器：持有表/查询的查询状态（分页、排序、筛选、运行句柄），
  * 并封装 execute / cancel / buildSelect。
  *
@@ -82,7 +92,7 @@ export class QueryRunner {
 
   execute(
     sql: string,
-    onExecuted?: (result: any, error?: Error) => void,
+    onExecuted?: ExecutedCallback,
     database = this.database || this.conn.database,
   ): Promise<void> {
     return this.enqueue(() => this.doExecute(sql, onExecuted, database));
@@ -129,11 +139,17 @@ export class QueryRunner {
 
   private async doExecute(
     sql: string,
-    onExecuted?: (result: any, error?: Error) => void,
+    onExecuted?: ExecutedCallback,
     database = this.database || this.conn.database,
   ): Promise<void> {
     if (this.disposed) return;
     const startedAt = Date.now();
+    // undefined = 驱动没给出耗时（调用方再决定是否兜底）；0ms 是合法的实测值。
+    let execMs: number | undefined;
+    const addMs = (value: unknown): void => {
+      const ms = driverMs(value);
+      if (ms !== undefined) execMs = (execMs ?? 0) + ms;
+    };
     let transactionState: 'active' | 'committed' | 'rolledback' | undefined;
     let session: any = undefined;
     try {
@@ -152,25 +168,30 @@ export class QueryRunner {
       // 那条路径过去完全不进历史。
       const stmtOpts = { ...(onExecuted ? { skipHistory: true } : {}), token };
       const results: any[] = [];
+      const runStmt = async (stmt: string): Promise<any> => {
+        const r = await session.query.query(stmt, undefined, stmtOpts);
+        addMs(r?.costTime);
+        return r;
+      };
       for (const stmt of stmts) {
         // 用方言词法器剥离注释：`#` 只在 MySQL 是注释，PG/SQLite 里是运算符，
         // 旧的无条件 `.replace(/#.*$/gm)` 会把 `SELECT 1 # 2` 截断。
         const upper = sqlSkeleton(stmt, scanOpts).toUpperCase().trim();
         if (upper === 'BEGIN' || upper.startsWith('START TRANSACTION')) {
-          await session.query.query(stmt, undefined, stmtOpts);
+          await runStmt(stmt);
           transactionState = 'active';
           this.openTransaction = true;
           continue;
         }
-        if (upper === 'COMMIT') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'committed'; this.openTransaction = false; continue; }
-        if (upper === 'ROLLBACK') { await session.query.query(stmt, undefined, stmtOpts); transactionState = 'rolledback'; this.openTransaction = false; continue; }
+        if (upper === 'COMMIT') { await runStmt(stmt); transactionState = 'committed'; this.openTransaction = false; continue; }
+        if (upper === 'ROLLBACK') { await runStmt(stmt); transactionState = 'rolledback'; this.openTransaction = false; continue; }
         if (upper.startsWith('SET AUTOCOMMIT')) {
-          await session.query.query(stmt, undefined, stmtOpts);
+          await runStmt(stmt);
           if (upper.includes('= 0') || upper.includes('=0')) { transactionState = 'active'; this.openTransaction = true; }
           else this.openTransaction = false;
           continue;
         }
-        const r = await session.query.query(stmt, undefined, stmtOpts);
+        const r = await runStmt(stmt);
         results.push({ ...r, kind: classifyWriteKind(stmt, scanOpts) });
       }
       const result = results[results.length - 1];
@@ -231,7 +252,7 @@ export class QueryRunner {
           aiGenerated: AiSqlRegistry.tryGet()?.isAiSql(sql) ?? false,
         });
       }
-      onExecuted?.(result);
+      onExecuted?.(result, undefined, execMs);
     } catch (err) {
       diagError('query failed', (err as Error).message);
       // P9 S4：错误诊断附加字段（结构增量，旧渲染忽略）。message+sql 双扫描：
@@ -247,7 +268,8 @@ export class QueryRunner {
         askAi: true,
         secretRisk,
       });
-      onExecuted?.(undefined, err as Error);
+      addMs((err as { costTime?: unknown })?.costTime);
+      onExecuted?.(undefined, err as Error, execMs);
       if (transactionState === 'active' && session) {
         try {
           await session.query.query('ROLLBACK');

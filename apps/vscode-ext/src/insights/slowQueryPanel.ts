@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { SqlScanOptions } from '@devbelt/db-core/sql';
 import type { SavedConnection } from '@devbelt/db-host/connection/connectionStore';
 import { BaseWebView } from '../result/baseWebView';
 import { l10n } from '../i18n';
@@ -9,13 +10,15 @@ import type {
   SlowQueryGroupView,
   SlowQueryUpMessage,
 } from '../result/protocol';
-import { aggregateSlowQueries, type SlowQueryGroup } from './slowQueries';
+import { aggregateSlowQueriesWithStats, type SlowQueryGroup } from './slowQueries';
 
 export interface SlowQueryPanelDeps {
   history: HistoryStore;
   /** Saved connections (to resolve ids and show names). */
   connections: () => SavedConnection[];
   historyLimit: () => number;
+  /** Dialect scan options of a connection (fingerprints must follow the connection's SQL dialect). */
+  scanOptionsFor: (conn: SavedConnection) => SqlScanOptions;
   /** Open the SQL in an editor bound to the connection/database. */
   openSql: (sql: string, conn: SavedConnection | undefined, database: string | undefined) => Promise<void>;
   /** Open the EXPLAIN panel for the SQL. */
@@ -111,12 +114,16 @@ export class SlowQueryPanel extends BaseWebView {
     const connections = this.deps.connections();
     const known = new Set(connections.map((c) => c.id));
     const now = Date.now();
-    const groups = aggregateSlowQueries(entries, {
+    const byId = new Map(connections.map((c) => [c.id, c]));
+    const { groups, scanned } = aggregateSlowQueriesWithStats(entries, {
       ...(this.filter.connectionId ? { connectionId: this.filter.connectionId } : {}),
       range: this.filter.range,
       keyword: this.filter.keyword,
       sort: this.filter.sort,
-    }, now);
+    }, now, (id) => {
+      const conn = id ? byId.get(id) : undefined;
+      return conn ? this.deps.scanOptionsFor(conn) : undefined;
+    });
     this.groups = new Map(groups.map((g) => [g.key, g]));
     const views: SlowQueryGroupView[] = groups.map((g) => ({
       ...g,
@@ -127,7 +134,7 @@ export class SlowQueryPanel extends BaseWebView {
       filter: this.filter,
       groups: views,
       connections: connections.map((c) => ({ id: c.id, name: c.name || c.host || c.id })),
-      historySize: entries.length,
+      historySize: scanned,
       historyLimit: this.deps.historyLimit(),
       now,
     } as SlowQueryDownMessage);

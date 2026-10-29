@@ -41,6 +41,7 @@ function setup(entries: QueryHistoryEntry[] = []) {
     history,
     connections: () => conns,
     historyLimit: () => 100,
+    scanOptionsFor: () => ({}),
     openSql,
     explain,
   });
@@ -85,6 +86,45 @@ describe('SlowQueryPanel', () => {
     expect(snap.groups[0]).toMatchObject({ count: 2, totalMs: 400, missingConnection: false });
     expect(snap.groups.find((g: any) => g.connectionId === 'deleted').missingConnection).toBe(true);
     expect(snap.connections).toEqual([{ id: 'c1', name: 'local' }]);
+  });
+
+  it('historySize counts the entries that survive the filter', async () => {
+    const { view } = setup(rows);
+    await mount(view);
+    expect(lastSnapshot(view).historySize).toBe(3);
+    await view.handleMessage({ type: 'slowFilter', filter: { range: 'all', keyword: 'users', sort: 'total' } });
+    expect(lastSnapshot(view).historySize).toBe(2);
+  });
+
+  it('fingerprints with the dialect of each entry\'s connection', async () => {
+    const scanOptionsFor = vi.fn(() => ({ hashComment: true }));
+    const history = new HistoryStore(memento([
+      { id: 'a', sql: "SELECT * FROM t WHERE a = 'x' # one", connection: 'local', connectionId: 'c1', time: now - 1000, costTime: 5 },
+      { id: 'b', sql: "SELECT * FROM t WHERE a = 'y' # two", connection: 'local', connectionId: 'c1', time: now - 5000, costTime: 5 },
+    ]));
+    const view: any = SlowQueryPanel.open({
+      history,
+      connections: () => [{ id: 'c1', name: 'local', host: 'localhost' }] as any[],
+      historyLimit: () => 100,
+      scanOptionsFor,
+      openSql: vi.fn(async () => undefined),
+      explain: vi.fn(),
+    });
+    await mount(view);
+    const snap = lastSnapshot(view);
+    expect(snap.groups).toHaveLength(1);
+    expect(snap.groups[0].fingerprint).toBe('SELECT * FROM t WHERE a = ?');
+    expect(scanOptionsFor).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
+  });
+
+  it('closeAll (account switch) disposes the panel and stops refreshing', async () => {
+    const { view, history } = setup(rows);
+    await mount(view);
+    SlowQueryPanel.closeAll();
+    expect(SlowQueryPanel.current()).toBeUndefined();
+    const before = view.post.mock.calls.length;
+    await history.add({ sql: 'SELECT 9', connection: 'local', connectionId: 'c1', costTime: 1 });
+    expect(view.post.mock.calls.length).toBe(before);
   });
 
   it('applies filters sent from the webview', async () => {

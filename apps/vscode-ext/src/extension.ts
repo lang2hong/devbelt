@@ -124,6 +124,13 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     scopedMemento(context.globalState),
     () => clampHistoryLimit(vscode.workspace.getConfiguration().get<number>('devbelt.insights.historyLimit')),
   );
+  // 调小 historyLimit 后立即裁剪存量历史，不必等下一次执行 SQL。
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('devbelt.insights.historyLimit')) return;
+      void history.enforceRetention().catch((err) => diagWarn('history retention failed', err instanceof Error ? err.message : String(err)));
+    }),
+  );
   // 本机路径覆盖（B3）：仅存本机 globalState、不回传、不产生 mutation/同步事件。
   const overrideStore = new ConnectionPathOverrideStore(context.globalState);
   // history 注入管理器：所有会话的修改性语句由此自动进历史，
@@ -203,6 +210,8 @@ async function activateImpl(context: vscode.ExtensionContext): Promise<void> {
     TableQueryView.closeAll();
     RedisView.closeAll();
     ElasticsearchView.closeAll();
+    // 慢查询面板读的是账号作用域的历史：不关会继续显示上一个账号的 SQL。
+    SlowQueryPanel.closeAll();
     // 关闭会话会通知各面板；连接树由返回的 id 逐个清掉「已打开」状态。
     for (const id of manager.closeAllForAccountSwitch()) treeProvider.markClosed(id);
     const scope = accountScope();

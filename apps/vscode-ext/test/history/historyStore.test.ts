@@ -61,6 +61,25 @@ describe('HistoryStore', () => {
     expect(store.list()).toHaveLength(10);
   });
 
+  it('enforceRetention trims existing history when the limit is lowered', async () => {
+    let limit = 50;
+    const store = new HistoryStore(makeMemento(), () => limit);
+    for (let i = 0; i < 40; i++) await store.add({ sql: `q${i}`, connection: 'c', costTime: i });
+    expect(store.list()).toHaveLength(40);
+
+    let changed = 0;
+    store.onChanged(() => { changed += 1; });
+    await store.enforceRetention();
+    expect(store.list()).toHaveLength(40);
+    expect(changed).toBe(0);
+
+    limit = 10;
+    await store.enforceRetention();
+    expect(store.list()).toHaveLength(10);
+    expect(store.list()[0].sql).toBe('q39');
+    expect(changed).toBe(1);
+  });
+
   it('clamps the retention limit to 10–1000 and falls back on bad values', () => {
     expect(clampHistoryLimit(5)).toBe(10);
     expect(clampHistoryLimit(5000)).toBe(1000);

@@ -75,6 +75,16 @@ export class HistoryStore {
     void eventBus.publish(new HistoryChangedEvent('clear'));
   }
 
+  /** 按当前保留上限裁剪存量历史（调小 `historyLimit` 后立即生效）；无需裁剪时不写入。 */
+  async enforceRetention(): Promise<void> {
+    const list = [...this.list()];
+    const before = list.length;
+    this.trimToRetention(list);
+    if (list.length === before) return;
+    await this.memento.update(HistoryStore.KEY, list);
+    this.changedEmitter.fire();
+  }
+
   /** 截断至保留上限，超出时丢弃最旧记录。 */
   private trimToRetention(list: QueryHistoryEntry[]): void {
     const max = clampHistoryLimit(this.limit());

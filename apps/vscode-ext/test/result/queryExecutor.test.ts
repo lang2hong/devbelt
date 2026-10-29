@@ -12,6 +12,7 @@ vi.mock('vscode', () => ({
 }));
 
 import { QueryExecutor } from '../../src/result/queryExecutor';
+import { TableQueryView } from '../../src/result/tableQueryView';
 
 const conn: any = { id: 'c1', name: 'n', dbType: 'MYSQL', host: 'h', port: 3306, environment: 'development', readOnly: false };
 
@@ -98,5 +99,47 @@ describe('QueryExecutor.runHeadless（AI Chat 在对话中运行）', () => {
     const r = await exec.runHeadless(conn, 'SELECT 1', 'db', { onStart: (h) => h.cancel() });
     expect(r.userCanceled).toBe(true);
     expect(manager.connectSql).not.toHaveBeenCalled();
+  });
+});
+
+describe('QueryExecutor 历史耗时取驱动实测值', () => {
+  it('runHeadless 成功：历史与返回值用驱动耗时', async () => {
+    const { manager } = makeManager({ fields: [{ name: 'id' }], rows: [{ id: 1 }], costTime: 1234 });
+    const add = vi.fn(async () => undefined);
+    const exec = new QueryExecutor(manager, { add } as any);
+    const r = await exec.runHeadless(conn, 'SELECT 1', 'db');
+    expect(r.costTime).toBe(1234);
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ costTime: 1234, sql: 'SELECT 1' }));
+  });
+
+  it('runHeadless 失败：历史用 QueryError.costTime', async () => {
+    const { manager } = makeManager(undefined, Object.assign(new Error('Unknown column x'), { costTime: 321 }));
+    const add = vi.fn(async () => undefined);
+    const exec = new QueryExecutor(manager, { add } as any);
+    const r = await exec.runHeadless(conn, 'SELECT bogus', 'db');
+    expect(r.costTime).toBe(321);
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ costTime: 321, failed: true }));
+  });
+
+  it('run：回调带 execMs 时用它，不用从命令开始的墙钟时间', async () => {
+    let cb: any;
+    const spy = vi.spyOn(TableQueryView, 'openForQuery').mockImplementation(async (...args: any[]) => {
+      cb = args[4];
+      return {} as any;
+    });
+    const add = vi.fn(async () => undefined);
+    const exec = new QueryExecutor({ scanOptionsFor: () => undefined } as any, { add } as any);
+    await exec.run(conn, 'SELECT 1', 'db');
+    await new Promise((r) => setTimeout(r, 30));
+    await cb({ rows: [{ id: 1 }] }, undefined, 5);
+    expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ costTime: 5 }));
+
+    await cb(undefined, new Error('x'), 7);
+    expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ costTime: 7, failed: true }));
+
+    await cb({ rows: [] }, undefined, undefined);
+    const fallback = (add.mock.calls.at(-1) as any[])[0].costTime;
+    expect(fallback).toBeGreaterThanOrEqual(30);
+    spy.mockRestore();
   });
 });

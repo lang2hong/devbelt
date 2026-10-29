@@ -6,7 +6,7 @@ import { ExplainPanel } from '../explain/explainPanel';
 import { reconcileColumnOrder, reconcileColumnWidths, reconcileHiddenColumns } from './tableLayout';
 import { CompletionService } from './completionService';
 import { RowEditor } from './rowEditor';
-import { QueryRunner } from './queryRunner';
+import { QueryRunner, type ExecutedCallback } from './queryRunner';
 import { ExportHandler } from './exportHandler';
 import { pgSchemaFor } from '../utils/sql';
 import { buildDataQaMessages, buildDiagnoseMessages, formatRowSample } from '@devbelt/ai-core';
@@ -48,7 +48,7 @@ export class TableQueryView extends BaseWebView {
   private pendingQueries: Array<{
     sql: string;
     database?: string;
-    onExecuted?: (result: any, error?: Error) => void;
+    onExecuted?: ExecutedCallback;
   }> = [];
   /**
    * P9 S4：最后一次单结果集快照（数据问答 / 0 行诊断素材）。
@@ -157,7 +157,7 @@ export class TableQueryView extends BaseWebView {
     manager: ConnectionManager,
     sql: string,
     database?: string,
-    onExecuted?: (result: any, error?: Error) => void,
+    onExecuted?: ExecutedCallback,
     mode: 'reuse' | 'new' = 'reuse',
     schema?: string,
     viewColumn?: vscode.ViewColumn,
@@ -170,7 +170,7 @@ export class TableQueryView extends BaseWebView {
     manager: ConnectionManager,
     sql: string,
     database: string | undefined,
-    onExecuted: ((result: any, error?: Error) => void) | undefined,
+    onExecuted: ExecutedCallback | undefined,
     mode: 'reuse' | 'new',
     schema?: string,
     viewColumn: vscode.ViewColumn = vscode.ViewColumn.Active,
@@ -448,7 +448,7 @@ export class TableQueryView extends BaseWebView {
   private queueQuery(
     sql: string,
     database?: string,
-    onExecuted?: (result: any, error?: Error) => void,
+    onExecuted?: ExecutedCallback,
   ): void {
     this.panel.title = `Query @ ${this.conn.name || this.conn.host}`;
     this.pendingQueries.push({ sql, database, onExecuted });

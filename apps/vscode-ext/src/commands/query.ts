@@ -117,6 +117,7 @@ export function registerQueryCommands(deps: Deps, sub: Sub): void {
       history,
       connections: () => store.list(),
       historyLimit: () => clampHistoryLimit(vscode.workspace.getConfiguration().get<number>('devbelt.insights.historyLimit')),
+      scanOptionsFor: (c) => manager.scanOptionsFor(c),
       openSql: async (sql, conn, database) => {
         const editor = await openSqlDocEditor(sql);
         if (editor && conn) connCtx.setForDoc(editor.document.uri.toString(), conn, database);
