@@ -66,7 +66,7 @@ async function build() {
         devices: { active: 0, platforms: [], versions: [] },
         sync: { connectionMetas: 0, storageBytes: 0, syncedUsers: 0 },
         ai: { monthTokens: 0, monthBilledTokens: 0, monthRequests: 0, daily: [] },
-        billing: { paidOrders30d: 0, revenueCents30d: 0, topupOrders30d: 0, topupRevenueCents30d: 0, daily: [] },
+        billing: { paidOrders30d: 0, revenueCents30d: 0, topupOrders30d: 0, topupRevenueCents30d: 0, manualGift: { orders: 0, faceValueCents: 0, tokens: 0 }, daily: [] },
         feedback: { newCount: 0, byStatus: [], byCategory: [] },
       }),
     } as never,

@@ -166,12 +166,25 @@ onMounted(load);
       </div>
 
       <div class="trend-grid">
-        <section class="panel span-2">
+        <section class="panel">
           <header class="panel-head">
             <h3>安装与活跃趋势</h3>
             <span class="sub">近 30 天 · 活跃数据自上线起</span>
           </header>
           <TelemetryTrendChart :points="data.telemetry.daily" />
+        </section>
+
+        <section class="panel">
+          <header class="panel-head">
+            <h3>每日营收</h3>
+            <span class="sub">套餐 + AI 充值 · 已排除手工赠送单</span>
+          </header>
+          <DailyBarChart
+            stacked
+            :points="data.billing.daily"
+            :series="[{ key: 'planCents', label: '套餐' }, { key: 'topupCents', label: 'AI 充值' }]"
+            kind="money"
+          />
         </section>
 
         <section class="panel">
@@ -188,19 +201,6 @@ onMounted(load);
             <span class="sub">原始用量</span>
           </header>
           <DailyBarChart :points="data.ai.daily" :series="[{ key: 'tokens', label: '原始 tokens' }]" kind="tokens" />
-        </section>
-
-        <section class="panel span-2">
-          <header class="panel-head">
-            <h3>每日营收</h3>
-            <span class="sub">套餐 + AI 充值 · 已排除手工赠送单</span>
-          </header>
-          <DailyBarChart
-            stacked
-            :points="data.billing.daily"
-            :series="[{ key: 'planCents', label: '套餐' }, { key: 'topupCents', label: 'AI 充值' }]"
-            kind="money"
-          />
         </section>
       </div>
 
@@ -236,6 +236,18 @@ onMounted(load);
         </section>
       </div>
 
+      <section class="panel gift-panel">
+        <header class="panel-head">
+          <h3>手工赠送</h3>
+          <span class="sub">近 30 天 · 不计营收，不含已退款</span>
+        </header>
+        <div class="gift-grid">
+          <div><span>笔数</span><b>{{ data.billing.manualGift.orders.toLocaleString('zh-CN') }}</b></div>
+          <div><span>面值</span><b>{{ fmtCents(data.billing.manualGift.faceValueCents) }}</b></div>
+          <div><span>发放 tokens</span><b>{{ fmtTokens(data.billing.manualGift.tokens) }}</b></div>
+        </div>
+      </section>
+
       <section class="panel ops">
         <header class="panel-head"><h3>同步与运行</h3><span class="sub">当前快照</span></header>
         <div class="ops-grid">
@@ -265,7 +277,6 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .kpi.alert { border-color: var(--c-accent); }
 
 .trend-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.trend-grid .span-2 { grid-column: span 2; }
 .dist-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 
 .panel { padding: 14px 16px; border: 1px solid var(--c-border-strong); border-radius: 8px; background: var(--c-surface); min-width: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -274,6 +285,11 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 .panel-head .sub { font-size: 11.5px; }
 
 .ops { margin-top: 2px; }
+.gift-panel { margin-top: 2px; }
+.gift-grid { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 4px; }
+.gift-grid div { display: flex; flex-direction: column; gap: 2px; }
+.gift-grid span { color: var(--c-text-muted); font-size: 12px; }
+.gift-grid b { font-size: 17px; font-weight: 700; }
 .ops-grid { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 4px; }
 .ops-grid div { display: flex; flex-direction: column; gap: 2px; }
 .ops-grid span { color: var(--c-text-muted); font-size: 12px; }
@@ -285,7 +301,6 @@ h2 { margin: 0 0 4px; font-size: 20px; }
 @media (max-width: 900px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .trend-grid { grid-template-columns: minmax(0, 1fr); }
-  .trend-grid .span-2 { grid-column: auto; }
 }
 @media (max-width: 560px) {
   .kpis { grid-template-columns: minmax(0, 1fr); }

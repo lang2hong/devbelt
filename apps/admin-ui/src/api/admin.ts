@@ -1121,6 +1121,7 @@ export interface AdminOverview {
     revenueCents30d: number;
     topupOrders30d: number;
     topupRevenueCents30d: number;
+    manualGift: { orders: number; faceValueCents: number; tokens: number };
     daily: Array<{ day: string; planCents: number; topupCents: number }>;
   };
   feedback: {

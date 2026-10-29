@@ -307,6 +307,15 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
         WHERE purpose = 'topup' AND status IN ('paid', 'fulfilled') AND channel <> 'manual'
           AND paid_time >= NOW() - INTERVAL 30 DAY`,
     );
+    const [manualGiftRow] = await rows(
+      `SELECT COUNT(DISTINCT o.id) AS orders,
+              COALESCE(SUM(o.amount_cents), 0) AS face_cents,
+              COALESCE(SUM(g.tokens_total), 0) AS tokens
+         FROM orders o
+         LEFT JOIN ai_quota_grants g ON g.order_id = o.id
+        WHERE o.purpose = 'topup' AND o.channel = 'manual' AND o.status = 'fulfilled'
+          AND o.create_time >= UTC_DATE() - INTERVAL 29 DAY`,
+    );
     const statusRows = await rows(`SELECT status, COUNT(*) AS n FROM user_feedback GROUP BY status`);
     const categoryRows = await rows(`SELECT category, COUNT(*) AS n FROM user_feedback GROUP BY category ORDER BY n DESC`);
     const platformRows = await rows(
@@ -327,6 +336,7 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
     const billing = billingRow ?? {};
     const synced = syncedRow ?? {};
     const topup = topupRow ?? {};
+    const manualGift = manualGiftRow ?? {};
     const byStatus = statusRows.map((r) => ({ status: String(r.status ?? ''), count: num(r.n) }));
     const byCategory = categoryRows.map((r) => ({ category: String(r.category ?? ''), count: num(r.n) }));
     const days = lastDaysUtc(30);
@@ -368,6 +378,11 @@ export class MysqlFeedbackRepo implements IFeedbackRepo {
         revenueCents30d: num(billing.cents),
         topupOrders30d: num(topup.orders),
         topupRevenueCents30d: num(topup.cents),
+        manualGift: {
+          orders: num(manualGift.orders),
+          faceValueCents: num(manualGift.face_cents),
+          tokens: num(manualGift.tokens),
+        },
         daily: days.map((day) => ({
           day,
           planCents: revenueByDay.get(day)?.planCents ?? 0,

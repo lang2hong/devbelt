@@ -36,6 +36,7 @@ describe('MysqlFeedbackRepo.overview', () => {
         { day: today, purpose: 'topup', cents: '900' },
       ]],
       [/FROM personal_sync_state/, [{ users: '12' }]],
+      [/channel = 'manual'/, [{ orders: '2', face_cents: '5800', tokens: '2000000' }]],
       [/purpose = 'topup'/, [{ orders: 1, cents: '900' }]],
       [/FROM orders[\s\S]*paid_time >= NOW\(\)/, [{ orders: 4, cents: '10800' }]],
       [/GROUP BY status/, [{ status: 'new', n: 4 }, { status: 'done', n: 5 }]],
@@ -61,6 +62,7 @@ describe('MysqlFeedbackRepo.overview', () => {
     expect(o.billing.revenueCents30d).toBe(10800);
     expect(o.billing.topupOrders30d).toBe(1);
     expect(o.billing.topupRevenueCents30d).toBe(900);
+    expect(o.billing.manualGift).toEqual({ orders: 2, faceValueCents: 5800, tokens: 2_000_000 });
     expect(o.billing.daily[29]).toEqual({ day: today, planCents: 9900, topupCents: 900 });
     expect(o.billing.daily[0]!.planCents).toBe(0);
 
@@ -99,6 +101,7 @@ describe('MysqlFeedbackRepo.overview', () => {
       revenueCents30d: 0,
       topupOrders30d: 0,
       topupRevenueCents30d: 0,
+      manualGift: { orders: 0, faceValueCents: 0, tokens: 0 },
     });
     expect(o.ai.monthTokens).toBe(0);
     expect(o.ai.monthBilledTokens).toBe(0);

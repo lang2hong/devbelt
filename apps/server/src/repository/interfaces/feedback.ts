@@ -133,6 +133,8 @@ export interface FeedbackOverview {
     revenueCents30d: number;
     topupOrders30d: number;
     topupRevenueCents30d: number;
+    /** 近 30 天手工赠送（channel='manual' 且 fulfilled）；面值不是营收。 */
+    manualGift: { orders: number; faceValueCents: number; tokens: number };
     /** 近 30 天每日营收，按套餐/充值拆分（UTC，服务端补 0）。 */
     daily: Array<{ day: string; planCents: number; topupCents: number }>;
   };
