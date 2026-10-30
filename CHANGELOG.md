@@ -4,6 +4,78 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.7] - 2026-10-30
+
+### English
+
+#### Security
+
+- Upgraded Fastify, `@fastify/static`, Nodemailer and Undici to versions without known high/critical advisories; production dependency audit is clean.
+- Added CI secret scanning and dependency audit gates.
+- Strict single-address email validation.
+- Feedback accepts the documented 3 × 2 MiB images (12 MiB request body).
+- Payment redirect URLs must use HTTPS and stay on the channel's allowlisted host.
+
+#### Changed
+
+- Sync records must carry an entity kind and cannot change it later.
+- Local path overrides are isolated per account and show a one-time notice after account switch.
+- Added a bulk "Fix All Connection Paths" command.
+- Admin console can backfill historical sync record kinds for one user and flags missing plan features.
+- Browser authenticator unlock is not remembered by default; opt-in lasts 30 minutes in the current tab.
+
+### 中文
+
+#### 安全
+
+- 升级 Fastify、`@fastify/static`、Nodemailer、Undici，生产依赖审计无已知高危/严重漏洞。
+- CI 增加密钥扫描与依赖审计门禁。
+- 邮箱改为严格单地址校验。
+- 反馈恢复支持 3 张 2 MiB 图片（12 MiB 请求体）。
+- 支付跳转必须 HTTPS，且限制在渠道域名内。
+
+#### 变更
+
+- 同步记录创建必须携带类型，之后不可篡改。
+- 本机路径覆盖按账号隔离，切换账号后一次性提示。
+- 新增“批量补齐连接路径”命令。
+- 管理后台可按用户补全历史同步类型，并标出套餐缺失特性。
+- 网页验证器默认不记住解锁；勾选后仅当前标签页保留 30 分钟。
+
+## [0.4.6] - 2026-10-30
+
+### English
+
+#### Security
+
+- Local connection path overrides are now isolated per account.
+- Connection URLs that contain a password are stored in SecretStorage; Memento keeps only the redacted URL. Legacy plaintext values are migrated on startup.
+- Switching accounts or logging out clears the in-memory override cache.
+
+### 中文
+
+#### 安全
+
+- 本机连接路径覆盖改为按账号隔离。
+- 含密码的连接串只存 SecretStorage，Memento 仅保留脱敏值；启动时自动迁移历史明文。
+- 切换账号或登出会清空内存中的覆盖缓存。
+
+## [0.4.5] - 2026-10-30
+
+### English
+
+#### Security
+
+- Sync record mutations now include `entityKind`, so the server can enforce per-type quotas and display record types.
+- Authentication and AI key handling received the first batch of security hardening.
+
+### 中文
+
+#### 安全
+
+- 同步记录写入开始携带 `entityKind`，服务端可按类型执行配额并在后台展示记录类型。
+- 认证与 AI Key 处理完成第一批安全加固。
+
 ## [0.4.4] - 2026-10-30
 
 ### English
