@@ -4,6 +4,20 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.4] - 2026-10-30
+
+### English
+
+#### Changed
+
+- Documentation only. The Marketplace page is now Chinese by default (`README.md`); the English README moved to `README.en.md`, which stays available on GitHub. The changelog link and the link to the other language now point at rendered GitHub pages instead of raw text files.
+
+### 中文
+
+#### 变更
+
+- 仅文档调整。Marketplace 页面默认显示中文（`README.md`）；英文说明移至 `README.en.md`，在 GitHub 上可访问。发版说明与另一语言的链接改为 GitHub 渲染页，不再指向 raw 纯文本。
+
 ## [0.4.3] - 2026-10-29
 
 ### English
