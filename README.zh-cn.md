@@ -16,7 +16,8 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - **结构设计是一等能力。** 表设计器、DDL、ER 图、Schema 对比，以及 PostgreSQL 多 schema、多库导航。
 - **AI 融入工作流。** 生成 SQL、解释与优化、错误诊断、基于结果样本的数据问答和结果可视化。
 - **安全内建。** 凭据保存在 VS Code `SecretStorage`；SSH 隧道校验主机密钥；只读与生产保护默认 fail-closed；写操作进入审计。
-- **个人连接保持私密。** 可选端到端加密同步，连接元数据与本地路径在离开设备前完成加密。
+- **个人数据端到端加密。** 可选开启的同步覆盖：连接与分组、保存的查询与文件夹、表/列注记、验证器条目（开启同步时 TOTP 密钥也会加密上传）、AI 模型接入配置。每一类可在 `devbelt.sync.items` 单独关闭；服务端只存密文。
+- **按账号隔离。** 数据和凭据按登录账号隔离存储，切换账号时面板会重新加载；若另一个 VS Code 窗口换了登录账号，本窗口会停止同步并提示重新加载窗口。
 
 ### SQL 工作台
 
@@ -30,6 +31,8 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - CSV、JSON、XML、XLSX、SQL 导入导出与库间数据传输。
 
 ### 查询洞察
+
+![SQL EXPLAIN 与 AI 解读](resources/screenshots/08-explain.png)
 
 - **可视化 EXPLAIN**：支持 MySQL（`FORMAT=JSON`）、PostgreSQL（`FORMAT JSON`）、SQLite（`EXPLAIN QUERY PLAN`），提供计划树、节点详情、告警高亮（大表全扫描、filesort、临时表、高风险嵌套循环、缺少索引）与原始计划复制。只执行普通 `EXPLAIN`，语句只做规划、不会执行。PostgreSQL 已在 CI 的 PostgreSQL 16 上做集成测试，真实业务库上的人工走查尚未进行。
 - **AI 解释计划**：把精简、有上限的计划摘要发给 AI Chat 解释。
@@ -89,9 +92,7 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - 自然语言生成 SQL、SQL 解释与优化、错误诊断。
 - 数据问答，样本发送需显式确认。
 - 表设计生成与审阅。
-- 结果图表：柱状图、折线图、面积图、饼图、堆叠柱状图、横向条形图。
-
-![SQL EXPLAIN 与 AI 解读](resources/screenshots/08-explain.png)
+- 结果图表：柱状图、折线图、面积图、饼图、堆叠柱状图、横向条形图；支持多 Y 轴、标题可编辑、按列聚合。
 - 每条回复显示积分消耗、耗时与触发时间。
 - SQL 行内补全（默认关闭，按 `Alt+/` 触发）。
 - 支持服务端代理或自带 API Key。
@@ -130,7 +131,10 @@ code --install-extension lang2hong.devbelt-db-client
 |---|---|---|
 | `Ctrl+Enter` | `Cmd+Enter` | 运行查询或当前语句 |
 | `Ctrl+Alt+Enter` | `Cmd+Ctrl+Enter` | 在新面板运行 |
+| `Ctrl+Shift+Enter` | `Cmd+Shift+Enter` | 运行全部语句 |
 | `Ctrl+Shift+E` | `Cmd+Shift+E` | EXPLAIN |
+| `Alt+A` | — | NL2SQL（在 SQL 编辑器中用自然语言生成 SQL） |
+| `Alt+/` | — | 行内 SQL 补全（启用时） |
 | `Ctrl+Alt+F` | `Cmd+Alt+F` | 搜索数据库对象 |
 | `Ctrl+Alt+C` | `Cmd+Alt+C` | 搜索连接 |
 
@@ -140,6 +144,18 @@ code --install-extension lang2hong.devbelt-db-client
 - 本地 SQL 路径（MySQL、PostgreSQL、SQLite）是当前最成熟的部分。
 - Redis、Elasticsearch 与 AI 能力已可用，仍在持续进行真机硬化。
 - 个人同步为端到端加密、可选启用；双设备安装版验证仍在进行。
+
+### 遥测与安装统计
+
+DevBelt 每天最多发送一次匿名心跳，用于统计安装量和活跃安装数。上报内容只有：随机安装 ID（保存在本机）、扩展版本、操作系统/架构、是否为远程窗口；不包含邮箱、账号、连接信息、查询内容或 IP 地址。服务端仅用请求 IP 做心跳接口的限流，限流桶两小时后清理，不会与安装记录或日志关联。
+
+只有在 VS Code 遥测（`vscode.env.isTelemetryEnabled`）开启且 `devbelt.telemetry.enabled`（默认开启）为 `true` 时才会发送。将 `devbelt.telemetry.enabled` 设为 `false` 即可关闭。我们不统计卸载；安装数按「首次激活」计算。远程/Codespaces 窗口使用独立的扩展宿主，可能被计为单独安装。
+
+### 反馈
+
+侧边栏「反馈」视图把入口并列展示：「写反馈 / 查看回复」（打开面板，带未读徽标），以及 Bug 报告、功能建议、文档、评价。点击「写反馈 / 查看回复」（或命令 `DevBelt: 写反馈 / 查看回复`）会在编辑器区域打开面板，表单、图片附件与「我的反馈与回复」上下排列。可附最多 3 张 PNG/JPEG/WebP/GIF 截图（每张 2 MB），图片保存在 DevBelt 服务端，只有团队能在管理后台查看。反馈无需登录，每条会附带随机安装 ID、扩展版本和操作系统，服务端会记录来源 IP 以处理滥用；登录状态下提交的反馈会关联到你的账号。
+
+DevBelt 团队的回复显示在面板的「我的反馈与回复」中，有新回复时侧边栏图标上会显示未读数。回复在打开视图、打开面板、点击「刷新」或提交反馈时拉取，不是实时推送。匿名反馈的回复通过保存在 VS Code 安全存储中的随机回复凭证与本安装绑定，清除该存储后将无法再查看；登录后提交的反馈随账号可见。如果填写了邮箱，团队也可能同时通过邮件回复。
 
 ### 文档
 

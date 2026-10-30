@@ -16,7 +16,8 @@ For release notes see [CHANGELOG.md](CHANGELOG.md). 中文说明见 [README.zh-c
 - **Schema work is first-class.** Table designer, DDL, ER diagrams, schema comparison and PostgreSQL multi-schema/multi-database navigation.
 - **AI is part of the workflow.** Generate SQL, explain and optimize queries, diagnose errors, ask questions about result samples and visualize results.
 - **Security is built in.** Secrets stay in VS Code `SecretStorage`; SSH tunnels use host-key verification; read-only and production guards are fail-closed; writes are audited.
-- **Personal connections stay personal.** Optional E2EE sync protects connection metadata and local paths before they leave the device.
+- **Personal data stays personal.** Optional end-to-end encrypted sync covers connections and groups, saved queries and folders, schema notes, authenticator entries (including their TOTP secrets when sync is on), and AI model access. Each category can be turned off individually with `devbelt.sync.items`. The server stores ciphertext only.
+- **Isolated per account.** Data and secrets are scoped to the signed-in account; switching accounts reloads panels. If another VS Code window changes the signed-in account, this window stops sync and asks you to reload.
 
 ### SQL workspace
 
@@ -30,6 +31,8 @@ For release notes see [CHANGELOG.md](CHANGELOG.md). 中文说明见 [README.zh-c
 - CSV, JSON, XML, XLSX and SQL import/export; database-to-database transfer.
 
 ### Query insight
+
+![SQL EXPLAIN with AI](resources/screenshots/08-explain.png)
 
 - **Visual EXPLAIN** for MySQL (`FORMAT=JSON`), PostgreSQL (`FORMAT JSON`) and SQLite (`EXPLAIN QUERY PLAN`): plan tree, node details, warning highlights (large full scans, filesort, temporary tables, risky nested loops, missing indexes) and raw-plan copy. Plain `EXPLAIN` only — statements are planned, never executed. PostgreSQL is integration-tested against PostgreSQL 16 in CI; a manual walkthrough on a real workload is pending.
 - **AI: Explain plan** sends a compact, bounded plan summary to AI Chat.
@@ -89,9 +92,7 @@ For release notes see [CHANGELOG.md](CHANGELOG.md). 中文说明见 [README.zh-c
 - Natural-language to SQL, SQL explanation and optimization, and error diagnosis.
 - Data Q&A with sample sending explicitly opt-in.
 - Table design generation and review.
-- Result charts: bar, line, area, pie, stacked bar and horizontal bar.
-
-![SQL EXPLAIN with AI](resources/screenshots/08-explain.png)
+- Result charts: bar, line, area, pie, stacked bar, horizontal bar; multiple Y axes, editable titles and per-column aggregation.
 - Per-response credits used, duration and trigger time.
 - Inline SQL completion (off by default, trigger with `Alt+/`).
 - Server proxy or bring-your-own API key.
@@ -130,7 +131,10 @@ code --install-extension lang2hong.devbelt-db-client
 |---|---|---|
 | `Ctrl+Enter` | `Cmd+Enter` | Run query or current statement |
 | `Ctrl+Alt+Enter` | `Cmd+Ctrl+Enter` | Run in a new panel |
+| `Ctrl+Shift+Enter` | `Cmd+Shift+Enter` | Run all statements |
 | `Ctrl+Shift+E` | `Cmd+Shift+E` | EXPLAIN |
+| `Alt+A` | — | NL2SQL (generate SQL from natural language in SQL editors) |
+| `Alt+/` | — | Inline SQL completion (when enabled) |
 | `Ctrl+Alt+F` | `Cmd+Alt+F` | Search database objects |
 | `Ctrl+Alt+C` | `Cmd+Alt+C` | Search connections |
 
@@ -140,6 +144,18 @@ code --install-extension lang2hong.devbelt-db-client
 - The local SQL path (MySQL, PostgreSQL, SQLite) is the most mature part of the product.
 - Redis, Elasticsearch and AI features are available and continue to receive real-world hardening.
 - Personal sync is E2EE and opt-in; dual-device installed-build validation is pending.
+
+### Telemetry
+
+DevBelt sends at most one anonymous heartbeat per installation per day to count installs and active installations. The payload contains a random installation ID stored locally, the extension version, OS/architecture, and whether the window is remote. It never contains your email, account, connection details, queries, or IP address. The server uses the request IP only for per-IP rate limiting on the heartbeat endpoint; rate-limit buckets are cleared after two hours and are not joined with install records or logs.
+
+Heartbeats are sent only when VS Code telemetry is enabled (`vscode.env.isTelemetryEnabled`) and `devbelt.telemetry.enabled` is on (default). Set `devbelt.telemetry.enabled` to `false` to opt out. Uninstall statistics are not collected; an installation is counted when it first activates. Remote/Codespaces windows use a separate extension host and may be counted as separate installations.
+
+### Feedback
+
+The **Feedback** sidebar view lists the entries side by side: **Send feedback / View replies** (opens the panel and carries the unread badge), plus Bug report, Feature request, Docs and Review. **Send feedback / View replies** (or the command `DevBelt: Send Feedback / View Replies`) opens a panel in the editor area with the form, image attachments and **My feedback & replies** stacked vertically. You can attach up to three PNG/JPEG/WebP/GIF screenshots (2 MB each); images are stored on the DevBelt server and are visible only to the team in the admin console. No sign-in is required; each submission includes the random installation ID, the extension version and OS, and the server records the source IP to handle abuse. When you are signed in, the feedback is linked to your account.
+
+Replies from the DevBelt team appear under **My feedback & replies**, and the sidebar icon shows an unread count. Replies are fetched when you open the view, open the panel, click **Refresh**, or submit feedback; they are not pushed in real time. Anonymous replies are tied to this installation through a random reply key kept in VS Code's secret storage, so they are lost if that storage is cleared; replies to signed-in feedback follow your account. If you leave an email address, the team may also send the reply by email.
 
 ### Documentation
 
