@@ -133,9 +133,14 @@ DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS C
 
 ## Privacy and telemetry
 
-DevBelt sends at most one anonymous heartbeat per installation per day to count installs and active installations. The payload contains a random installation ID, the extension version, OS/architecture, and whether the window is remote. It never contains your email, account, connection details, queries, or IP address.
+DevBelt uses anonymous heartbeats to count installs and active installations, **without requiring sign-in**:
 
-Heartbeats are sent only when VS Code telemetry is enabled and `devbelt.telemetry.enabled` is on (default). Set `devbelt.telemetry.enabled` to `false` to opt out.
+- **Install**: reported once, the first time a machine (or VS Code profile) activates the extension.
+- **Active**: at most once per day afterwards (multiple launches within the same UTC day count once).
+
+The payload contains a random installation ID, the extension version, OS/architecture, and whether the window is remote. It never contains your email, account, connection details, queries, or IP address.
+
+Heartbeats are controlled by the extension's own `devbelt.telemetry.enabled` setting (default `true`) and can be turned off at any time. On first activation, if VS Code's global telemetry is off, a one-time notice is shown with a **Turn off anonymous stats** action.
 
 ## Feedback
 

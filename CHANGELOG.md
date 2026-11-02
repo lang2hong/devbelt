@@ -4,6 +4,32 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.9] - 2026-11-02
+
+### English
+
+#### Changed
+
+- Install/active telemetry no longer depends on the VS Code global telemetry switch. The extension's own `devbelt.telemetry.enabled` setting (default on) is the only control: the install event is reported once per machine (per VS Code profile), activity at most once per UTC day. This fixes installs being almost entirely missing from the admin overview.
+- On first activation, if VS Code's global telemetry is off, a one-time notice explains what is sent and offers **Turn off anonymous stats**.
+
+#### Fixed
+
+- Heartbeats are now diagnosable in the **DevBelt Diagnostics** output channel (skip reason, HTTP status, network error) instead of failing silently.
+- Refresh rejections now log their reason (device mismatch / expired / reused) to diagnostics, making "signed out after every update" explainable.
+
+### 中文
+
+#### 变更
+
+- 安装/活跃统计不再依赖 VS Code 全局遥测开关，仅由扩展自身的 `devbelt.telemetry.enabled`（默认开启）控制：安装事件每台机器（每个 VS Code Profile）只上报一次，活跃每 UTC 日最多一次。修复了后台概览里安装量几乎完全缺失的问题。
+- 首次激活时，如果 VS Code 全局遥测是关闭的，会弹一次提示说明上报内容，并提供「关闭匿名统计」按钮。
+
+#### 修复
+
+- 心跳现在会在 **DevBelt Diagnostics** 输出面板留下可诊断的记录（跳过原因、HTTP 状态、网络错误），不再静默失败。
+- 刷新被拒时会把原因（设备不匹配 / 已过期 / 复用检测）写进诊断日志，让「每次升级后掉登录」可解释。
+
 ## [0.4.8] - 2026-11-02
 
 ### English

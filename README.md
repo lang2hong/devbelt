@@ -133,9 +133,14 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 
 ## 隐私与遥测
 
-DevBelt 每天最多发送一次匿名心跳，用于统计安装量和活跃安装数。上报内容只有随机安装 ID、扩展版本、操作系统/架构和是否为远程窗口；不包含邮箱、账号、连接信息、查询内容或 IP 地址。
+DevBelt 用匿名心跳统计安装量与活跃安装数，**无需登录**：
 
-心跳仅在 VS Code 遥测开启且 `devbelt.telemetry.enabled` 为 `true`（默认）时发送。将 `devbelt.telemetry.enabled` 设为 `false` 即可关闭。
+- **安装**：每台机器（每个 VS Code Profile）首次激活时上报一次，终身一次；
+- **活跃**：之后每天最多一次（同一 UTC 日内多次启动只算一次）。
+
+上报内容只有随机安装 ID、扩展版本、操作系统/架构和是否为远程窗口；不包含邮箱、账号、连接信息、查询内容或 IP 地址。
+
+心跳由扩展自己的 `devbelt.telemetry.enabled`（默认 `true`）控制，可在设置中随时关闭；首次激活时如果检测到 VS Code 全局遥测是关闭的，会给出一次提示并提供「关闭匿名统计」按钮。
 
 ## 反馈
 
