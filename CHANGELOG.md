@@ -4,6 +4,48 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.8] - 2026-11-02
+
+### English
+
+#### Changed
+
+- Marketplace and GitHub README now use absolute image URLs so screenshots render correctly in the VS Code Marketplace and on GitHub.
+- README trimmed to marketing-focused copy, removing internal implementation details and configuration references.
+
+#### Fixed
+
+- Fixed a false "account changed in another window" warning when another VS Code window signed in to the same account. Same-account sign-in from another window is now adopted silently.
+- Signing out from another window now shows a dedicated sign-out message instead of the account-switch warning.
+
+#### Security and stability
+
+- Server migrations now safely tolerate concurrent execution and re-runs.
+- Added conservative per-user rate limits to read endpoints to prevent abuse.
+- Admin refund dialog now supports optionally revoking the matching active subscription entitlement when refunding a plan order.
+- Feedback source IP addresses are cleared after 90 days; feedback content is retained.
+- Old sync epoch nonces and tombstones are cleaned up safely without affecting current sync data.
+
+### 中文
+
+#### 变更
+
+- Marketplace 与 GitHub README 改为绝对图片地址，截图可在 VS Code 插件市场和 GitHub 正常渲染。
+- README 收敛为宣传文案，移除内部实现细节与配置说明。
+
+#### 修复
+
+- 修复另一个 VS Code 窗口登录同一账号时误弹“另一个窗口切换了登录账号”的问题；同账号跨窗口登录现在会静默采纳，不再要求重新加载。
+- 另一个窗口退出登录时使用独立提示文案，不再误用“切换账号”提示。
+
+#### 安全与稳定性
+
+- 服务端迁移可安全并发执行与重跑。
+- 为读接口增加保守的按用户限流，防止滥用。
+- 管理后台退款弹窗支持在退回套餐订单时选择是否同时收回匹配的当前订阅权益。
+- 反馈来源 IP 保留 90 天后自动清除，反馈正文保留。
+- 旧同步周期的 nonce 与墓碑记录会被安全清理，不影响当前同步数据。
+
 ## [0.4.7] - 2026-10-30
 
 ### English
@@ -121,8 +163,8 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 #### 变更
 
-- **反馈面板改为单列**
-- **AI Chat 图表支持负数**：带退款/亏损的时间序列（例如月度营收里退款为负）现在可以出折线图；此前只要出现负数就整表退回表格。柱状/饼图仍要求非负，因为它们按 0 基线绘制。：表单与「我的反馈与回复」上下排列，窄编辑器分组下不再左右挤压。
+- **反馈面板改为单列**：表单与「我的反馈与回复」上下排列，窄编辑器分组下不再左右挤压。
+- **AI Chat 图表支持负数**：带退款/亏损的时间序列（例如月度营收里退款为负）现在可以出折线图；此前只要出现负数就整表退回表格。柱状/饼图仍要求非负，因为它们按 0 基线绘制。
 - Free 的引擎兜底补上 PostgreSQL，与服务端 Free 套餐一致。
 - 导入/导出与验证器配额提示不再写死「Pro」「免费套餐」，改为按当前套餐表述。
 - 反馈失败提示增加「查看套餐」动作（原来只有「查看日志」）。
