@@ -6,6 +6,8 @@
 
 DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS Code workspace. Browse connections, write and run queries, edit results, inspect schemas, and diagnose problems without switching between database tools.
 
+**Install**: [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lang2hong.devbelt-db-client) · [Open VSX](https://open-vsx.org/extension/lang2hong/devbelt-db-client) · [Download VSIX](https://github.com/lang2hong/devbelt/releases/latest)
+
 [中文](https://github.com/lang2hong/devbelt/blob/main/README.md) · [Changelog](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
 
 ## Why DevBelt

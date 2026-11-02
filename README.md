@@ -6,6 +6,8 @@
 
 DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Code 工作区。浏览连接、编写并执行查询、编辑结果、查看结构、诊断问题，无需在多个数据库工具间切换。
 
+**安装**：[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lang2hong.devbelt-db-client) · [Open VSX](https://open-vsx.org/extension/lang2hong/devbelt-db-client) · [下载 VSIX](https://github.com/lang2hong/devbelt/releases/latest)
+
 [English](https://github.com/lang2hong/devbelt/blob/main/README.en.md) · [更新日志](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
 
 ## 为什么选择 DevBelt
