@@ -16,7 +16,7 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - **从查询到结果。** 执行当前语句或选中 SQL、取消长查询、查看执行计划、编辑结果行并导出数据。
 - **结构设计是一等能力。** 表设计器、DDL、ER 图、Schema 对比，以及 PostgreSQL 多 schema、多库导航。
 - **AI 融入工作流。** 生成 SQL、解释与优化、错误诊断、基于结果样本的数据问答和结果可视化。
-- **安全内建。** 凭据保存在 VS Code `SecretStorage`；SSH 隧道校验主机密钥；只读与生产保护默认 fail-closed；写操作进入审计。
+- **安全内建。** 凭据保存在系统安全存储；SSH 隧道校验主机密钥；只读与生产保护默认阻止危险操作；写操作进入审计。
 - **个人数据端到端加密。** 可选同步连接与分组、保存的查询与文件夹、表/列注记、验证器条目和 AI 模型接入配置；服务端只存密文。
 - **按账号隔离。** 数据和凭据按登录账号隔离存储，切换账号时面板会重新加载。
 
@@ -105,7 +105,7 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 - 个人连接同步端到端加密，服务端只保存密文。
 - 自动同步默认关闭，可手动同步 / 拉取 / 推送，或显式开启。
 - SSH 主机密钥校验：默认首次确认指纹，`strict` 模式只信任 `known_hosts`；密钥变更一律硬失败。
-- 凭据保存在 VS Code `SecretStorage`。
+- 凭据保存在系统安全存储。
 - 只读模式、生产保护与写操作审计。
 - 验证器（2FA/TOTP）密钥保存在操作系统密钥库。
 
@@ -132,23 +132,17 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 
 - VS Code **1.85.0** 或更高版本。
 - 支持 MySQL、PostgreSQL、SQLite、Redis、Elasticsearch。
+- SQLite：Windows 已内置 sqlite3 引擎；macOS/Linux 使用系统 sqlite3（缺失时连接表单会提示安装，或指定命令路径）。
 
 ## 隐私与遥测
 
-DevBelt 用匿名心跳统计安装量与活跃安装数，**无需登录**：
-
-- **安装**：每台机器（每个 VS Code Profile）首次激活时上报一次，终身一次；
-- **活跃**：之后每天最多一次（同一 UTC 日内多次启动只算一次）。
-
-上报内容只有随机安装 ID、扩展版本、操作系统/架构和是否为远程窗口；不包含邮箱、账号、连接信息、查询内容或 IP 地址。
-
-心跳由扩展自己的 `devbelt.telemetry.enabled`（默认 `true`）控制，可在设置中随时关闭；首次激活时如果检测到 VS Code 全局遥测是关闭的，会给出一次提示并提供「关闭匿名统计」按钮。
+DevBelt 只发送低频安装/活跃心跳（可在设置中关闭）；登录时安装 ID 会与服务端账号关联用于统计。完整的数据项、账号关联与保留说明见 [遥测与隐私](https://github.com/lang2hong/devbelt/blob/main/docs/遥测与隐私.md)。
 
 ## 反馈
 
 在 VS Code 侧边栏打开「反馈」即可提交问题、功能建议或截图；也可以直接到 [GitHub Issues](https://github.com/lang2hong/devbelt/issues) 反馈。反馈无需登录，登录后提交会关联到你的账号。
 
-更多文档：[文档中心](https://github.com/lang2hong/devbelt/tree/main/docs) · [产品介绍](https://github.com/lang2hong/devbelt) · [更新日志](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
+更多信息：[产品介绍](https://github.com/lang2hong/devbelt) · [更新日志](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
 
 ## 许可
 

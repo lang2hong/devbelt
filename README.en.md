@@ -16,7 +16,7 @@ DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS C
 - **From query to result.** Run the current statement or selection, cancel long queries, inspect plans, edit result rows and export data.
 - **Schema work is first-class.** Table designer, DDL, ER diagrams, schema comparison and PostgreSQL multi-schema/multi-database navigation.
 - **AI is part of the workflow.** Generate SQL, explain and optimize queries, diagnose errors, ask questions about result samples and visualize results.
-- **Security is built in.** Secrets stay in VS Code `SecretStorage`; SSH tunnels use host-key verification; read-only and production guards are fail-closed; writes are audited.
+- **Security is built in.** Secrets stay in your system secure storage; SSH tunnels verify host keys; read-only and production guards block dangerous operations; writes are audited.
 - **Personal data stays personal.** Optional end-to-end encrypted sync covers connections and groups, saved queries and folders, schema notes, authenticator entries, and AI model access. The server stores ciphertext only.
 - **Isolated per account.** Data and secrets are scoped to the signed-in account; switching accounts reloads panels.
 
@@ -105,7 +105,7 @@ DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS C
 - Personal connection sync is end-to-end encrypted; the server stores ciphertext only.
 - Auto sync is off by default; use Sync Now / Pull / Push or enable it explicitly.
 - SSH host-key verification: confirm a new fingerprint by default, `strict` mode trusts only `known_hosts`, and key changes always fail closed.
-- Credentials live in VS Code `SecretStorage`.
+- Credentials stay in your system secure storage.
 - Read-only mode, production guards and audit records for writes.
 - Authenticator (2FA/TOTP) with secrets kept in the OS keychain.
 
@@ -132,23 +132,17 @@ DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS C
 
 - VS Code **1.85.0** or newer.
 - Supports MySQL, PostgreSQL, SQLite, Redis and Elasticsearch.
+- SQLite: the sqlite3 engine is bundled on Windows; macOS/Linux use the system sqlite3 (the connection form prompts to install it if missing, or you can set a custom command path).
 
 ## Privacy and telemetry
 
-DevBelt uses anonymous heartbeats to count installs and active installations, **without requiring sign-in**:
-
-- **Install**: reported once, the first time a machine (or VS Code profile) activates the extension.
-- **Active**: at most once per day afterwards (multiple launches within the same UTC day count once).
-
-The payload contains a random installation ID, the extension version, OS/architecture, and whether the window is remote. It never contains your email, account, connection details, queries, or IP address.
-
-Heartbeats are controlled by the extension's own `devbelt.telemetry.enabled` setting (default `true`) and can be turned off at any time. On first activation, if VS Code's global telemetry is off, a one-time notice is shown with a **Turn off anonymous stats** action.
+DevBelt sends low-frequency install/active heartbeats (can be disabled in settings); when signed in, the installation ID is linked to your account for statistics. See [Telemetry and privacy](https://github.com/lang2hong/devbelt/blob/main/docs/遥测与隐私.md) for the full data fields, account linkage and retention.
 
 ## Feedback
 
 Open **Feedback** in the VS Code sidebar to send a bug report, feature request or screenshot, or use [GitHub Issues](https://github.com/lang2hong/devbelt/issues). No sign-in is required; signed-in feedback is linked to your account.
 
-More docs: [Documentation center](https://github.com/lang2hong/devbelt/tree/main/docs) · [Product overview](https://github.com/lang2hong/devbelt) · [Changelog](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
+More information: [Product overview](https://github.com/lang2hong/devbelt) · [Changelog](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
 
 ## License
 
