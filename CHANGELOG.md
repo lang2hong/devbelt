@@ -4,6 +4,44 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.12] - 2026-11-05
+
+### English
+
+- Query results now paginate locally, so large result sets render smoothly instead of freezing the table.
+- The query panel supports 50/100/200/500 rows per page, and page changes apply instantly.
+- Table preview and query results now share the same pagination bar and page-size options.
+- The chart Y-axis picker is now a compact dropdown instead of a permanently expanded list.
+- The table column menu stays inside the window, so long field names are no longer clipped.
+- AI-generated SQL no longer adds a 10-row LIMIT by default; a 100-row safety cap applies. When results may exceed 100 rows, the chat offers a shortcut to run the query in the panel for more.
+- AI Chat inline results show 10 rows per page by default, with 10/20/50/100/200 options.
+
+### 中文
+
+- 查询结果支持本地分页，大结果集不再因一次性渲染而卡顿。
+- 查询面板每页可选 50/100/200/500，翻页即时生效。
+- 表预览与查询结果使用同一套分页控件和每页选项。
+- 图表 Y 轴改为紧凑下拉浮层，不再长期展开占用工具栏。
+- 表预览的字段菜单限制在窗口内，长字段名不再被左侧裁掉。
+- AI 生成的 SQL 默认不再追加 10 行 LIMIT，由客户端以 100 行安全上限兜底；结果可能超过 100 行时，聊天内提供“去面板执行”查看更多。
+- AI 对话内联结果默认每页 10 行，可选 10/20/50/100/200。
+
+## [0.4.11] - 2026-11-04
+
+### English
+
+- Results with only numeric columns now render as a bar chart in AI Chat; switch the X column and tick any combination of Y columns to compare several metrics side by side.
+- Grouped results by year/month are shown as a time-series line chart automatically.
+- Chart detection now respects actual column types, so numeric-looking text (IDs, codes) is no longer treated as a metric.
+- Chart rendering stays responsive on extreme numeric ranges.
+
+### 中文
+
+- AI 对话中只有数值的结果会直接生成柱状图，可切换 X 列、勾选任意多个指标列（多 Y）同图对比。
+- 按年份/月份分组的结果自动用折线图展示。
+- 图表识别结合真实列类型，纯数字文本列（编号、代码）不再被误当数值。
+- 极端数值范围下图表渲染保持流畅。
+
 ## [0.4.10] - 2026-11-03
 
 ### English
