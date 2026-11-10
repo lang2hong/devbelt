@@ -4,6 +4,38 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.13] - 2026-11-10
+
+### English
+
+- **SQL Server is now supported.** Connect with SQL authentication, browse databases, schemas, tables, views, columns, indexes and foreign keys, and work with your SQL Server data next to MySQL, PostgreSQL and SQLite.
+- TLS is on by default; you can opt into a trusted-self-signed certificate or point to a CA file, and certificate checks still work through SSH tunnels.
+- Query results are paginated, and each result set from a stored procedure or batch opens in its own tab.
+- Table design covers create/alter/drop for tables, columns, indexes and foreign keys, including computed columns, check constraints, identity columns and column comments.
+- Execution plans render as a visual tree with warnings for missing join predicates, key lookups, spills and implicit conversions.
+- AI Chat and Agent read-only queries work on SQL Server too, with the same guardrails as the other engines.
+- The table preview sorts by the primary key when one exists, so paging is stable.
+- The result panel's Copy menu gained an SQL (INSERT) item; the standalone Copy INSERT button moved into that menu.
+- Date and time cells are wider while editing, and the calendar icon is visible in dark themes.
+- A one-time notice appears when a database server is older than the version this release was verified against, so a missing feature is easier to explain. Connections are never blocked.
+
+Known limits: parameterized queries are not available for SQL Server, and monitoring is not available for SQL Server yet.
+
+### 中文
+
+- **新增 SQL Server 支持。** 使用 SQL 账号连接，浏览数据库、schema、表、视图、列、索引与外键，和 MySQL、PostgreSQL、SQLite 在同一个工作区里协作。
+- 默认开启 TLS；可选用自签名证书，或指定 CA 文件。通过 SSH 隧道连接时证书校验仍然生效。
+- 查询结果支持分页；存储过程或批处理返回的每个结果集都独立显示为一个标签页。
+- 表设计覆盖表、列、索引、外键的建、改、删，含计算列、CHECK 约束、IDENTITY 列与列注释。
+- 执行计划以可视化树呈现，并提示缺失连接条件、键查找、溢出到临时表与隐式转换。
+- AI Chat 与 Agent 的只读查询同样支持 SQL Server，安全护栏与其他引擎一致。
+- 表预览在有主键时按主键排序，翻页更稳定。
+- 结果面板的「复制」菜单新增 SQL（INSERT）项，原来单独的「复制 INSERT」按钮并入该菜单。
+- 日期与时间单元格在编辑时更宽，深色主题下日历图标可见。
+- 连接低于本版已验证的数据库版本时提示一次，便于判断功能缺失的原因；不会阻止连接。
+
+已知限制：SQL Server 暂不支持参数化查询，监控功能暂不支持 SQL Server。
+
 ## [0.4.12] - 2026-11-05
 
 ### English

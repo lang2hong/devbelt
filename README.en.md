@@ -131,7 +131,18 @@ DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS C
 ## Requirements
 
 - VS Code **1.85.0** or newer.
-- Supports MySQL, PostgreSQL, SQLite, Redis and Elasticsearch.
+- Supports MySQL, PostgreSQL, SQL Server, SQLite, Redis and Elasticsearch.
+
+| Engine | Supported versions | Notes |
+|---|---|---|
+| MySQL | 8.0 or later | 5.7 and older are not verified |
+| PostgreSQL | 11 or later | Requires `pg_get_function_identity_arguments` and index `INCLUDE` |
+| SQL Server | 2016 SP1 or later | Requires `CREATE OR ALTER` |
+| SQLite | 3.x | Uses the system or bundled `sqlite3` |
+| Redis | 6.0 or later | Cluster and Sentinel need matching server configuration |
+| Elasticsearch | 6.0 or later | 6/8/9 verified; 6.x typed mappings are supported |
+
+Older versions still connect; the extension shows a one-time notice when a server is below the verified minimum, so you know where a missing feature comes from.
 - SQLite: the sqlite3 engine is bundled on Windows; macOS/Linux use the system sqlite3 (the connection form prompts to install it if missing, or you can set a custom command path).
 
 ## Privacy and telemetry

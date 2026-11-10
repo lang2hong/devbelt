@@ -131,7 +131,18 @@ DevBelt 将 SQL、Redis、Elasticsearch 与 AI 工作流整合到同一个 VS Co
 ## 系统要求
 
 - VS Code **1.85.0** 或更高版本。
-- 支持 MySQL、PostgreSQL、SQLite、Redis、Elasticsearch。
+- 支持 MySQL、PostgreSQL、SQL Server、SQLite、Redis、Elasticsearch。
+
+| 引擎 | 支持的版本 | 说明 |
+|---|---|---|
+| MySQL | 8.0 及以上 | 5.7 及更早版本未验证 |
+| PostgreSQL | 11 及以上 | 需要 `pg_get_function_identity_arguments` 与索引 `INCLUDE` |
+| SQL Server | 2016 SP1 及以上 | 需要 `CREATE OR ALTER` |
+| SQLite | 3.x | 使用系统或内置 `sqlite3` |
+| Redis | 6.0 及以上 | 集群/哨兵需对应服务端配置 |
+| Elasticsearch | 6.0 及以上 | 6/8/9 已验证；6.x 使用带类型 mapping，也支持 |
+
+低于下限仍可连接，扩展会提示一次版本不受支持，便于你判断功能异常的来源。
 - SQLite：Windows 已内置 sqlite3 引擎；macOS/Linux 使用系统 sqlite3（缺失时连接表单会提示安装，或指定命令路径）。
 
 ## 隐私与遥测
