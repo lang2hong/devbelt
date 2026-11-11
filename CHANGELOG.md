@@ -4,6 +4,24 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.14] - 2026-11-11
+
+### English
+
+- **SQL Server connections now sync across devices**, with the same rules as MySQL and Elasticsearch: connection settings, TLS options, SSH tunnel settings and queries are kept in sync, while colors and timeouts stay local to each machine.
+- SQL Server is available on both Free and Pro plans.
+- The plan page now shows Redis, Elasticsearch and SQL Server by name instead of marking them as coming soon.
+- Fixed: when a SQL Server connection points at a CA file that is missing on the current machine, you get an actionable prompt before connecting instead of a low-level file error.
+- Upgrade notice: version 0.4.13 stops inbound sync when it encounters a synced SQL Server connection. Upgrade every device to 0.4.14 before using SQL Server connections on a multi-device account.
+
+### 中文
+
+- **SQL Server 连接现在支持跨设备同步**，规则与 MySQL、Elasticsearch 一致：连接配置、TLS 选项、SSH 隧道配置和查询都会同步；颜色与超时保持每台机器本地。
+- SQL Server 在免费版与 Pro 版都可用。
+- 套餐页按名称显示 Redis、Elasticsearch 与 SQL Server，不再标记为“即将支持”。
+- 修复：SQL Server 连接指向的 CA 文件在当前机器上缺失时，连接前会给出可操作的提示，而不是底层文件错误。
+- 升级提示：0.4.13 遇到同步过来的 SQL Server 连接时入站同步会停住。在多设备账号上使用 SQL Server 连接前，请把所有设备升级到 0.4.14。
+
 ## [0.4.13] - 2026-11-10
 
 ### English
