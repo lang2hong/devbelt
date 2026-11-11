@@ -4,6 +4,22 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.15] - 2026-11-11
+
+### English
+
+- **Read-only SQL Server connections are now enforced in the client core.** Previously every panel and command had to remember to check the flag; now any write statement is rejected centrally, so a new entry point cannot bypass it.
+- Execution plans still work on read-only SQL Server connections.
+- SQL Server connections no longer sync path and URL fields the engine does not use (Unix socket, client certificates, connection strings). CA files and SSH keys still sync.
+- When you mark a SQL Server connection as read-only, the form explains that enforcement happens in the client, because SQL Server has no database-level read-only mode.
+
+### 中文
+
+- **SQL Server 只读连接改由客户端核心统一拦截。** 以前每个面板和命令都要自己记得判断只读；现在任何写语句都会被中心护栏拒绝，新入口不会漏拦。
+- 只读的 SQL Server 连接上，执行计划仍然可用。
+- SQL Server 连接不再同步该引擎用不到的路径与 URL 字段（Unix socket、客户端证书、连接串）；CA 文件与 SSH 私钥仍会同步。
+- 勾选 SQL Server 连接的只读时，表单会说明拦截发生在客户端——SQL Server 没有数据库层只读。
+
 ## [0.4.14] - 2026-11-11
 
 ### English
