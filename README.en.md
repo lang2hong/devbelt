@@ -1,160 +1,108 @@
 # DevBelt
 
-**Database development, without leaving VS Code.**
+**Database work, back in one window.**
 
-![DevBelt](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/icon.png)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/lang2hong.devbelt-db-client?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=lang2hong.devbelt-db-client)
+[![Open VSX](https://img.shields.io/open-vsx/v/lang2hong/devbelt-db-client?label=Open%20VSX)](https://open-vsx.org/extension/lang2hong/devbelt-db-client)
+[![License](https://img.shields.io/badge/license-MIT-3ad29a)](LICENSE)
 
-DevBelt brings SQL, Redis, Elasticsearch and AI-assisted workflows into one VS Code workspace. Browse connections, write and run queries, edit results, inspect schemas, and diagnose problems without switching between database tools.
+DevBelt is an open-source VS Code extension for connecting, querying, designing, diagnosing and monitoring seven databases inside the editor you already use. Fewer tools, more focus.
+
+![DevBelt SQL workspace](https://devbelt.l2hi.com/screenshots/01-sql-workbench.png)
 
 **Install**: [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lang2hong.devbelt-db-client) · [Open VSX](https://open-vsx.org/extension/lang2hong/devbelt-db-client) · [Download VSIX](https://github.com/lang2hong/devbelt/releases/latest)
 
-[中文](https://github.com/lang2hong/devbelt/blob/main/README.md) · [Changelog](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
+[中文](https://github.com/lang2hong/devbelt/blob/main/README.md) · [Docs (中文)](https://devbelt.l2hi.com/db/docs) · [Changelog](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
 
 ## Why DevBelt
 
-- **One workspace, multiple engines.** MySQL, PostgreSQL, SQLite, Redis and Elasticsearch share the same workspace, tab model and security model.
-- **From query to result.** Run the current statement or selection, cancel long queries, inspect plans, edit result rows and export data.
-- **Schema work is first-class.** Table designer, DDL, ER diagrams, schema comparison and PostgreSQL multi-schema/multi-database navigation.
-- **AI is part of the workflow.** Generate SQL, explain and optimize queries, diagnose errors, ask questions about result samples and visualize results.
-- **Security is built in.** Secrets stay in your system secure storage; SSH tunnels verify host keys; read-only and production guards block dangerous operations; writes are audited.
-- **Personal data stays personal.** Optional end-to-end encrypted sync covers connections and groups, saved queries and folders, schema notes, authenticator entries, and AI model access. The server stores ciphertext only.
-- **Isolated per account.** Data and secrets are scoped to the signed-in account; switching accounts reloads panels.
+- **One window, seven databases.** MySQL, PostgreSQL, SQL Server, SQLite, Redis, Elasticsearch and MongoDB share connections, tabs and security settings.
+- **Built for the editor.** Run the current statement or selection, cancel long queries, use multi-result grids, completion and native shortcuts.
+- **AI with boundaries.** It reads schemas and queries data. Reads are bounded, and data or schema changes are never committed without your approval.
+- **Your data stays yours.** Passwords and keys live in the system keychain, sync is readable only by you, and production guards, read-only mode and masked export are built in.
 
-## SQL workspace
+## One window, seven databases
 
-![SQL editor and result grid](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/01-sql-workbench.png)
-
-- Connection groups, connection testing and SSH tunnels.
-- SQL editing, context-aware completion, formatting, execution and cancellation.
-- `EXPLAIN` from the editor.
-- Multi-result grids with filters, sorting, paging and controlled inline editing.
-- Query history, audit log, scheduled backups, server dashboard and object search.
-- CSV, JSON, XML, XLSX and SQL import/export; database-to-database transfer.
-
-## Query insight
-
-![SQL EXPLAIN with AI](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/08-explain.png)
-
-- **Visual EXPLAIN** for MySQL, PostgreSQL and SQLite: plan tree, node details, warning highlights and raw-plan copy. Statements are planned, never executed.
-- **AI: Explain plan** sends a compact plan summary to AI Chat.
-- **Index suggestions** for flagged tables: column order, confidence, reasons and risks. Copy the DDL; nothing is executed.
-- **Slow Queries**: local query history grouped by SQL template, sorted by time or runs.
-- **SQL diagnostics** for `UPDATE`/`DELETE` without `WHERE`, `DROP`/`TRUNCATE`/`ALTER`, `NOT IN (subquery)` and other risky patterns.
-- **Data dictionary**: export as Markdown or HTML, without connection details.
-
-## Monitoring
-
-![AI proposing a monitoring task](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/06-monitor-proposal.png)
-
-- **Scheduled read-only checks**: row count, a numeric metric or new rows; VS Code notification when your condition is met.
-- **Propose, not create**: in Agent mode the assistant can only propose a task as a card; you pick the interval and alert condition and confirm before anything runs.
-- **Background Tasks**: charts, check history, next check, failure count, and editable interval / condition.
-
-![Background Tasks drawer](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/07-monitor-tasks.png)
-
-## Schema and data
-
-![ER diagram](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/02-er-diagram.png)
-
-- Table designer and DDL generation.
-- ER diagrams and schema comparison with synchronization SQL.
-- PostgreSQL multi-schema writes, DDL, export and data editing.
-- PostgreSQL multi-database navigation with lazy per-database sessions.
-- Backup/restore and mock-data generation.
-
-## Redis
-
-![Redis key browser and value editor](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/03-redis.png)
-
-- Standalone, Cluster and Sentinel connections, including SSH tunnels and TLS.
-- Key browser with separators, SCAN paging and binary-safe keys.
-- Native editors for strings, hashes, lists, sets, sorted sets and Streams.
-- Stream consumer-group details, pending entries, `XACK` and `XCLAIM`.
-- CLI console, command log, slow log and server status.
-- Read-only mode and dangerous-command confirmation.
-
-## Elasticsearch
-
-![Elasticsearch documents and DSL console](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/04-elasticsearch.png)
-
-- HTTP/HTTPS, Basic/API-key authentication, TLS and SSH tunnels.
-- Cluster overview, node list and index browser.
-- Mapping, settings and aliases inspection.
-- Document browsing, create, edit, delete and bulk delete.
-- DSL console and REST console with structured errors and in-flight request cancellation.
-- Fail-closed read-only enforcement and audit logging.
-
-## AI assistant
-
-![AI Chat with charts and usage details](https://raw.githubusercontent.com/lang2hong/devbelt/main/resources/screenshots/05-ai-chat.png)
-
-- AI Chat with streaming responses, conversation history and schema context.
-- Natural-language to SQL, SQL explanation and optimization, and error diagnosis.
-- Data Q&A with sample sending explicitly opt-in.
-- Table design generation and review.
-- Result charts: bar, line, area, pie, stacked bar and horizontal bar.
-- Per-response credits used, duration and trigger time.
-- Inline SQL completion (off by default, trigger with `Alt+/`).
-- Server proxy or bring-your-own API key.
-- **Agent mode** (off by default): inspects the schema, runs read-only SQL and plain `EXPLAIN` step by step, within a step / tool-call / time budget.
-- **Write proposals only**: DML and DDL are proposed and executed only after you approve them in a native dialog.
-- **Where to open AI Chat**: the DevBelt sidebar title, the status bar, or the `✦ AI` button in a query result panel.
-
-## Sync, security and audit
-
-- Personal connection sync is end-to-end encrypted; the server stores ciphertext only.
-- Auto sync is off by default; use Sync Now / Pull / Push or enable it explicitly.
-- SSH host-key verification: confirm a new fingerprint by default, `strict` mode trusts only `known_hosts`, and key changes always fail closed.
-- Credentials stay in your system secure storage.
-- Read-only mode, production guards and audit records for writes.
-- Authenticator (2FA/TOTP) with secrets kept in the OS keychain.
-
-## Get started
-
-1. Install DevBelt from the VS Code Marketplace.
-2. Open the DevBelt activity bar and create a connection.
-3. Test the connection, open a SQL editor or browse data.
-
-## Shortcuts
-
-| Shortcut | macOS | Action |
+| Type | Databases | What you can do |
 |---|---|---|
-| `Ctrl+Enter` | `Cmd+Enter` | Run query or current statement |
-| `Ctrl+Alt+Enter` | `Cmd+Ctrl+Enter` | Run in a new panel |
-| `Ctrl+Shift+Enter` | `Cmd+Shift+Enter` | Run all statements |
-| `Ctrl+Shift+E` | `Cmd+Shift+E` | EXPLAIN |
-| `Alt+A` | — | NL2SQL (generate SQL from natural language in SQL editors) |
-| `Alt+/` | — | Inline SQL completion (when enabled) |
-| `Ctrl+Alt+F` | `Cmd+Alt+F` | Search database objects |
-| `Ctrl+Alt+C` | `Cmd+Alt+C` | Search connections |
+| Relational | MySQL · PostgreSQL · SQL Server · SQLite | Queries, result grids, table designer, relationship diagrams, execution plans, import/export |
+| Cache & search | Redis · Elasticsearch | Browse keys and documents, edit values, use the CLI and query consoles |
+| Document | MongoDB | Collections, indexes, paging, aggregation, change streams, GridFS |
 
-## Requirements
+One account, one set of shortcuts, one activity record.
 
-- VS Code **1.85.0** or newer.
-- Supports MySQL, PostgreSQL, SQL Server, SQLite, Redis and Elasticsearch.
+## Query, schema and insight
 
-| Engine | Supported versions | Notes |
-|---|---|---|
-| MySQL | 8.0 or later | 5.7 and older are not verified |
-| PostgreSQL | 11 or later | Requires `pg_get_function_identity_arguments` and index `INCLUDE` |
-| SQL Server | 2016 SP1 or later | Requires `CREATE OR ALTER` |
-| SQLite | 3.x | Uses the system or bundled `sqlite3` |
-| Redis | 6.0 or later | Cluster and Sentinel need matching server configuration |
-| Elasticsearch | 6.0 or later | 6/8/9 verified; 6.x typed mappings are supported |
+![Relationship diagram](https://devbelt.l2hi.com/screenshots/02-er-diagram.png)
 
-Older versions still connect; the extension shows a one-time notice when a server is below the verified minimum, so you know where a missing feature comes from.
-- SQLite: the sqlite3 engine is bundled on Windows; macOS/Linux use the system sqlite3 (the connection form prompts to install it if missing, or you can set a custom command path).
+- **Query & results**: connection groups, SSH tunnels, formatting, execution and cancellation, multi-result grids, filtering, sorting, paging and controlled editing.
+- **Import/export**: CSV, JSON, XML, XLSX and SQL; database-to-database transfer and optional masked export.
+- **Schema & design**: relationship diagrams, table designer, schema comparison, SQL preview and data dictionary. Diagrams are Pro.
+- **Insight & diagnosis**: visual execution plans, risk hints, index suggestions, slow-query analysis and risky statement warnings.
+- **Backup & data**: scheduled backups, restore and mock data generation.
 
-## Privacy and telemetry
+## AI helps you read the data. It does not make the call for you.
 
-DevBelt sends low-frequency install/active heartbeats (can be disabled in settings); when signed in, the installation ID is linked to your account for statistics. See [Telemetry and privacy](https://github.com/lang2hong/devbelt/blob/main/docs/遥测与隐私.md) for the full data fields, account linkage and retention.
+![AI assistant with charts](https://devbelt.l2hi.com/screenshots/05-ai-chat.png)
 
-## Feedback
+- **Natural-language queries**: generate, explain, optimize and diagnose with the relevant schema in context.
+- **AI assistant** (off by default): inspect schema, run read-only queries and view execution plans, bounded by steps, rows and time.
+- **No automatic commits**: reversible data changes first run in a rollback-only trial (tables with triggers are skipped), schema changes are checked, and nothing runs until you approve it in a native dialog.
+- **Read-only auto-run**: SQL, Redis reads, Elasticsearch searches, and MongoDB read-only queries with a collection follow one switch.
+- **Result charts**: bar, line, area, pie, stacked and horizontal bar.
+- **Bring your own model key**: or use the hosted proxy. Keys stay in the system keychain.
+- **MCP (Pro)**: expose read-only queries to Claude, Cursor and other external assistants.
 
-Open **Feedback** in the VS Code sidebar to send a bug report, feature request or screenshot, or use [GitHub Issues](https://github.com/lang2hong/devbelt/issues). No sign-in is required; signed-in feedback is linked to your account.
+## Monitor and alert
 
-More information: [Product overview](https://github.com/lang2hong/devbelt) · [Changelog](https://github.com/lang2hong/devbelt/blob/main/CHANGELOG.md)
+- **Three check types**: table row count, a key metric or new data.
+- **AI proposes, you confirm**: monitoring tasks arrive as cards; you choose the interval and alert condition.
+- **Optional start date**: time columns can start counting from a chosen day.
+- **Background tasks**: charts, check history, next check, failure count; edit interval and condition.
+- **Single owner**: when multiple VS Code windows are open, one window owns execution; handover is explicit, and switching accounts pauses tasks.
 
-## License
+## Free and Pro
 
-MIT
+**Free**: all seven databases locally, queries and result grids, and the basic AI assistant allowance — for personal local work.
+
+**Pro**: encrypted cross-device sync, relationship diagrams and schema design, connection profile export, MCP read-only queries, and higher device, connection and AI limits.
+
+Local use does not require an account. See the [plans page](https://devbelt.l2hi.com/plans) for exact limits.
+
+## Redis, Elasticsearch, MongoDB
+
+- **Redis**: standalone / Cluster / Sentinel, SSH and TLS, key tree, paging, five common types, Stream consumer groups and a CLI.
+- **Elasticsearch**: HTTP/HTTPS, Basic / API key, TLS / SSH, cluster and index browsing, mapping / settings / aliases, query and REST consoles.
+- **MongoDB**: `mongodb://` and Atlas, collections and indexes, `_id` paging, read-only aggregation, EJSON / JSONL, Change Streams, batch transactions and GridFS.
+
+AI and Agent use read-only operations for all three; values and document contents are not sent to the model by default.
+
+## Privacy and control
+
+- Connection passwords, model keys and authenticator secrets live in OS secure storage.
+- Optional cross-device sync of connections, queries and notes; the server stores ciphertext only.
+- Production protection, read-only mode, write activity records and dangerous-command confirmation.
+- Sensitive fields are redacted by default; MCP exposes read-only queries only and denies production connections by default.
+
+## Install
+
+| Channel | Best for |
+|---|---|
+| [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=lang2hong.devbelt-db-client) | VS Code, Cursor and compatible editors |
+| [Open VSX](https://open-vsx.org/extension/lang2hong/devbelt-db-client) | VSCodium, Gitpod, Eclipse Theia |
+| [GitHub Releases](https://github.com/lang2hong/devbelt/releases/latest) | Offline VSIX |
+
+```bash
+code --install-extension lang2hong.devbelt-db-client
+```
+
+Reload the window, create and test a connection, then open a query editor or ask in the AI assistant.
+
+## Learn more
+
+- [Product docs (中文)](https://devbelt.l2hi.com/db/docs)
+- [Changelog](CHANGELOG.md)
+- [GitHub Issues](https://github.com/lang2hong/devbelt/issues)
+- [Plans and Pro](https://devbelt.l2hi.com/plans)
+
+MIT License · © DevBelt
