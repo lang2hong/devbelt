@@ -4,6 +4,36 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.19] - 2026-11-26
+
+### English
+
+- **AI auto-run is predictable.** A reply with several read-only SQL blocks now runs them in order, at most five per reply; the rest stay manual with an inline notice. Production connections can auto-run read-only queries, but potentially slow ones (no WHERE, multiple JOINs, UNION, GROUP BY, subqueries, a leading `%` in LIKE) are held back with a notice. Writes and DDL never auto-run. Results default to a table; charts are drawn only when you ask for them. Switching chats, loading history or closing the panel stops queued runs.
+- **AI Chat got a visual pass.** Messages use an adaptive centered column (up to 1200px), assistant replies are grouped in low-contrast cards, and long SQL collapses behind a "Show all" control. When a reply has multiple SQL blocks they are numbered **SQL 1 / SQL 2**, and the assistant is instructed to put each query's explanation and confirmation points under its own "Query N" heading. SQL is syntax-highlighted; copy/run/edit actions are icons; result tables have a sticky header, zebra rows and tabular numbers.
+- **AI requires signing in.** Chat, agent mode, inline completion and the explain / optimize actions now require an account — including when you use your own API key. Your key and model settings are kept and apply immediately after signing in. Local database work (connections, queries, backup, monitoring, the authenticator) stays available without an account.
+- **Per-account data isolation.** Connection passwords, AI keys, chat sessions, monitor tasks and legacy data are separated per account. When several accounts share one machine, a newly signed-in account no longer sees connections, monitor tasks or AI data created by the previous one; connections that had inherited the previous account's password now show no password and ask for it again.
+- **Deleting while signed in now sticks.** Connections, groups, saved queries, query folders and backup schedules deleted while signed in no longer reappear after you sign out. Note the other direction: items created or renamed while signed in are not copied back to the signed-out state, so signing out shows what you had before signing in.
+- **Write protection follows the live connection.** Read-only and production flags are re-read from the saved connection instead of a panel's startup snapshot: if you switch an open panel's connection to read-only, write actions stop immediately (Redis / Elasticsearch / MongoDB buttons grey out); if the connection is deleted — including a delete synced from another device — its panels close.
+- **PostgreSQL 10 works again.** The index query used a column that only exists in PostgreSQL 11+, so listing indexes failed on 10 (table designer, schema compare, schema sync). Index metadata is now fetched with a version-safe query. PostgreSQL 10 is covered by CI for the first time.
+- **MongoDB 4.4 is verified.** The CI job for 4.4 could not start the server (it used a shell that 4.4 images do not ship), so 4.4 had never actually been tested. That is fixed and the 4.4 suite now runs and passes.
+- **SQLite values keep their type.** Backups, SQL exports and data sync no longer turn integers in untyped columns into text, and no longer fold very large floating-point values into infinity; the backup writer also splits large tables into several INSERT statements and includes indexes.
+- **Tighter safety gates.** Elasticsearch confirmation cannot be bypassed by path spelling (trailing slash, encoded names, nested `match_all`, `_aliases` remove, bulk deletes, data-stream/template deletion, `_close`); AI auto-run of Elasticsearch bodies is validated; Redis auto-run uses a read-only command whitelist; MCP tokens are scoped to selected databases; monitor proposals respect `sensitiveTables`.
+- **Smaller fixes.** MySQL column edits keep `AUTO_INCREMENT`; schema sync creates parent tables before child tables; editing an index validates before dropping the old one; PostgreSQL database drop works; cancelling the database picker in import/export cancels the operation; deleted AI chats stay deleted; ES auto-run failures explain themselves. Connections closed by the background health check now show as closed in the tree immediately instead of failing only when expanded.
+
+### 中文
+
+- **AI 自动执行更可预期。** 一条回复里有多个只读 SQL 块时按顺序执行，单次最多 5 条；其余保留手动执行并在代码块下方提示。生产连接可以自动执行只读查询，但可能较慢的查询（无 WHERE、多个 JOIN、UNION、GROUP BY、子查询、前导 `%` 的 LIKE）会拦下并提示。写与 DDL 永不自动执行。结果默认表格，只有明确要图表才画图。切换会话、加载历史或关闭面板会停止排队中的执行。
+- **AI Chat 视觉整理。** 消息改为自适应居中列（最宽 1200px），助手回复用低对比卡片分组，长 SQL 默认折叠并可「展开全部」。一条回复有多个 SQL 块时显示 **SQL 1 / SQL 2**，并在提示词里要求每个查询的说明和确认点放在各自的「查询 N」下。SQL 增加语法高亮；复制/运行/编辑等操作改为图标；结果表增加 sticky 表头、斑马纹和等宽数字。
+- **AI 需要登录。** AI 对话、Agent 模式、行内补全，以及解释 / 优化操作都改为需要登录后使用；自带 Key 也一样。已保存的 Key 与模型配置会保留，登录后立即生效。本地数据库功能（连接、查询、备份、监控、验证器）无需登录即可使用。
+- **账号数据隔离。** 连接密码、AI Key、AI 会话、监控任务与旧版本地数据按账号分开存放。同一台电脑上有多个账号时，后登录的账号不再看到上一个账号创建的连接、监控任务和 AI 数据；原先"碰巧"继承了上一个账号密码的同 id 连接，现在会显示没有密码，需要重新输入。
+- **登录状态下的删除会保留。** 登录时删除的连接、分组、保存的查询、查询文件夹和备份计划，退出登录后不再出现。反方向要注意：登录时新建或改名的数据**不会**写回未登录状态，退出登录后看到的是登录前的样子。
+- **写保护跟随当前连接配置。** 只读与生产标记改为读取已保存的连接，而不是面板启动时的快照：把已打开面板的连接改成只读后，写操作立即被拦住（Redis / Elasticsearch / MongoDB 的写按钮随之变灰）；连接被删除时（包括另一台设备同步过来的删除）相关面板自动关闭。
+- **PostgreSQL 10 恢复可用。** 索引查询用到 PostgreSQL 11 才有的列，导致 PG 10 上读取索引失败（表设计器、结构比对、结构同步都受影响）。索引元数据改用版本安全的查询，PG 10 也第一次纳入 CI 验证。
+- **MongoDB 4.4 真正经过验证。** 4.4 的 CI 任务此前根本启动不了服务（用了 4.4 镜像里没有的 shell），测试从未执行。已修复，4.4 套件现在会实际运行并通过。
+- **SQLite 值保留类型。** 备份、SQL 导出与数据同步不再把无类型列里的整数写成文本，也不会把极大的浮点数折成无穷；备份还把大表拆成多条 INSERT，并带上索引。
+- **安全门禁收紧。** Elasticsearch 的危险操作确认不能再靠写法绕过（尾斜杠、编码名、嵌套 `match_all`、`_aliases` remove、批量删除、删数据流/模板、`_close`）；AI 自动执行的 Elasticsearch 请求体增加校验；Redis 自动执行改用只读命令白名单；MCP 令牌绑定到所选数据库；监控提案遵守 `sensitiveTables`。
+- **其它修复。** MySQL 改列保留 `AUTO_INCREMENT`；结构同步先建父表再建子表；编辑索引先校验再删旧索引；PostgreSQL 删库可用；导入/导出取消选库即取消；已删除的 AI 会话不会复活；ES 自动执行被拦下时提示可读。后台健康检查关闭的连接会立即在树里显示为已关闭，不再等展开时才报错。
+
 ## [0.4.18] - 2026-11-17
 
 ### English
