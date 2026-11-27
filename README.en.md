@@ -41,17 +41,17 @@ One account, one set of shortcuts, one activity record.
 - **Insight & diagnosis**: visual execution plans, risk hints, index suggestions, slow-query analysis and risky statement warnings.
 - **Backup & data**: scheduled backups, restore and mock data generation.
 
-## AI helps you read the data. It does not make the call for you.
+## DevBelt AI helps you read the data. It does not make the call for you.
 
-![AI assistant with charts](https://devbelt.l2hi.com/screenshots/05-ai-chat.png)
+![DevBelt AI with charts](https://devbelt.l2hi.com/screenshots/05-ai-chat.png)
 
 - **Natural-language queries**: generate, explain, optimize and diagnose with the relevant schema in context.
-- **AI assistant** (off by default): inspect schema, run read-only queries and view execution plans, bounded by steps, rows and time.
+- **Agent mode** (off by default): inspect schema, run read-only queries and view execution plans, bounded by steps, rows and time.
 - **No automatic commits**: reversible data changes first run in a rollback-only trial (tables with triggers are skipped), schema changes are checked, and nothing runs until you approve it in a native dialog.
 - **Read-only auto-run**: SQL, Redis reads, Elasticsearch searches, and MongoDB read-only queries with a collection follow one switch.
 - **Result charts**: bar, line, area, pie, stacked and horizontal bar.
 - **Bring your own model key**: or use the hosted proxy. Keys stay in the system keychain.
-- **MCP (Pro)**: expose read-only queries to Claude, Cursor and other external assistants.
+- **MCP (Pro)**: expose read-only queries to Claude, Cursor and other external AI clients.
 
 ## Monitor and alert
 
@@ -63,7 +63,7 @@ One account, one set of shortcuts, one activity record.
 
 ## Free and Pro
 
-**Free**: all seven databases locally, queries and result grids, and the basic AI assistant allowance — for personal local work.
+**Free**: all seven databases locally, queries and result grids, and the basic DevBelt AI allowance — for personal local work.
 
 **Pro**: encrypted cross-device sync, relationship diagrams and schema design, connection profile export, MCP read-only queries, and higher device, connection and AI limits.
 
@@ -96,7 +96,7 @@ AI and Agent use read-only operations for all three; values and document content
 code --install-extension lang2hong.devbelt-db-client
 ```
 
-Reload the window, create and test a connection, then open a query editor or ask in the AI assistant.
+Reload the window, create and test a connection, then open a query editor or ask in DevBelt AI.
 
 ## Learn more
 

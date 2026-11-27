@@ -4,6 +4,24 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.21] - 2026-11-27
+
+### English
+
+- **AI is now DevBelt AI.** The AI entry points (chat, agent, explain/optimize, MCP) now use the DevBelt AI name; behavior is unchanged.
+- **Start with a sample database.** Run **Try Sample Database** from the command palette or the empty connection tree to open a bundled SQLite sample (customers, products, orders). You can run queries and ask AI about the schema without configuring MySQL or PostgreSQL first. The sample connection is local-only: it does not sync to other devices and does not count toward your saved-connection limit.
+- **Safety is visible where it matters.** Production connections show a **Production read-only · 10s** badge in AI Chat. When AI auto-runs a query, the running indicator also states: read-only auto-run, 10s timeout, writes/DDL never auto-run.
+- **AI Error Doctor.** When a query fails, click **Explain & fix** to get a plain-language cause and a corrected SQL, compare the original and fixed statements, then apply the fix to the editor or run it. Nothing runs automatically; if AI cannot produce a usable fix, it falls back to the existing AI diagnose flow.
+- **MCP setup guide.** The MCP config page now walks through exposing a connection, choosing Cursor / Claude / VS Code or another client, and copying the generated config. Tokens stay read-only and can be revoked at any time.
+
+### 中文
+
+- **AI 统一为 DevBelt AI。** 对话、Agent、解释/优化、MCP 等入口统一使用 DevBelt AI 名称，功能行为不变。
+- **内置示例库，打开就能用。** 命令面板或空连接树的「试用示例库」会打开内置 SQLite 示例库（customers / products / orders）。不用先配 MySQL 或 PostgreSQL，就能运行查询、让 AI 解释表结构。示例连接只在本机使用：不参与跨设备同步，也不占用保存连接配额。
+- **安全模式只在关键处出现。** 生产连接在 AI Chat 顶栏显示「生产只读 · 10s」徽标；AI 自动执行查询时，执行中指示会同时说明：只读自动执行、10 秒超时、写/DDL 不自动执行。
+- **AI 报错修复。** SQL 报错时点「解释并修复」，会得到原因和修复后的 SQL；可以对比原 SQL 与修复 SQL，再应用到编辑器或直接运行。不会自动执行；AI 无法给出可用修复时，回退到原有「AI 诊断」。
+- **MCP 接入指引。** MCP 配置页增加三步说明：启动连接、选择 Cursor / Claude / VS Code 等客户端、生成并复制配置。token 仍是只读、可随时撤销。
+
 ## [0.4.20] - 2026-11-27
 
 ### English
