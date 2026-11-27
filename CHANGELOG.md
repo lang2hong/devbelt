@@ -4,6 +4,24 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.20] - 2026-11-27
+
+### English
+
+- **AI Chat uses the full width.** Messages, SQL blocks, result tables and the composer now fill the panel; only the normal content padding remains, so wide screens no longer waste space on both sides.
+- **Long SQL and results fold.** SQL blocks have a fold button in the top-right corner. Long SQL opens with a 16-line preview and a "Show all" control; after expanding, clicking Collapse hides the whole block (header only), and Show all brings the full query back. Blocks of 16 lines or fewer have no fold control, and streaming output stays expanded. Result cards fold from the title row and keep the row count and elapsed time visible.
+- **Fewer false "slow query" blocks.** Production auto-run now only holds back queries with no `WHERE`, a leading `%` in `LIKE`, or `SELECT DISTINCT *`. Filtered `DISTINCT`, multiple JOINs, subqueries, `GROUP BY`/`HAVING` and `UNION` are allowed to auto-run. A 10-second client timeout cancels a slow production auto-run and asks you to run it manually; manual runs are not timed. Read-only-only, the five-per-reply cap, the serial queue and the MSSQL preflight are unchanged.
+- **Wide tables keep all their columns.** The AI schema context no longer stops at 50 columns per table. Auto mode injects at most the 50 most relevant tables (60K characters); tables you select explicitly are loaded up to 200 tables and 110K characters. When the context is truncated, the table badge and schema note say so instead of silently dropping columns. The prompt now forbids borrowing a similar column from another table and tells the model to ask when a column is missing.
+- **AI sees schema changes.** After a table is altered — in DevBelt or another client — refreshing the connection tree makes the next AI message reload the table and column metadata, so newly added columns can be used without waiting for the 60-second cache to expire. SQL that was already generated still needs to be regenerated or edited.
+
+### 中文
+
+- **AI Chat 默认占满宽度。** 消息、SQL 代码块、结果表和输入框都占满面板可用宽度，只保留正常内容边距，宽屏下不再两边留白。
+- **长 SQL 与结果表可折叠。** SQL 代码块右上角新增折叠按钮；长 SQL 默认显示前 16 行预览并提供「展开全部」，展开后点「收起」会完全收起、只保留标题行，再点「展开」恢复全文。不超过 16 行的代码块不显示折叠按钮，流式生成期间保持展开。结果卡可从标题行折叠，收起后仍显示行数与耗时。
+- **减少误拦「慢查询」。** 生产自动执行只拦无 `WHERE`、前导 `%` 的 `LIKE`、`SELECT DISTINCT *`；带过滤的 `DISTINCT`、多 JOIN、子查询、`GROUP BY`/`HAVING`、`UNION` 都可以自动执行。生产自动执行增加 10 秒客户端超时，超时会取消并提示手动运行；手动运行不计时。只读限制、单回复 5 条、串行队列和 MSSQL 预演保持不变。
+- **宽表加载全部列。** AI schema 上下文不再限制每表 50 列。自动模式最多注入最相关的 50 张表（60K 字符）；显式勾选的表最多 200 张、110K 字符。上下文被截断时，表徽标和 schema 说明会明确提示，不再静默丢列。提示词新增规则：禁止借用另一张表的相似列，列缺失时要询问用户。
+- **AI 跟随表结构变化。** 改表后（DevBelt 内或其他客户端），刷新连接树即可让下一次 AI 请求重新读取表和列，新字段不用等 60 秒缓存过期；已经生成的 SQL 仍需重新生成或手动修改。
+
 ## [0.4.19] - 2026-11-26
 
 ### English
