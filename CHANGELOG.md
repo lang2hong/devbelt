@@ -4,6 +4,32 @@ All notable changes to DevBelt DB Client are documented in this file.
 
 本文件记录 DevBelt DB Client 的所有重要变更。
 
+## [0.4.22] - 2026-11-28
+
+### English
+
+- **MariaDB is now a first-class engine.** Create MariaDB connections directly (10.11 / 11.4 / 11.8 / 12.3 LTS); the tree, status panel, plans and MCP treat it as MariaDB while the engine reuses the MySQL implementation. Existing MySQL-type connections that are actually MariaDB are detected and can be switched with one click.
+- **Browse and manage sequences.** A Sequences category lists MariaDB sequences with start/increment details; view the definition, create from a template, or delete with confirmation. `NEXT VALUE FOR`, `NEXTVAL` and `SETVAL` count as writes for read-only and AI auto-run.
+- **Real execution plans on MariaDB.** The plan panel uses `ANALYZE FORMAT=JSON` for actual execution and understands MariaDB's filesort and temporary-table nodes.
+- **Safer MariaDB specifics.** JSON columns stay text end-to-end; `ed25519` accounts fail with an actionable message instead of a driver TODO.
+- **Connection details.** Reveal a saved password on demand in the edit form; copy connection info from the tree or form — summary without password by default, full connection string only after confirmation.
+- **Anonymous engine statistics.** Heartbeats can include which engines were used that day (fixed enum; never hosts, databases, users or SQL). Controlled by the existing telemetry settings.
+- **MCP and AI.** MariaDB connections can be exposed over MCP and used as AI schema context like MySQL.
+
+> MariaDB connections require 0.4.22 or later to sync across devices.
+
+### 中文
+
+- **MariaDB 成为独立引擎。** 新建连接可直接选择 MariaDB（10.11 / 11.4 / 11.8 / 12.3 LTS）；连接树、状态面板、执行计划和 MCP 都按 MariaDB 展示，底层复用 MySQL 实现。已有的 MySQL 类型连接如果实际是 MariaDB，会自动识别并提示一键改为 MariaDB。
+- **序列可浏览、可管理。** 连接树新增「序列」分类，显示起始值与步长；可查看定义、按模板新建、确认后删除。`NEXT VALUE FOR`、`NEXTVAL`、`SETVAL` 按写入处理，只读连接与 AI 自动执行都会拒绝。
+- **MariaDB 实际执行计划。** 计划面板用 `ANALYZE FORMAT=JSON` 获取真实行数与耗时，并识别 MariaDB 的 filesort 与临时表节点。
+- **MariaDB 细节处理。** JSON 列全程按文本处理；`ed25519` 账号会得到可操作的提示，而不是驱动的 TODO 报错。
+- **连接信息。** 编辑连接时可按需显示已保存密码；连接树或表单可一键复制连接信息——默认不含密码，含密码连接串需二次确认。
+- **匿名引擎统计。** 心跳可携带当天使用过的数据库类型（固定枚举，不含主机、库名、用户名或 SQL），受现有遥测开关控制。
+- **MCP 与 AI。** MariaDB 连接可以像 MySQL 一样通过 MCP 暴露，并作为 AI schema 上下文。
+
+> MariaDB 连接需要 0.4.22 及以上版本才能在设备间同步。
+
 ## [0.4.21] - 2026-11-27
 
 ### English

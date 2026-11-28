@@ -6,7 +6,7 @@
 [![Open VSX](https://img.shields.io/open-vsx/v/lang2hong/devbelt-db-client?label=Open%20VSX)](https://open-vsx.org/extension/lang2hong/devbelt-db-client)
 [![License](https://img.shields.io/badge/license-MIT-3ad29a)](LICENSE)
 
-DevBelt 是一款开源 VS Code 扩展：连接、查询、设计、诊断和监控七种数据库，都在你每天使用的编辑器里。少开几个工具，多留一点专注。
+DevBelt 是一款开源 VS Code 扩展：连接、查询、设计、诊断和监控八种数据库，都在你每天使用的编辑器里。少开几个工具，多留一点专注。
 
 ![DevBelt SQL 工作台](https://devbelt.l2hi.com/screenshots/01-sql-workbench.png)
 
@@ -16,16 +16,16 @@ DevBelt 是一款开源 VS Code 扩展：连接、查询、设计、诊断和监
 
 ## 为什么是 DevBelt
 
-- **一个窗口，七种数据库。** MySQL、PostgreSQL、SQL Server、SQLite、Redis、Elasticsearch 和 MongoDB 共用连接、页签与安全设置。
+- **一个窗口，八种数据库。** MySQL、MariaDB、PostgreSQL、SQL Server、SQLite、Redis、Elasticsearch 和 MongoDB 共用连接、页签与安全设置。
 - **按编辑器的方式工作。** 当前语句执行、选中执行、取消长查询、多结果表格、补全和快捷键，都是 VS Code 原生体验。
 - **AI 有边界。** 能看结构、能查数据；读操作有上限，改数据、改结构不会自动提交，必须由你批准。
 - **数据留在你这边。** 密码和 Key 进入系统密钥库；同步只有你能读；生产保护、只读模式和脱敏导出默认可用。
 
-## 一个窗口，七种数据库
+## 一个窗口，八种数据库
 
 | 类型 | 数据库 | 你可以做什么 |
 |---|---|---|
-| 关系型 | MySQL · PostgreSQL · SQL Server · SQLite | 查询、结果表格、表设计、关系图、执行计划、导入导出 |
+| 关系型 | MySQL · MariaDB · PostgreSQL · SQL Server · SQLite | 查询、结果表格、表设计、关系图、执行计划、导入导出 |
 | 缓存与搜索 | Redis · Elasticsearch | 浏览键和文档、直接编辑、命令行与查询控制台 |
 | 文档型 | MongoDB | 集合与索引、分页、聚合、实时变更、GridFS |
 
@@ -63,7 +63,7 @@ DevBelt 是一款开源 VS Code 扩展：连接、查询、设计、诊断和监
 
 ## 免费与 Pro
 
-**Free**：七种数据库本地使用、查询与结果表格、基础 DevBelt AI 额度，适合个人本地开发。
+**Free**：八种数据库本地使用、查询与结果表格、基础 DevBelt AI 额度，适合个人本地开发。
 
 **Pro**：跨设备加密同步、关系图与结构设计、连接配置导出、MCP 只读查询，以及更高的设备、连接和 AI 额度。
 

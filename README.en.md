@@ -6,7 +6,7 @@
 [![Open VSX](https://img.shields.io/open-vsx/v/lang2hong/devbelt-db-client?label=Open%20VSX)](https://open-vsx.org/extension/lang2hong/devbelt-db-client)
 [![License](https://img.shields.io/badge/license-MIT-3ad29a)](LICENSE)
 
-DevBelt is an open-source VS Code extension for connecting, querying, designing, diagnosing and monitoring seven databases inside the editor you already use. Fewer tools, more focus.
+DevBelt is an open-source VS Code extension for connecting, querying, designing, diagnosing and monitoring eight databases inside the editor you already use. Fewer tools, more focus.
 
 ![DevBelt SQL workspace](https://devbelt.l2hi.com/screenshots/01-sql-workbench.png)
 
@@ -16,16 +16,16 @@ DevBelt is an open-source VS Code extension for connecting, querying, designing,
 
 ## Why DevBelt
 
-- **One window, seven databases.** MySQL, PostgreSQL, SQL Server, SQLite, Redis, Elasticsearch and MongoDB share connections, tabs and security settings.
+- **One window, eight databases.** MySQL, MariaDB, PostgreSQL, SQL Server, SQLite, Redis, Elasticsearch and MongoDB share connections, tabs and security settings.
 - **Built for the editor.** Run the current statement or selection, cancel long queries, use multi-result grids, completion and native shortcuts.
 - **AI with boundaries.** It reads schemas and queries data. Reads are bounded, and data or schema changes are never committed without your approval.
 - **Your data stays yours.** Passwords and keys live in the system keychain, sync is readable only by you, and production guards, read-only mode and masked export are built in.
 
-## One window, seven databases
+## One window, eight databases
 
 | Type | Databases | What you can do |
 |---|---|---|
-| Relational | MySQL · PostgreSQL · SQL Server · SQLite | Queries, result grids, table designer, relationship diagrams, execution plans, import/export |
+| Relational | MySQL · MariaDB · PostgreSQL · SQL Server · SQLite | Queries, result grids, table designer, relationship diagrams, execution plans, import/export |
 | Cache & search | Redis · Elasticsearch | Browse keys and documents, edit values, use the CLI and query consoles |
 | Document | MongoDB | Collections, indexes, paging, aggregation, change streams, GridFS |
 
@@ -63,7 +63,7 @@ One account, one set of shortcuts, one activity record.
 
 ## Free and Pro
 
-**Free**: all seven databases locally, queries and result grids, and the basic DevBelt AI allowance — for personal local work.
+**Free**: all eight databases locally, queries and result grids, and the basic DevBelt AI allowance — for personal local work.
 
 **Pro**: encrypted cross-device sync, relationship diagrams and schema design, connection profile export, MCP read-only queries, and higher device, connection and AI limits.
 
